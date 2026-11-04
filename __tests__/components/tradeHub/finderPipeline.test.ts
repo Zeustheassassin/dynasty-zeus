@@ -1914,3 +1914,192 @@ describe("runFinderPipeline — pick-receiving trades", () => {
     expect(allTrades.map((t) => t.oppRosterId)).toEqual([2, 3]);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Trade Shape setting (user, 2026-11-04): Tier Up shows mostly 2 for 1s, Tier Down mostly 1 for 2s,
+// on any team. Only a filter on shape: "I want the rules to stay the same otherwise".
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — Trade Shape setting", () => {
+  const pick = (value: number) =>
+    ({ season: CY, round: 1, roster_id: 1, owner_id: 1, value }) as unknown as PickWithValue;
+  const oneForOne = () => mkTrade({
+    give: [mkPlayer("a1", "WR", 3000)], receive: [mkPlayer("a2", "WR", 3000)], format: "1 for 1",
+  });
+  const twoForOne = (score = 100) => mkTrade({
+    give: [mkPlayer("b1", "WR", 2400), mkPlayer("b2", "WR", 2300)], receive: [mkPlayer("b3", "WR", 4500)],
+    format: "2 for 1", score,
+  });
+  const relatedUp = (score = 100) => mkTrade({
+    give: [mkPlayer("c1", "WR", 3000)], givePicks: [pick(1000)], receive: [mkPlayer("c2", "WR", 3900)],
+    format: "1 + pick for 1", score,
+  });
+  const oneForTwo = (score = 100) => mkTrade({
+    give: [mkPlayer("d1", "WR", 4500)], receive: [mkPlayer("d2", "WR", 2400), mkPlayer("d3", "WR", 2300)],
+    format: "1 for 2", score,
+  });
+  const relatedDown = (score = 100) => mkTrade({
+    give: [mkPlayer("e1", "WR", 3900)], receive: [mkPlayer("e2", "WR", 3000)], receivePicks: [pick(1000)],
+    format: "1 for 1 + pick", score,
+  });
+  const ids = (ts: TradeResult[]) => ts.map((t) => t.format);
+
+  it("Any leaves the board alone and marks nothing", () => {
+    const { allTrades } = runFinderPipeline([oneForOne(), twoForOne(), oneForTwo()], baseCtx());
+    expect(allTrades).toHaveLength(3);
+    expect(allTrades.every((t) => t.tierRank === undefined)).toBe(true);
+  });
+
+  it("Tier Up keeps only consolidating shapes", () => {
+    const { allTrades } = runFinderPipeline(
+      [oneForOne(), twoForOne(), relatedUp(), oneForTwo()],
+      baseCtx({ finderTierMode: "TIER_UP" }),
+    );
+    expect(ids(allTrades)).toEqual(["2 for 1", "1 + pick for 1"]);
+  });
+
+  it("Tier Down keeps only splitting shapes", () => {
+    const { allTrades } = runFinderPipeline(
+      [oneForOne(), twoForOne(), oneForTwo(), relatedDown()],
+      baseCtx({ finderTierMode: "TIER_DOWN" }),
+    );
+    expect(ids(allTrades)).toEqual(["1 for 2", "1 for 1 + pick"]);
+  });
+
+  it("the headline shape comes first even when a related shape scores far higher", () => {
+    const { allTrades } = runFinderPipeline(
+      [relatedUp(500), twoForOne(100)],
+      baseCtx({ finderTierMode: "TIER_UP" }),
+    );
+    expect(ids(allTrades)).toEqual(["2 for 1", "1 + pick for 1"]);
+    expect(allTrades.map((t) => t.tierRank)).toEqual([0, 1]);
+  });
+
+  it("works on any team, and a trade that fits its direction shows the same as on the normal board", () => {
+    const rebuilder = { finderDirection: "Rebuilder", myFinderPlayoffOdds: 20 };
+    expect(runFinderPipeline([twoForOne()], baseCtx(rebuilder)).allTrades).toHaveLength(1);
+    expect(runFinderPipeline([twoForOne()], baseCtx({ ...rebuilder, finderTierMode: "TIER_UP" })).allTrades).toHaveLength(1);
+  });
+
+  it("lifts no rule: a trade with a poor direction fit stays off in a tier mode too", () => {
+    const poorFit = () => twoForOne(-500);
+    const rebuilder = { finderDirection: "Rebuilder", myFinderPlayoffOdds: 20 };
+    expect(runFinderPipeline([poorFit()], baseCtx(rebuilder)).allTrades).toHaveLength(0);
+    expect(runFinderPipeline([poorFit()], baseCtx({ ...rebuilder, finderTierMode: "TIER_UP" })).allTrades).toHaveLength(0);
+  });
+
+  it("the acceptance gate still applies: a trade the opponent would never make stays off", () => {
+    const eliteOpp = {
+      rosterId: 2, ownerId: "OPP", ownerName: "Opp", fitLabel: "", fitScore: 0, reason: "",
+      playoffOdds: 90, directionProfile: { bucket: "Elite" },
+    } as never;
+    const picksOnly = mkTrade({
+      give: [mkPlayer("f1", "WR", 3000)], receive: [mkPlayer("f2", "WR", 2700), mkPlayer("f3", "WR", 1000)],
+      format: "1 for 2", score: 0,
+    });
+    const blocked = runFinderPipeline([picksOnly], baseCtx({
+      finderTierMode: "TIER_DOWN", tradePartnerRankings: [eliteOpp],
+      isBlockedBuyDisposition: (id) => id === "f2",
+    }));
+    expect(blocked.allTrades).toHaveLength(0);
+  });
+
+  it("the fair-target cap still applies to a Tier Down", () => {
+    const lopsided = mkTrade({
+      give: [mkPlayer("g1", "WR", 4500)], receive: [mkPlayer("g2", "WR", 3500), mkPlayer("g3", "WR", 3400)],
+      format: "1 for 2",
+    });
+    expect(runFinderPipeline([lopsided], baseCtx({ finderTierMode: "TIER_DOWN" })).allTrades).toHaveLength(0);
+  });
+
+  it("lifts no rule: the overpay credit stays a contender's", () => {
+    const overpay = () => mkTrade({
+      // Young, so the no-aging-vets rule for a team that isn't win-now doesn't apply.
+      give: [mkPlayer("h1", "RB", 2000), mkPlayer("h2", "RB", 1500)], receive: [mkPlayer("h3", "RB", 2700, { age: 23 })],
+      format: "2 for 1", score: 30, net: -800,
+    });
+    const rebuilder = { finderDirection: "Rebuilder", myFinderPlayoffOdds: 20 };
+    const contender = { finderDirection: "Elite", myFinderPlayoffOdds: 80 };
+    const deep = [mkPlayer("h1", "RB", 2000), mkPlayer("h2", "RB", 1500), mkPlayer("backup", "RB", 1600)];
+    expect(runFinderPipeline([overpay()], baseCtx({ ...rebuilder, myPlayers: deep, finderTierMode: "TIER_UP" })).allTrades).toHaveLength(0);
+    expect(runFinderPipeline([overpay()], baseCtx({ ...contender, myPlayers: deep, finderTierMode: "TIER_UP" })).allTrades).toHaveLength(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Championship Impact (user, 2026-11-04): the board is the trades measured to raise title odds.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("runFinderPipeline — Championship Impact view", () => {
+  const winNow = { finderDirection: "Elite", myFinderPlayoffOdds: 80, hasMySim: true };
+  const swap = (n: number, target = `r${n}`) => mkTrade({
+    give: [mkPlayer(`g${n}`, "WR", 3000)], receive: [mkPlayer(target, "RB", 3000)], format: "1 for 1",
+  });
+  const fp = (n: number, target = `r${n}`) => buildTradeFingerprint("L1", 2, [`g${n}`], [target]);
+
+  it("measures a locked-in team, which the standard board skips: title odds can still rise", () => {
+    const locked = { ...winNow, myFinderPlayoffOdds: 97 };
+    expect(runFinderPipeline([swap(1)], baseCtx(locked)).simCandidates).toHaveLength(0);
+    expect(runFinderPipeline([swap(1)], baseCtx({ ...locked, titleGainByFingerprint: new Map() })).simCandidates).toHaveLength(1);
+  });
+
+  it("looks at more trades than the standard pool", () => {
+    const trades = Array.from({ length: 40 }, (_, i) => swap(i));
+    expect(runFinderPipeline(trades, baseCtx(winNow)).simCandidates).toHaveLength(22);
+    expect(runFinderPipeline(trades, baseCtx({ ...winNow, titleGainByFingerprint: new Map() })).simCandidates).toHaveLength(30);
+  });
+
+  it("won't spend the pool on one target", () => {
+    const trades = [...Array.from({ length: 8 }, (_, i) => swap(i, "star")), swap(99)];
+    const { simCandidates } = runFinderPipeline(trades, baseCtx({ ...winNow, titleGainByFingerprint: new Map() }));
+    expect(simCandidates.filter((c) => c.receiveIds[0] === "star")).toHaveLength(4);
+    expect(simCandidates.some((c) => c.receiveIds[0] === "r99")).toBe(true);
+  });
+
+  it("skips trades that don't improve the lineup, since they can't raise title odds", () => {
+    const { simCandidates } = runFinderPipeline([swap(1), swap(2)], baseCtx({
+      ...winNow,
+      titleGainByFingerprint: new Map(),
+      getTradeLineupSafety: (r) => ({
+        valid: true, myValid: true, oppValid: true, score: 0,
+        lineupGain: r.give[0].player_id === "g1" ? 0 : 40,
+      }),
+    }));
+    expect(simCandidates.map((c) => c.giveIds[0])).toEqual(["g2"]);
+  });
+
+  it("keeps the normal board while nothing has been measured yet", () => {
+    const { allTrades } = runFinderPipeline([swap(1), swap(2)], baseCtx({ ...winNow, titleGainByFingerprint: new Map() }));
+    expect(allTrades).toHaveLength(2);
+  });
+
+  it("then shows only measured trades, biggest gain first, whatever their heuristic rank", () => {
+    const { allTrades } = runFinderPipeline([swap(1), swap(2), swap(3)], baseCtx({
+      ...winNow,
+      titleGainByFingerprint: new Map([[fp(1), 0.6], [fp(2), 3.1]]),
+    }));
+    expect(allTrades.map((t) => t.give[0].player_id)).toEqual(["g2", "g1"]);
+  });
+
+  it("a trade outside the top of the heuristic order can still make the board on its gain", () => {
+    const trades = Array.from({ length: 30 }, (_, i) => swap(i));
+    const last = 29;
+    const { allTrades } = runFinderPipeline(trades, baseCtx({
+      ...winNow,
+      titleGainByFingerprint: new Map([[fp(last), 2]]),
+    }));
+    expect(allTrades.map((t) => t.give[0].player_id)).toEqual([`g${last}`]);
+  });
+
+  it("a team that isn't playing for this season never gets this board", () => {
+    const young = (n: number) => mkTrade({
+      give: [mkPlayer(`g${n}`, "WR", 3000)], receive: [mkPlayer(`r${n}`, "WR", 3000)], format: "1 for 1",
+    });
+    const { allTrades, simCandidates } = runFinderPipeline([young(1), young(2)], baseCtx({
+      finderDirection: "Hopeless", myFinderPlayoffOdds: 5, hasMySim: true, iAmTankingFinder: true,
+      titleGainByFingerprint: new Map([[fp(1), 3]]),
+    }));
+    expect(simCandidates).toHaveLength(0);
+    expect(allTrades).toHaveLength(2);
+  });
+});

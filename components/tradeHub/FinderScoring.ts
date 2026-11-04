@@ -297,6 +297,77 @@ export const fairnessScore = (f: TradeFairness): number =>
 export const fairnessTier = (f: TradeFairness | undefined): number =>
   !f ? 2 : f.gap <= 0.015 ? 0 : f.gap <= 0.04 ? 1 : 2;
 
+// ── Tier up / tier down ───────────────────────────────────────────────────────
+// A filter on the shape of the trades the Finder would already show, for any team (user,
+// 2026-11-04: "different versions of trades that I might prefer ... I want the rules to stay the
+// same"). It lifts no other rule. Tier up: several of your assets for one better player, mostly 2
+// for 1s. Tier down: one of your players for several pieces, mostly 1 for 2s. The one player must
+// clear the best asset on the other side by this much, or it's a lateral move with a throw-in
+// rather than a change of tier.
+export const TIER_STEP = 1.1;
+
+type TierAsset = { value: number };
+interface TierShapeTrade {
+  give: (TierAsset & { player_id?: string })[];
+  receive: TierAsset[];
+  givePicks: TierAsset[];
+  receivePicks: TierAsset[];
+  format: string;
+  sweetenerPlayerId?: string;
+}
+
+/** 0 = the headline shape, 1 = a related shape, null = not this mode. Everything is 0 for ANY. */
+export const tierShapeRank = (trade: TierShapeTrade, mode: "ANY" | "TIER_UP" | "TIER_DOWN"): 0 | 1 | null => {
+  if (mode === "ANY") return 0;
+  if (trade.format === "Lottery") return null;
+  const give = trade.give.filter((p) => p.player_id === undefined || p.player_id !== trade.sweetenerPlayerId);
+  const best = (assets: TierAsset[]) => assets.reduce((top, a) => Math.max(top, a.value), 0);
+  if (mode === "TIER_UP") {
+    if (trade.receive.length !== 1 || trade.receivePicks.length > 0) return null;
+    if (give.length + trade.givePicks.length < 2) return null;
+    if (trade.receive[0].value < best([...give, ...trade.givePicks]) * TIER_STEP) return null;
+    return give.length === 2 && trade.givePicks.length === 0 ? 0 : 1;
+  }
+  if (give.length !== 1 || trade.givePicks.length > 0) return null;
+  if (trade.receive.length + trade.receivePicks.length < 2) return null;
+  if (give[0].value < best([...trade.receive, ...trade.receivePicks]) * TIER_STEP) return null;
+  return trade.receive.length === 2 && trade.receivePicks.length === 0 ? 0 : 1;
+};
+
+// ── Measured trade impact ─────────────────────────────────────────────────────
+// What a trade does to both teams' odds, from two runs with the same dice (TradeImpactMeasure in
+// lib/helpers/simulation). A gain under the minimums isn't worth making a trade for.
+export const MIN_PLAYOFF_ODDS_GAIN = 1.0;
+export const MIN_TITLE_ODDS_GAIN = 0.5;
+
+export interface TradeSimImpact {
+  myPlayoffBefore: number; myPlayoffAfter: number;
+  myTitleBefore: number; myTitleAfter: number;
+  oppPlayoffDelta: number; oppTitleDelta: number;
+  oppIsContender: boolean; oppIsRebuildSide: boolean;
+}
+
+export const playoffGain = (i: TradeSimImpact): number => i.myPlayoffAfter - i.myPlayoffBefore;
+export const titleGain = (i: TradeSimImpact): number => i.myTitleAfter - i.myTitleBefore;
+
+/** Whether a measured trade stays on the board.
+ *  The user's side: Championship Impact wants real title-odds gain. Otherwise the trade must help
+ *  now, in playoff or title odds, since a team that's nearly locked in has little playoff room left.
+ *  The opponent's side: a contender won't make itself worse. A rebuilder rising is a reason to pass
+ *  on an ordinary swap, but not on a trade the user went looking for title odds with: a rebuilder
+ *  taking two starters for a star is what those deals look like, and oppDirectionScore already
+ *  judged its dynasty fit. */
+export const tradeImpactPasses = (
+  impact: TradeSimImpact,
+  view: "recommended" | "playoffImpact" | "championshipImpact",
+): boolean => {
+  if (impact.oppIsContender
+    && Math.min(impact.oppPlayoffDelta, impact.oppTitleDelta) <= -MIN_PLAYOFF_ODDS_GAIN) return false;
+  if (view === "championshipImpact") return titleGain(impact) >= MIN_TITLE_ODDS_GAIN;
+  if (impact.oppIsRebuildSide && impact.oppPlayoffDelta >= MIN_PLAYOFF_ODDS_GAIN) return false;
+  return playoffGain(impact) >= MIN_PLAYOFF_ODDS_GAIN || titleGain(impact) >= MIN_TITLE_ODDS_GAIN;
+};
+
 // ── Team window ───────────────────────────────────────────────────────────────
 
 // Returns avg years until positional cliffs across the starting lineup.

@@ -10,7 +10,7 @@
 // ============================================================
 import {
   createSeededRandom, randomNormal, buildRoundRobinSchedule,
-  average, logisticWinProb, percentileFromCounts,
+  average, logisticWinProb, percentileFromCounts, mixSeed,
 } from "./math";
 import { getRegularSeasonWeeks, remainingRegularSeasonWeeks, type ScoredWeeklyProjections } from "./weeklyProjections";
 import { gameFractionRemaining, normalCdf } from "./gamedayLive";
@@ -50,6 +50,27 @@ export function buildRostersWithTrade(
   });
 }
 
+/**
+ * Measure what one trade does instead of forecasting the season (2026-11-04). Compare two runs
+ * with the same `trials`, one on the real rosters and one with the trade applied. Three things
+ * differ from a normal run, each because the normal way hides or drowns a trade's effect:
+ *  - Same dice. Each team has its own random draws per week and each player his own injury roll,
+ *    so a trade can't reshuffle anyone else's luck. In a normal run one changed roster shifts every
+ *    later draw, which makes two runs independent samples: at 250 seasons their title odds differ
+ *    by several points by chance alone.
+ *  - Title odds are the exact chance of winning the bracket from each simulated seeding, not one
+ *    played-out bracket per season, which removes the largest source of noise.
+ *  - A team's past scores were earned by its real roster. The trade changes what it projects to
+ *    score from here, so its full projected change counts, not the sliver left after blending with
+ *    those past scores (65% of team strength once 8 games are in).
+ */
+export interface TradeImpactMeasure {
+  /** Seasons to simulate. */
+  trials: number;
+  /** The rosters as they really stand: the players who actually scored the past points. */
+  historyRosters: SleeperRoster[];
+}
+
 export interface SimulateLeagueArgs {
   selectedLeague: SleeperLeague | null;
   rosters: SleeperRoster[];
@@ -74,6 +95,8 @@ export interface SimulateLeagueArgs {
    *  real points and only the rest of the week is simulated. Null: the whole week is simulated. */
   currentWeekGames: Record<string, TeamGameState> | null;
   simSalt: number;
+  /** Set only to measure a trade; see TradeImpactMeasure. Normal runs leave this out. */
+  impact?: TradeImpactMeasure;
 }
 
 export function simulateLeague({
@@ -93,6 +116,7 @@ export function simulateLeague({
   weeklyProjections,
   currentWeekGames,
   simSalt,
+  impact,
 }: SimulateLeagueArgs): LeagueSimulation | null {
   if (!selectedLeague || !rosters.length) return null;
 
@@ -104,7 +128,7 @@ export function simulateLeague({
   const regularSeasonWeeks = getRegularSeasonWeeks(selectedLeague);
   const playoffTeams = Number(selectedLeague?.settings?.playoff_teams || Math.ceil(rosters.length / 2));
   const byeTeams = playoffTeams >= 6 ? 2 : playoffTeams === 5 ? 1 : 0;
-  const simCount = simulationMode === "offseason" ? 350 : 250;
+  const simCount = impact?.trials ?? (simulationMode === "offseason" ? 350 : 250);
   const weeklyHistory = (leagueWeeklyMatchups[leagueId] || []) as Array<{ week: number; matchups: SleeperMatchup[] }>;
   const projectionMap = new Map(
     ((projectionWeek === 0 || projectionWeek === currentWeek) ? projectionData : []).map((row) => [String(row.sleeperId), Number(row.fpts || 0)])
@@ -200,24 +224,35 @@ export function simulateLeague({
     return byeWk > 0 && byeWk === week;
   };
 
+  // This runs for every team every simulated week, so each pool is sorted once. The sort is stable,
+  // so filtering a sorted pool gives the same order as sorting the filtered one.
+  const bestFirstPools = new WeakMap<PoolPlayer[], PoolPlayer[]>();
+  const bestFirst = (pool: PoolPlayer[]): PoolPlayer[] => {
+    let sorted = bestFirstPools.get(pool);
+    if (!sorted) {
+      sorted = [...pool].sort((a, b) => b.score - a.score);
+      bestFirstPools.set(pool, sorted);
+    }
+    return sorted;
+  };
   const pickBestStarters = (
     pool: PoolPlayer[],
     unavailableIds: Set<string>,
     slots: readonly string[] = lineupSlots,
   ): { score: number; used: Set<string> } => {
-    const avail = [...pool].filter((p) => !unavailableIds.has(p.id)).sort((a, b) => b.score - a.score);
+    const avail = bestFirst(pool).filter((p) => !unavailableIds.has(p.id));
     const used = new Set<string>();
     let score = 0;
     slots.forEach((slot: string) => {
-      const eligible = slot === "FLEX" ? ["RB", "WR", "TE"] : slot === "SUPER_FLEX" ? ["QB", "RB", "WR", "TE"] : [slot];
-      const next = avail.find((p) => !used.has(p.id) && eligible.includes(p.position));
+      const next = avail.find((p) => !used.has(p.id) && (
+        slot === "FLEX" ? p.position !== "QB" : slot === "SUPER_FLEX" || p.position === slot
+      ));
       if (next) { used.add(next.id); score += next.score; }
     });
     return { score, used };
   };
 
-  const rosterPoolMap = new Map<number, PoolPlayer[]>();
-  rosters.forEach((rEntry) => {
+  const buildRosterPool = (rEntry: SleeperRoster): PoolPlayer[] => {
     const existing: PoolPlayer[] = ((rEntry?.players || []) as string[])
       .map((id: string) => {
         const p = players[id] as SleeperPlayer | undefined;
@@ -230,8 +265,10 @@ export function simulateLeague({
     const rookieExtras: PoolPlayer[] = simulationMode === "offseason"
       ? (projectedRookiesByRoster.get(Number(rEntry.roster_id)) || [])
       : [];
-    rosterPoolMap.set(Number(rEntry.roster_id), [...existing, ...rookieExtras]);
-  });
+    return [...existing, ...rookieExtras];
+  };
+  const rosterPoolMap = new Map<number, PoolPlayer[]>();
+  rosters.forEach((rEntry) => rosterPoolMap.set(Number(rEntry.roster_id), buildRosterPool(rEntry)));
 
   const buildLineupStrength = (pool: PoolPlayer[]) => {
     const { score: rawLineupScore, used } = pickBestStarters(pool, new Set());
@@ -345,6 +382,13 @@ export function simulateLeague({
     };
   });
 
+  /** Impact mode: the weekly strength of the roster that actually scored a team's past points. */
+  const earnedLineupScore = (rosterId: number): number | null => {
+    const earner = impact?.historyRosters.find((r) => Number(r.roster_id) === rosterId);
+    if (!earner) return null;
+    return pickBestStarters(buildRosterPool(earner), new Set()).score / (projectionIsSeason ? regularSeasonWeeks : 1);
+  };
+
   const teamActualScores = new Map<number, number[]>();
   if (currentWeek > 0) {
     weeklyHistory
@@ -372,7 +416,12 @@ export function simulateLeague({
 
       if (scores.length >= 4) {
         const histWeight = Math.min(0.65, 0.40 + (scores.length - 4) * 0.0625);
-        row.lineupScore = row.lineupScore * (1 - histWeight) + weightedMean * histWeight;
+        // How far past scores ran from what the roster that scored them projected. On the real
+        // roster the two lines agree; with a trade applied only the second is right.
+        const earned = earnedLineupScore(row.rosterId);
+        row.lineupScore = earned === null
+          ? row.lineupScore * (1 - histWeight) + weightedMean * histWeight
+          : row.lineupScore + (weightedMean - earned) * histWeight;
       }
 
       const formulaStdDev = row.weeklyStdDev;
@@ -483,6 +532,24 @@ export function simulateLeague({
    *  the week that gap applies to (all of it, unless part of the week is already played). */
   type WeekScore = { points: number; maxPf: number; gapShare: number };
 
+  // Impact mode's dice (TradeImpactMeasure). Normal runs get the shared stream back unchanged, in
+  // the same draw order, so their results don't move.
+  let impactTrialSeed = 0;
+  const playerSeedCache = new Map<string, number>();
+  const playerSeed = (id: string): number => {
+    let seed = playerSeedCache.get(id);
+    if (seed === undefined) {
+      seed = 0;
+      for (let i = 0; i < id.length; i++) seed = (Math.imul(seed, 31) + id.charCodeAt(i)) | 0;
+      playerSeedCache.set(id, seed);
+    }
+    return seed;
+  };
+  const teamDice = (rosterId: number, simWeek: number, rng: () => number): (() => number) =>
+    impact && simWeek > 0 ? createSeededRandom(mixSeed(impactTrialSeed, simWeek, rosterId)) : rng;
+  const injuryRoll = (playerId: string, simWeek: number, rng: () => number): number =>
+    impact ? createSeededRandom(mixSeed(impactTrialSeed, simWeek, playerSeed(playerId), 1))() : rng();
+
   const playMatch = (aRosterId: number, bRosterId: number, simWeek: number, rng: () => number) => {
     const aRow = rowByRosterId.get(aRosterId);
     const bRow = rowByRosterId.get(bRosterId);
@@ -495,7 +562,7 @@ export function simulateLeague({
       pool.forEach((p) => {
         if (partial.started.has(p.id) || isOutForWeek(p, simWeek)) {
           unavail.add(p.id);
-        } else if (rng() < getPlayerInjuryRate(p.id, p.position, simWeek)) {
+        } else if (injuryRoll(p.id, simWeek, rng) < getPlayerInjuryRate(p.id, p.position, simWeek)) {
           unavail.add(p.id);
         }
       });
@@ -506,7 +573,7 @@ export function simulateLeague({
       const restRaw = partial.liveRemainingRaw + pickBestStarters(pool, unavail, partial.openSlots).score;
       const restShare = Math.min(1, restRaw / baseRaw);
       const expectedRest = restRaw * calibration;
-      const rest = Math.max(0, expectedRest + randomNormal(rng) * row.weeklyStdDev * 0.82 * Math.sqrt(restShare));
+      const rest = Math.max(0, expectedRest + randomNormal(teamDice(rosterId, simWeek, rng)) * row.weeklyStdDev * 0.82 * Math.sqrt(restShare));
       const points = partial.lockedPoints + rest;
       // Max PF: the best lineup in hindsight from every rostered player's week — real points for
       // those who've played, and for those who haven't their projection moved by the same draw
@@ -536,7 +603,7 @@ export function simulateLeague({
         pool.forEach((p) => {
           if (isOutForWeek(p, simWeek)) {
             unavail.add(p.id);
-          } else if (rng() < getPlayerInjuryRate(p.id, p.position, simWeek)) {
+          } else if (injuryRoll(p.id, simWeek, rng) < getPlayerInjuryRate(p.id, p.position, simWeek)) {
             unavail.add(p.id);
           }
         });
@@ -545,7 +612,7 @@ export function simulateLeague({
         const weeklyRaw = weekRaw / (projectionIsSeason ? regularSeasonWeeks : 1);
         const baseWeekly = baseRaw / (projectionIsSeason ? regularSeasonWeeks : 1);
         const ratio = baseWeekly > 0 ? Math.max(0.35, Math.min(1.0, weeklyRaw / baseWeekly)) : 1.0;
-        return Math.max(scoreFloor, row.lineupScore * ratio + randomNormal(rng) * row.weeklyStdDev * 0.82);
+        return Math.max(scoreFloor, row.lineupScore * ratio + randomNormal(teamDice(rosterId, simWeek, rng)) * row.weeklyStdDev * 0.82);
       }
       return Math.max(scoreFloor, row.lineupScore + randomNormal(rng) * row.weeklyStdDev);
     };
@@ -622,6 +689,59 @@ export function simulateLeague({
       }
     }
     return places;
+  };
+
+  // Impact mode's title odds: each team's exact chance of winning the bracket from a seeding. A
+  // playoff game is two normal draws around lineupScore (playMatch at week 0, no injury rolls), so
+  // the chance of winning one has a closed form, and the same pairings as simulatePlayoffs give the
+  // rest. The score floor is left out: it only matters when both teams are in their low tail.
+  const playoffWinChance = (a: number, b: number): number => {
+    const aRow = rowByRosterId.get(a);
+    const bRow = rowByRosterId.get(b);
+    if (!aRow || !bRow) return 0.5;
+    const spread = Math.sqrt(aRow.weeklyStdDev ** 2 + bRow.weeklyStdDev ** 2);
+    return spread > 0 ? normalCdf((aRow.lineupScore - bRow.lineupScore) / spread) : 0.5;
+  };
+  const titleOddsBySeeding = new Map<string, Map<number, number>>();
+  const titleOddsFromSeeding = (seededIds: number[]): Map<number, number> => {
+    const key = seededIds.join(",");
+    const known = titleOddsBySeeding.get(key);
+    if (known) return known;
+    const odds = new Map<number, number>();
+    const bySeed = (ids: number[]) => [...ids].sort((a, b) => seededIndex(seededIds, a) - seededIndex(seededIds, b));
+    const pairUp = (ids: number[]) => {
+      const seeds = [...ids];
+      const pairs: Array<[number, number]> = [];
+      while (seeds.length >= 2) pairs.push([seeds.shift()!, seeds.pop()!]);
+      return pairs;
+    };
+    const everyResult = (
+      pairs: Array<[number, number]>,
+      chance: number,
+      then: (winners: number[], chance: number) => void,
+      winners: number[] = [],
+    ): void => {
+      if (winners.length === pairs.length) { then(winners, chance); return; }
+      const [high, low] = pairs[winners.length];
+      const highWins = playoffWinChance(high, low);
+      everyResult(pairs, chance * highWins, then, [...winners, high]);
+      everyResult(pairs, chance * (1 - highWins), then, [...winners, low]);
+    };
+    const playRound = (roundTeams: number[], chance: number): void => {
+      if (roundTeams.length <= 1) {
+        if (roundTeams.length === 1) odds.set(roundTeams[0], (odds.get(roundTeams[0]) || 0) + chance);
+        return;
+      }
+      everyResult(pairUp(bySeed(roundTeams)), chance, (winners, next) => playRound(bySeed(winners), next));
+    };
+    if (byeTeams > 0 && seededIds.length > byeTeams) {
+      const byes = seededIds.slice(0, byeTeams);
+      everyResult(pairUp(seededIds.slice(byeTeams)), 1, (winners, next) => playRound(bySeed([...byes, ...winners]), next));
+    } else {
+      playRound(seededIds, 1);
+    }
+    titleOddsBySeeding.set(key, odds);
+    return odds;
   };
 
   rows.forEach((row) => {
@@ -755,6 +875,7 @@ export function simulateLeague({
   const simStartWeek = currentWeek > 0 ? currentWeek : 1;
   for (let sim = 0; sim < simCount; sim++) {
     const rng = createSeededRandom(leagueSeed + sim * 7919 + regularSeasonWeeks * 17);
+    impactTrialSeed = mixSeed(leagueSeed, sim);
     const winMap = new Map<number, number>(rows.map((row) => [row.rosterId, row.actualWins]));
     const pointMap = new Map<number, number>(rows.map((row) => [row.rosterId, row.pointsFor]));
     const maxPfMap = new Map<number, number>(rows.map((row) => [row.rosterId, Math.max(row.maxPf, row.pointsFor)]));
@@ -816,7 +937,13 @@ export function simulateLeague({
       if (index < byeTeams) simulationStats[rosterId].byeCount += 1;
     });
     const playoffPlaces = simulatePlayoffs(seededIds.slice(0, playoffTeams), rng);
-    if (playoffPlaces.length > 0) simulationStats[playoffPlaces[0]].titleCount += 1;
+    if (impact) {
+      titleOddsFromSeeding(seededIds.slice(0, playoffTeams)).forEach((chance, rosterId) => {
+        simulationStats[rosterId].titleCount += chance;
+      });
+    } else if (playoffPlaces.length > 0) {
+      simulationStats[playoffPlaces[0]].titleCount += 1;
+    }
     playoffPlaces.forEach((rosterId, place) => { simulationStats[rosterId].slotCounts[rosters.length - place] += 1; });
   }
 

@@ -9,13 +9,13 @@ import {
   isFutureInsulationAsset, isOldProducerBuy,
   getAgeUrgency, getFutureValue, computeTeamWindow, getPickSlotBonus,
   isBalanced, LOW_VALUE_FLOOR, MID_VALUE_CEILING,
-  computeTradeFairness, fairnessScore, isFairEnough, isNonProducer,
+  computeTradeFairness, fairnessScore, isFairEnough, isNonProducer, tierShapeRank,
 } from "./FinderScoring";
 import type { TradeSide, TradeFairness } from "./FinderScoring";
 import { computeFinderAdjustedNet } from "./calculatorUtils";
 import { finderPickKey } from "./finderUtils";
 import { buildTradeFingerprint } from "./shared";
-import type { TradeResult } from "./finderTypes";
+import type { FinderTierMode, TradeResult } from "./finderTypes";
 import { valueBearingGive } from "./finderTypes";
 import type { PlayerWithValue, PickWithValue } from "./shared";
 
@@ -68,6 +68,12 @@ export interface FinderPipelineCtx {
    *  (an endless "vet, discard some, vet a different 22" loop). Applied only when building the
    *  final displayed list, after simCandidates has already been derived from the stable pool. */
   simDiscardedFingerprints?: Set<string>;
+  /** The trade shape the user asked for; other shapes are left off the board (default: any).
+   *  Only a filter: every other rule applies the same. */
+  finderTierMode?: FinderTierMode;
+  /** Championship Impact view: simCandidates are chosen to find title-odds gains, and once this
+   *  map has measurements the board is the trades it lists, biggest gain first. */
+  titleGainByFingerprint?: Map<string, number>;
   /** "Never Accept" structured tags scoped to one opponent, keyed by partner_roster_id. */
   opponentAversionTags: Map<number, AversionTags>;
   /** "Never Accept" structured tags scoped to "any opponent" — merged into one set. */
@@ -106,9 +112,21 @@ export interface FinderPipelineCtx {
   failsDirectionGuardrail: (r: TradeResult) => boolean;
   getDirectionTradeScore: (r: TradeResult) => number;
   getTradeLineupSafety: (r: TradeResult) => {
-    valid: boolean; myValid: boolean; oppValid: boolean; score: number;
+    valid: boolean; myValid: boolean; oppValid: boolean; score: number; lineupGain?: number;
   };
 }
+
+/** A team playing for this season: a contender bucket, a championship push, or a winning sim, but
+ *  never while actively tanking (a tanker is selling, even with a stale Almost There / Window
+ *  Closing bucket), and the bare odds>=50 path excludes seller buckets (a high sim seed on a
+ *  value-rich/points-poor roster doesn't make it a buyer of aging vets). */
+export const isWinNowTeam = ({ iAmTankingFinder, isChampionshipPush, finderDirection, myFinderPlayoffOdds }: {
+  iAmTankingFinder: boolean; isChampionshipPush: boolean; finderDirection: string; myFinderPlayoffOdds: number;
+}): boolean => !iAmTankingFinder && (
+  isChampionshipPush
+  || CONTENDER_BUCKETS.includes(finderDirection)
+  || (myFinderPlayoffOdds >= 50 && !SELLER_BUCKETS.includes(finderDirection))
+);
 
 /** A finder-generated candidate flagged for the caller to real-simulate before finalizing
  *  the displayed list (see SIM_CANDIDATE_POOL_SIZE). oppIsContender/oppIsRebuildSide mirror
@@ -141,7 +159,8 @@ export function runFinderPipeline(
     myFinderPlayoffOdds, hasMySim, isChampionshipPush, pinnedPlayer, deferredTargetPlayerId,
     deferredPinnedPlayerId, deferredTargetOppRosterId, deferredFinderSeed,
     nflTeamDepth, tradePartnerRankings, leagueMateProfileByRosterId, tradeAttempts,
-    discardedFingerprints, simDiscardedFingerprints, opponentAversionTags, globalAversionTags,
+    discardedFingerprints, simDiscardedFingerprints, finderTierMode = "ANY", titleGainByFingerprint,
+    opponentAversionTags, globalAversionTags,
     historicalSnapshot, playerStats, crossLeagueExposure, buyLowPlayerIds,
     nflState, selectedLeagueSimulation, selectedLeagueDraftHasOccurred,
     weeklyProjMap, playerDispositions, finderPickValue, calcDropCost, buildPostTradePlayers,
@@ -353,15 +372,7 @@ export function runFinderPipeline(
   // this only blocks RECEIVING them. A pinned/targeted player still routes through the pin
   // filters above.) This is the rule a pick-rich "Consolidate"/Rebuilder team needs: it must
   // not spend even its excess picks turning a young asset + future pick into an aging vet.
-  // Win-now = a contender bucket, a championship push, or a winning sim — but NEVER while
-  // actively tanking (a tanker is selling, even with a stale Almost There / Window Closing
-  // bucket), and the bare odds>=50 path excludes seller buckets (a high sim seed on a
-  // value-rich/points-poor roster doesn't make it a buyer of aging vets).
-  const userIsWinNow = !iAmTankingFinder && (
-    isChampionshipPush
-    || CONTENDER_BUCKETS.includes(finderDirection)
-    || (myFinderPlayoffOdds >= 50 && !SELLER_BUCKETS.includes(finderDirection))
-  );
+  const userIsWinNow = isWinNowTeam({ iAmTankingFinder, isChampionshipPush, finderDirection, myFinderPlayoffOdds });
   // The user's side for the fair-target rule (FinderScoring.computeTradeFairness): win-now as
   // above, rebuilding when tanking or in a seller bucket, otherwise in between.
   const userSide: TradeSide = userIsWinNow ? "winNow"
@@ -382,6 +393,7 @@ export function runFinderPipeline(
 
   const preGuardrail = results
     .filter((r) => isFinite(r.score))
+    .filter((r) => tierShapeRank(r, finderTierMode) !== null)
     .filter((r) => !r.give.some((p) => isBlockedSellDisposition(p.player_id)))
     .filter((r) => !r.receive.some((p) => isBlockedBuyDisposition(p.player_id, r.oppRosterId)))
     .filter((r) => !pinnedPlayer || r.give.some((p) => p.player_id === pinnedPlayer.player_id))
@@ -540,6 +552,11 @@ export function runFinderPipeline(
   // otherwise an elite team would see zero trades once the gain-threshold filter runs.
   const SIM_CANDIDATE_POOL_SIZE = 22;
   const PLAYOFF_ODDS_CEILING_SKIP = 95;
+  // Championship Impact shows only what it has measured, so it looks at more trades, and at no more
+  // than a few for any one player so a single star can't use up the whole pool.
+  const CHAMPIONSHIP_POOL_SIZE = 30;
+  const CHAMPIONSHIP_POOL_PER_TARGET = 4;
+  const championshipView = titleGainByFingerprint !== undefined && userIsWinNow;
 
   // O(1) candidate index lookup for the seeded tiebreak below — avoids an O(n^2) results.indexOf
   // per surviving candidate (the MAX_CANDIDATES ceiling makes the worst case large).
@@ -1668,6 +1685,9 @@ export function runFinderPipeline(
     .filter(({ r, fairness, isTierUpOverpay }) =>
       r.format === "Lottery" || isTierUpOverpay || isFairEnough(fairness))
     .sort((a, b) => {
+      // A tier mode's headline shape (2 for 1 / 1 for 2) fills the board before related shapes.
+      const tierDiff = (tierShapeRank(a.r, finderTierMode) ?? 0) - (tierShapeRank(b.r, finderTierMode) ?? 0);
+      if (tierDiff !== 0) return tierDiff;
       // Rank by the full strategy/value model first; the draft-pick-year preference
       // (bucketPriority) is only a tiebreak, so an excellent player trade can't be buried
       // under a marginal pick trade just because the pick lands in the preferred year.
@@ -1675,20 +1695,48 @@ export function runFinderPipeline(
       if (a.bucketPriority !== b.bucketPriority) return a.bucketPriority - b.bucketPriority;
       return a.sort - b.sort;
     })
-    .map(({ r, fairness }) => ({ ...r, fairness }));
+    .map(({ r, fairness }) => ({
+      ...r,
+      fairness,
+      ...(finderTierMode !== "ANY" ? { tierRank: tierShapeRank(r, finderTierMode) ?? 0 } : {}),
+    }));
+
+  const fingerprintOf = (r: TradeResult) => buildTradeFingerprint(
+    selectedLeague.league_id, r.oppRosterId,
+    [...r.give.map((p) => p.player_id), ...r.givePicks.map((p) => finderPickKey(p))],
+    [...r.receive.map((p) => p.player_id), ...r.receivePicks.map((p) => finderPickKey(p))],
+  );
 
   // ── Sim-vetting candidate pool ─────────────────────────────────────────
   // Expose the top standard-swap, win-now candidates so the caller can real-simulate
   // (simulateLeague, via previewTradeSimulation) each one and discard/backfill trades whose
   // actual playoff-odds impact is negligible — heuristic scoring alone let e.g. a 3-RB-for-
   // 2WR+TE trade through that barely moved the needle (34% → 34.3%). Skipped entirely once
-  // the user is already near-locked into the playoffs (nothing meaningful left to gain).
+  // the user is already near-locked into the playoffs (nothing meaningful left to gain) — except
+  // in Championship Impact, where a locked-in team still has title odds to gain.
   const simCandidates: FinderSimCandidate[] = (() => {
-    if (!myRoster || !userIsWinNow || !hasMySim || myFinderPlayoffOdds >= PLAYOFF_ODDS_CEILING_SKIP) return [];
+    if (!myRoster || !userIsWinNow || !hasMySim) return [];
+    if (!championshipView && myFinderPlayoffOdds >= PLAYOFF_ODDS_CEILING_SKIP) return [];
     const myRosterId = Number(myRoster.roster_id);
-    return shuffled
-      .filter((r) => !r.draftCapital && r.format !== "Lottery")
-      .slice(0, SIM_CANDIDATE_POOL_SIZE)
+    const swaps = shuffled.filter((r) => !r.draftCapital && r.format !== "Lottery");
+    const pool = championshipView
+      ? (() => {
+          // Walk the ranked trades, skipping any that doesn't improve the lineup: it can't raise
+          // title odds, so simulating it would only take time from one that might.
+          const perTarget = new Map<string, number>();
+          const picked: TradeResult[] = [];
+          for (const r of swaps) {
+            if (picked.length >= CHAMPIONSHIP_POOL_SIZE) break;
+            const target = [...r.receive].sort((a, b) => b.value - a.value)[0]?.player_id ?? "";
+            if ((perTarget.get(target) ?? 0) >= CHAMPIONSHIP_POOL_PER_TARGET) continue;
+            if ((getTradeLineupSafety(r).lineupGain ?? 1) <= 0) continue;
+            perTarget.set(target, (perTarget.get(target) ?? 0) + 1);
+            picked.push(r);
+          }
+          return picked;
+        })()
+      : swaps.slice(0, SIM_CANDIDATE_POOL_SIZE);
+    return pool
       .map((r) => {
         const oppRosterId = Number(r.oppRosterId);
         // Same lookup oppDirectionScore already used per-candidate above — recomputed here
@@ -1702,11 +1750,7 @@ export function runFinderPipeline(
         const { isRebuild: oppIsRebuild, isHopeless: oppIsHopeless, isElite: oppIsElite, isContender: oppIsContenderStrict } =
           classifyOppDirection(oppBucket, oppPlayoffOddsBefore);
         return {
-          fingerprint: buildTradeFingerprint(
-            selectedLeague.league_id, oppRosterId,
-            [...r.give.map((p) => p.player_id), ...r.givePicks.map((p) => finderPickKey(p))],
-            [...r.receive.map((p) => p.player_id), ...r.receivePicks.map((p) => finderPickKey(p))],
-          ),
+          fingerprint: fingerprintOf(r),
           myRosterId,
           oppRosterId,
           giveIds: r.give.map((p) => p.player_id),
@@ -1724,13 +1768,17 @@ export function runFinderPipeline(
   // Trades the sim-vetting pass has ruled out get excluded here — the LAST step, after
   // simCandidates (above) already locked in the stable pool that got vetted. shuffled itself
   // is untouched so re-vetting never sees a shifted pool.
-  const shuffledForDisplay = simDiscardedFingerprints && simDiscardedFingerprints.size > 0
-    ? shuffled.filter((r) => !simDiscardedFingerprints.has(buildTradeFingerprint(
-        selectedLeague.league_id, r.oppRosterId,
-        [...r.give.map((p) => p.player_id), ...r.givePicks.map((p) => finderPickKey(p))],
-        [...r.receive.map((p) => p.player_id), ...r.receivePicks.map((p) => finderPickKey(p))],
-      )))
-    : shuffled;
+  const shuffledForDisplay = (() => {
+    const kept = simDiscardedFingerprints && simDiscardedFingerprints.size > 0
+      ? shuffled.filter((r) => !simDiscardedFingerprints.has(fingerprintOf(r)))
+      : shuffled;
+    if (!championshipView || titleGainByFingerprint.size === 0) return kept;
+    // Championship Impact is only what's been measured, biggest gain first, so the slots below
+    // fill from the top of that order and not from the heuristic ranking.
+    return kept
+      .filter((r) => titleGainByFingerprint.has(fingerprintOf(r)))
+      .sort((a, b) => (titleGainByFingerprint.get(fingerprintOf(b)) ?? 0) - (titleGainByFingerprint.get(fingerprintOf(a)) ?? 0));
+  })();
 
   // ── Build the standard final list ──────────────────────────────────────
   const FINAL_TRADE_COUNT = 12;  // headline ranked trades

@@ -24,6 +24,13 @@ const log = logger("useSimulatorState");
  *  a Sleeper 429 can pause that queue for up to a minute. */
 export const SIM_RUN_LEAGUE_TIMEOUT_MS = 90_000;
 
+
+/** Seasons per trade measurement. How much a measured gain varies between runs (2026-11-04): ±0.12
+ *  title-odds and ±0.87 playoff-odds points at 250 seasons, ±0.08 and ±0.57 at 500. Each run blocks
+ *  the page while it goes (about 0.45s at 500 on real leagues), and the Finder makes 20 or 30 in a
+ *  row, so this stays near the low end: title odds, the noisier-looking one, hardly change. */
+const TRADE_IMPACT_SEASONS = 300;
+
 export interface SimulatorCtx {
   selectedLeague: SleeperLeague | null;
   rosters: SleeperRoster[];
@@ -287,10 +294,15 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
 
   // On-demand "what if" preview: re-runs the same engine against a hypothetical roster swap
   // without touching any state — the caller (Trade Calculator/Finder) decides when to invoke
-  // this, so it never runs on every keystroke while a trade is being built.
+  // this, so it never runs on every keystroke while a trade is being built. It measures a trade
+  // (see TradeImpactMeasure): compare it only against its own no-trade run ([] give, [] receive),
+  // never against the Simulator's forecast, whose luck is different.
   const previewTradeSimulation = useCallback(
-    (myRosterId: number, opponentRosterId: number, giveIds: string[], receiveIds: string[]): LeagueSimulation | null =>
-      simulateLeague({
+    (myRosterId: number, opponentRosterId: number, giveIds: string[], receiveIds: string[]): LeagueSimulation | null => {
+      // In season, wait for the league's weekly scores (the Trade Hub loads them): anything measured
+      // before they arrive is on a generated schedule, and gets thrown away when they do.
+      if (nflState?.season_type === "regular" && selectedLeague && !leagueWeeklyMatchups[selectedLeague.league_id]) return null;
+      return simulateLeague({
         selectedLeague,
         rosters: buildRostersWithTrade(rosters, myRosterId, opponentRosterId, giveIds, receiveIds),
         players,
@@ -307,7 +319,9 @@ export function useSimulatorState(ctx: SimulatorCtx): SimulatorResult {
         weeklyProjections,
         currentWeekGames,
         simSalt,
-      }),
+        impact: { trials: TRADE_IMPACT_SEASONS, historyRosters: rosters },
+      });
+    },
     [
       selectedLeague, rosters, players, nflState, projectionData, projectionWeek, playerStats,
       leagueWeeklyMatchups, standings, users, leagueAdjustedFcValues, leagueAdjustedRedraftValues,

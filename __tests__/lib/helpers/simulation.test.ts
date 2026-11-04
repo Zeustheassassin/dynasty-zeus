@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { simulateLeague, buildRostersWithTrade, type SimulateLeagueArgs, type PoolPlayer } from "@/lib/helpers/simulation";
 import type { LeagueSimulation, SleeperMatchup, TeamGameState } from "@/lib/types";
+import { createSeededRandom, mixSeed } from "@/lib/helpers/math";
 
 // Characterization ("golden") tests for the season simulator, written BEFORE any refactor or
 // Web Worker move (audit Batch 1 step 5). The RNG is seeded from league_id + simSalt, so every
@@ -1091,5 +1092,158 @@ describe("buildRostersWithTrade", () => {
     expect(buildRostersWithTrade(rosters, 1, 2, [], [])).toBe(rosters);
     buildRostersWithTrade(rosters, 1, 2, ["a"], ["x"]);
     expect((rosters as unknown as { players: string[] }[])[0].players).toEqual(["a", "b", "c"]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Measuring a trade (TradeImpactMeasure, 2026-11-04). The measured gains are only worth ranking on
+// if a do-nothing trade reads as nothing and a real one reads at full size.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("simulateLeague — measuring a trade", () => {
+  const WEEKS = 8;
+  const f = buildFixture();
+  const rosters = f.rosters as { roster_id: number; players: string[] }[];
+  const realRosters = f.rosters as never;
+  const args = (over: Partial<SimulateLeagueArgs> = {}) => inSeasonArgs({
+    selectedLeague: league({ playoff_week_start: 15 }) as never,
+    nflState: { week: WEEKS + 1, season_type: "regular" } as never,
+    projectionWeek: WEEKS + 1,
+    leagueWeeklyMatchups: {
+      "1234567890": Array.from({ length: WEEKS }, (_, w) =>
+        mkMatchups(w + 1, [110, 95, 120, 100, 88, 105].map((p, i) => p + ((w * 7 + i * 11) % 23) - 11))),
+    },
+    ...over,
+  });
+  const impact = { trials: 500, historyRosters: realRosters };
+  const measure = (over: Partial<SimulateLeagueArgs> = {}) => simulateLeague(args({ ...over, impact }))!;
+  const traded = (give: string[], receive: string[], me = 2, opp = 5) =>
+    buildRostersWithTrade(realRosters, me, opp, give, receive) as never;
+  const odds = (sim: LeagueSimulation, id: number) => sim.rowByRosterId.get(id)!;
+
+  // A star for the worst player on the team: big enough that no one could miss it.
+  const star = rosters[4].players[5];
+  const dud = rosters[1].players[8];
+  const withStar = {
+    projectionData: [...(f.proj as { sleeperId: string; fpts: number }[]).filter((p) => p.sleeperId !== star), { sleeperId: star, fpts: 45 }] as never,
+  };
+
+  it("gives the same answer every time for the same input", () => {
+    const a = measure();
+    const b = measure();
+    expect(a.rows.map((r) => [r.rosterId, r.playoffOdds, r.titleOdds])).toEqual(
+      b.rows.map((r) => [r.rosterId, r.playoffOdds, r.titleOdds]),
+    );
+  });
+
+  it("reads a swap of two players nobody starts as nothing, on every team", () => {
+    const benchA = rosters[1].players[10];
+    const benchB = rosters[4].players[10];
+    const bench = {
+      projectionData: [
+        ...(f.proj as { sleeperId: string; fpts: number }[]).filter((p) => p.sleeperId !== benchA && p.sleeperId !== benchB),
+        { sleeperId: benchA, fpts: 0.1 }, { sleeperId: benchB, fpts: 0.1 },
+      ] as never,
+    };
+    const before = measure(bench);
+    const after = measure({ ...bench, rosters: traded([benchA], [benchB]) });
+    before.rows.forEach((row) => {
+      expect(Math.abs(odds(after, row.rosterId).playoffOdds - row.playoffOdds)).toBeLessThan(0.5);
+      expect(Math.abs(odds(after, row.rosterId).titleOdds - row.titleOdds)).toBeLessThan(0.5);
+    });
+  });
+
+  it("the same swap in a normal run moves odds by chance, which is why this mode exists", () => {
+    const benchA = rosters[1].players[10];
+    const benchB = rosters[4].players[10];
+    const before = simulateLeague(args())!;
+    const after = simulateLeague(args({ rosters: traded([benchA], [benchB]) }))!;
+    const moved = before.rows.some((row) => odds(after, row.rosterId).playoffOdds !== row.playoffOdds);
+    expect(moved).toBe(true);
+  });
+
+  it("a real upgrade raises the buyer's odds and lowers the seller's", () => {
+    const before = measure(withStar);
+    const after = measure({ ...withStar, rosters: traded([dud], [star]) });
+    expect(odds(after, 2).titleOdds).toBeGreaterThan(odds(before, 2).titleOdds);
+    expect(odds(after, 2).playoffOdds).toBeGreaterThan(odds(before, 2).playoffOdds);
+    expect(odds(after, 5).titleOdds).toBeLessThan(odds(before, 5).titleOdds);
+  });
+
+  it("counts a trade's full projected change, where a normal run keeps only 35% of it after 8 games", () => {
+    const fullChange = odds(measure({ ...withStar, rosters: traded([dud], [star]) }), 2).lineupScore - odds(measure(withStar), 2).lineupScore;
+    const damped = odds(simulateLeague(args({ ...withStar, rosters: traded([dud], [star]) }))!, 2).lineupScore
+      - odds(simulateLeague(args(withStar))!, 2).lineupScore;
+    expect(fullChange).toBeGreaterThan(10);
+    expect(damped).toBeCloseTo(fullChange * 0.35, 5);
+  });
+
+  it("past scores still count on the real rosters: a no-trade run sees the same team strength as a normal run", () => {
+    const measured = measure();
+    const normal = simulateLeague(args())!;
+    measured.rows.forEach((row) => {
+      expect(row.lineupScore).toBeCloseTo(odds(normal, row.rosterId).lineupScore, 8);
+    });
+  });
+
+  it("title odds are a real share: they add up to 100 and agree with playing the brackets out", () => {
+    const exact = measure();
+    const total = exact.rows.reduce((sum, row) => sum + row.titleOdds, 0);
+    expect(Math.abs(total - 100)).toBeLessThan(0.5);
+    const RUNS = 20; // 5,000 played-out seasons
+    const playedOut = new Map<number, number>();
+    for (let salt = 0; salt < RUNS; salt++) {
+      simulateLeague(args({ simSalt: salt * 37 + 3 }))!.rows.forEach((row) => {
+        playedOut.set(row.rosterId, (playedOut.get(row.rosterId) || 0) + row.titleOdds / RUNS);
+      });
+    }
+    exact.rows.forEach((row) => {
+      expect(Math.abs(row.titleOdds - (playedOut.get(row.rosterId) || 0))).toBeLessThan(3);
+    });
+  }, 30000);
+
+  it("its own dice don't lean any team's way: playoff odds agree with a normal run", () => {
+    const measured = simulateLeague(args({ impact: { trials: 3000, historyRosters: realRosters } }))!;
+    const RUNS = 20;
+    const normal = new Map<number, number>();
+    for (let salt = 0; salt < RUNS; salt++) {
+      simulateLeague(args({ simSalt: salt * 41 + 9 }))!.rows.forEach((row) => {
+        normal.set(row.rosterId, (normal.get(row.rosterId) || 0) + row.playoffOdds / RUNS);
+      });
+    }
+    measured.rows.forEach((row) => {
+      expect(Math.abs(row.playoffOdds - (normal.get(row.rosterId) || 0))).toBeLessThan(3);
+    });
+  }, 30000);
+
+  it("works in the offseason, with no past scores to weigh", () => {
+    const sim = simulateLeague(mkArgs({ impact }))!;
+    const total = sim.rows.reduce((sum, row) => sum + row.titleOdds, 0);
+    expect(sim.simCount).toBe(500);
+    expect(Math.abs(total - 100)).toBeLessThan(0.5);
+  });
+});
+
+describe("mixSeed", () => {
+  it("is repeatable and sensitive to every part", () => {
+    expect(mixSeed(1, 2, 3)).toBe(mixSeed(1, 2, 3));
+    expect(mixSeed(1, 2, 3)).not.toBe(mixSeed(1, 2, 4));
+    expect(mixSeed(1, 2, 3)).not.toBe(mixSeed(3, 2, 1));
+  });
+
+  it("gives even first draws from nearby seeds, which the raw generator doesn't", () => {
+    const firstDraws = (seedOf: (i: number) => number) =>
+      Array.from({ length: 2000 }, (_, i) => createSeededRandom(seedOf(i))());
+    const closeToNext = (draws: number[]) =>
+      draws.slice(1).filter((d, i) => Math.abs(d - draws[i]) < 0.001).length / (draws.length - 1);
+    // Consecutive raw seeds nearly always draw almost the same number, so two players' injury rolls
+    // would move together; mixed seeds are as independent as chance would have them.
+    expect(closeToNext(firstDraws((i) => 1000 + i))).toBeGreaterThan(0.9);
+    const mixed = firstDraws((i) => mixSeed(1000, i));
+    expect(closeToNext(mixed)).toBeLessThan(0.01);
+    expect(Math.abs(mixed.reduce((a, b) => a + b, 0) / mixed.length - 0.5)).toBeLessThan(0.03);
+    // An injury rate of 6.5% should come up about 6.5% of the time.
+    const injured = mixed.filter((d) => d < 0.065).length / mixed.length;
+    expect(Math.abs(injured - 0.065)).toBeLessThan(0.02);
   });
 });

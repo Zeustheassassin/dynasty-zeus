@@ -1,6 +1,6 @@
 "use client";
 import type { RosterDirectionProfile, LeagueMateView } from "../../lib/types";
-import type { FinderStrategyOverride } from "./finderTypes";
+import type { FinderStrategyOverride, FinderTierMode } from "./finderTypes";
 
 interface FinderDirectionPanelProps {
   loadingCalcValues: boolean;
@@ -19,12 +19,20 @@ interface FinderDirectionPanelProps {
   rosterOverflow: number;
   finderStrategyOverride: FinderStrategyOverride;
   setFinderStrategyOverride: (mode: FinderStrategyOverride) => void;
+  finderTierMode: FinderTierMode;
+  setFinderTierMode: (mode: FinderTierMode) => void;
 }
 
 const STRATEGY_OPTIONS: { mode: FinderStrategyOverride; label: string }[] = [
   { mode: "AUTO", label: "Default" },
   { mode: "TANK", label: "Full Tank" },
   { mode: "CONTEND", label: "Full Contend" },
+];
+
+const TIER_OPTIONS: { mode: FinderTierMode; label: string; note?: string }[] = [
+  { mode: "ANY", label: "Any" },
+  { mode: "TIER_UP", label: "Tier Up", note: "Mostly 2 for 1s: your depth for one better player." },
+  { mode: "TIER_DOWN", label: "Tier Down", note: "Mostly 1 for 2s: one of your players for two pieces." },
 ];
 
 export function FinderDirectionPanel({
@@ -44,6 +52,8 @@ export function FinderDirectionPanel({
   rosterOverflow,
   finderStrategyOverride,
   setFinderStrategyOverride,
+  finderTierMode,
+  setFinderTierMode,
 }: FinderDirectionPanelProps) {
   return (
     <>
@@ -180,6 +190,29 @@ export function FinderDirectionPanel({
               </span>
             )}
           </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-700/60 pt-2">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Trade Shape</div>
+            <div className="flex gap-1.5">
+              {TIER_OPTIONS.map(({ mode, label }) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={finderTierMode === mode}
+                  onClick={() => setFinderTierMode(mode)}
+                  className={`text-[11px] px-2.5 py-1 rounded-full border font-medium transition ${
+                    finderTierMode === mode
+                      ? "border-blue-500 bg-blue-950/50 text-blue-200"
+                      : "border-slate-700 bg-slate-900/40 text-slate-400 hover:border-slate-500 hover:text-slate-300"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {TIER_OPTIONS.find((o) => o.mode === finderTierMode)?.note && (
+            <p className="mt-1 text-[11px] text-slate-500">{TIER_OPTIONS.find((o) => o.mode === finderTierMode)?.note}</p>
+          )}
         </div>
       )}
     </>

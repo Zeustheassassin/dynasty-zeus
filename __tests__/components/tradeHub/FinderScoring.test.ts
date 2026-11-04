@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import type { PlayerWithValue, PickWithValue } from "@/components/tradeHub/shared";
 import {
+  tierShapeRank, tradeImpactPasses, playoffGain, titleGain, type TradeSimImpact,
+} from "@/components/tradeHub/FinderScoring";
+import {
   isAgingAsset,
   isOldProducerBuy,
   isYoungBuildingBlock,
@@ -572,5 +575,117 @@ describe("isNonProducer", () => {
     expect(isNonProducer({ value: 4000 }, 1200)).toBe(true);   // 30% of dynasty value
     expect(isNonProducer({ value: 4000 }, 1700)).toBe(false);  // 42.5%
     expect(isNonProducer({ value: 3000, injury_status: null }, 3500)).toBe(false);
+  });
+});
+
+describe("tierShapeRank", () => {
+  const asset = (value: number, player_id?: string) => ({ value, player_id });
+  const trade = (give: number[], receive: number[], picks: { give?: number[]; receive?: number[] } = {}, format = "x") => ({
+    give: give.map((v, i) => asset(v, `g${i}`)),
+    receive: receive.map((v, i) => asset(v, `r${i}`)),
+    givePicks: (picks.give ?? []).map((v) => asset(v)),
+    receivePicks: (picks.receive ?? []).map((v) => asset(v)),
+    format,
+  });
+
+  it("lets everything through when the setting is Any", () => {
+    expect(tierShapeRank(trade([3000], [3000]), "ANY")).toBe(0);
+    expect(tierShapeRank(trade([], [800], { give: [700] }, "Lottery"), "ANY")).toBe(0);
+  });
+
+  it("Tier Up: 2 for 1 is the headline, player + pick deals are related", () => {
+    expect(tierShapeRank(trade([3000, 2000], [4500]), "TIER_UP")).toBe(0);
+    expect(tierShapeRank(trade([3000, 1000], [5000], { give: [900] }), "TIER_UP")).toBe(1);
+    expect(tierShapeRank(trade([3000], [4000], { give: [900] }), "TIER_UP")).toBe(1);
+  });
+
+  it("Tier Up: the player coming back has to be a real step up", () => {
+    // Paying 2,000 extra for a player barely better than the one going out isn't a tier up.
+    expect(tierShapeRank(trade([5000, 2000], [5400]), "TIER_UP")).toBeNull();
+    expect(tierShapeRank(trade([5000, 2000], [5500]), "TIER_UP")).toBe(0);
+    // Better only than the pick in the deal doesn't count: the best asset going out is the bar.
+    expect(tierShapeRank(trade([1000], [1500], { give: [2000] }), "TIER_UP")).toBeNull();
+  });
+
+  it("Tier Up: every other shape is left off", () => {
+    expect(tierShapeRank(trade([3000], [3500]), "TIER_UP")).toBeNull();
+    expect(tierShapeRank(trade([3000, 1000], [3500, 1000]), "TIER_UP")).toBeNull();
+    expect(tierShapeRank(trade([5000], [2500, 2500]), "TIER_UP")).toBeNull();
+    expect(tierShapeRank(trade([1000], [1500], { give: [700], receive: [200] }), "TIER_UP")).toBeNull();
+    expect(tierShapeRank(trade([1500, 1500], [], { receive: [2000] }), "TIER_UP")).toBeNull();
+    expect(tierShapeRank(trade([], [800], { give: [700] }, "Lottery"), "TIER_UP")).toBeNull();
+  });
+
+  it("Tier Up: a sweetener on a 1 for 1 doesn't turn it into a 2 for 1", () => {
+    const sweetened = { ...trade([3000, 300], [4000]), sweetenerPlayerId: "g1" };
+    expect(tierShapeRank(sweetened, "TIER_UP")).toBeNull();
+  });
+
+  it("Tier Down: 1 for 2 is the headline, other splits are related", () => {
+    expect(tierShapeRank(trade([6000], [3500, 3000]), "TIER_DOWN")).toBe(0);
+    expect(tierShapeRank(trade([6000], [2500, 2000, 1800]), "TIER_DOWN")).toBe(1);
+    expect(tierShapeRank(trade([6000], [3000, 2500], { receive: [900] }), "TIER_DOWN")).toBe(1);
+    expect(tierShapeRank(trade([6000], [4500], { receive: [1200] }), "TIER_DOWN")).toBe(1);
+    expect(tierShapeRank(trade([6000], [], { receive: [3000, 3000] }), "TIER_DOWN")).toBe(1);
+  });
+
+  it("Tier Down: the player going out has to be a real step above what comes back", () => {
+    expect(tierShapeRank(trade([6000], [5600, 800]), "TIER_DOWN")).toBeNull();
+    expect(tierShapeRank(trade([6000], [5400, 800]), "TIER_DOWN")).toBe(0);
+  });
+
+  it("Tier Down: every other shape is left off", () => {
+    expect(tierShapeRank(trade([3000], [3000]), "TIER_DOWN")).toBeNull();
+    expect(tierShapeRank(trade([3000, 2000], [4500]), "TIER_DOWN")).toBeNull();
+    expect(tierShapeRank(trade([5000, 3000], [3000, 2500, 2500]), "TIER_DOWN")).toBeNull();
+    expect(tierShapeRank(trade([3000], [1500, 1500], { give: [500] }), "TIER_DOWN")).toBeNull();
+  });
+});
+
+describe("tradeImpactPasses", () => {
+  const impact = (over: Partial<TradeSimImpact> = {}): TradeSimImpact => ({
+    myPlayoffBefore: 60, myPlayoffAfter: 60,
+    myTitleBefore: 10, myTitleAfter: 10,
+    oppPlayoffDelta: 0, oppTitleDelta: 0,
+    oppIsContender: false, oppIsRebuildSide: false,
+    ...over,
+  });
+
+  it("reads the gains", () => {
+    const i = impact({ myPlayoffAfter: 63, myTitleAfter: 12.5 });
+    expect(playoffGain(i)).toBe(3);
+    expect(titleGain(i)).toBe(2.5);
+  });
+
+  it("the standard board needs a real gain in playoff or title odds", () => {
+    expect(tradeImpactPasses(impact(), "recommended")).toBe(false);
+    expect(tradeImpactPasses(impact({ myPlayoffAfter: 60.9 }), "recommended")).toBe(false);
+    expect(tradeImpactPasses(impact({ myPlayoffAfter: 61 }), "recommended")).toBe(true);
+    // Nearly locked in: no playoff room left, but the title odds moved.
+    expect(tradeImpactPasses(impact({ myPlayoffBefore: 92, myPlayoffAfter: 92.5, myTitleAfter: 11 }), "recommended")).toBe(true);
+  });
+
+  it("Championship Impact wants title odds, however much playoff odds moved", () => {
+    expect(tradeImpactPasses(impact({ myPlayoffAfter: 70, myTitleAfter: 10.4 }), "championshipImpact")).toBe(false);
+    expect(tradeImpactPasses(impact({ myTitleAfter: 10.5 }), "championshipImpact")).toBe(true);
+  });
+
+  it("a contender opponent won't make itself worse, in any view", () => {
+    const hurtsThem = { myPlayoffAfter: 65, myTitleAfter: 12, oppIsContender: true, oppPlayoffDelta: -2 };
+    expect(tradeImpactPasses(impact(hurtsThem), "recommended")).toBe(false);
+    expect(tradeImpactPasses(impact(hurtsThem), "championshipImpact")).toBe(false);
+    // A locked-in contender has no playoff odds to lose, so its title odds are what tell.
+    expect(tradeImpactPasses(impact({ ...hurtsThem, oppPlayoffDelta: 0, oppTitleDelta: -1.5 }), "recommended")).toBe(false);
+    expect(tradeImpactPasses(impact({ ...hurtsThem, oppPlayoffDelta: 0, oppTitleDelta: -0.5 }), "recommended")).toBe(true);
+  });
+
+  it("a rebuilder with no odds to lose can still trade (it could never fall the old required point)", () => {
+    expect(tradeImpactPasses(impact({ myPlayoffAfter: 65, oppIsRebuildSide: true }), "recommended")).toBe(true);
+  });
+
+  it("a rebuilder rising blocks an ordinary swap, not a trade picked for its title odds", () => {
+    const liftsThem = { myPlayoffAfter: 65, myTitleAfter: 12, oppIsRebuildSide: true, oppPlayoffDelta: 3 };
+    expect(tradeImpactPasses(impact(liftsThem), "recommended")).toBe(false);
+    expect(tradeImpactPasses(impact(liftsThem), "championshipImpact")).toBe(true);
   });
 });

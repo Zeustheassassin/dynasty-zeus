@@ -18,7 +18,7 @@ import type { TradeResult } from "./finderTypes";
 import { ordinalSuffix, buildTradeFingerprint } from "./shared";
 import { computeFinderAdjustedNet, EVEN_NET_THRESHOLD } from "./calculatorUtils";
 import { Card } from "../ui/Card";
-import { fairnessTier, type TradeFairness } from "./FinderScoring";
+import { fairnessTier, type TradeFairness, type TradeSimImpact } from "./FinderScoring";
 
 const FAIRNESS_TIER_STYLE = [
   { label: "On the fair mark", color: "border-emerald-800 bg-emerald-950/30 text-emerald-300" },
@@ -56,6 +56,8 @@ interface TradeCardProps {
   leagueId: string | null;
   myRoster: SleeperRoster | undefined;
   selectedLeagueSimulation: LeagueSimulation | null;
+  /** What this trade measured, when it was in the win-now candidate pool. */
+  simImpact?: TradeSimImpact;
   previewTradeSimulation: (
     myRosterId: number,
     opponentRosterId: number,
@@ -93,6 +95,7 @@ export default function TradeCard({
   leagueId,
   myRoster,
   selectedLeagueSimulation,
+  simImpact,
   previewTradeSimulation,
   posTeamTotals,
   numTeams,
@@ -125,15 +128,18 @@ export default function TradeCard({
   // never for every candidate the Finder generates (that would multiply the sim cost across
   // dozens of trades). Player-only: picks don't move the current-season sim.
   const hasPlayerMovement = trade.give.length > 0 || trade.receive.length > 0;
-  const [simPreview, setSimPreview] = useState<LeagueSimulation | null>(null);
+  const [simPreview, setSimPreview] = useState<{ before: LeagueSimulation; after: LeagueSimulation } | null>(null);
   const handleSimPreview = () => {
     if (!myRoster) return;
-    setSimPreview(previewTradeSimulation(
+    // Against its own no-trade run with the same dice, so the change is only the trade.
+    const before = previewTradeSimulation(myRoster.roster_id, Number(trade.oppRosterId), [], []);
+    const after = previewTradeSimulation(
       myRoster.roster_id,
       Number(trade.oppRosterId),
       trade.give.map((p) => p.player_id),
       trade.receive.map((p) => p.player_id),
-    ));
+    );
+    setSimPreview(before && after ? { before, after } : null);
   };
 
   // "Never Accept" — discards this suggestion (like Discard) and also teaches the Finder's
@@ -591,12 +597,11 @@ export default function TradeCard({
         </details>
       )}
 
-      {/* Simulator Preview — computed on demand via the button in the actions row below */}
-      {simPreview && (() => {
+      {/* Odds the trade measured, or the Simulator Preview computed on demand via the button in
+          the actions row below. Only one shows: they're the same measurement. */}
+      {(() => {
         const myRosterId = Number(myRoster?.roster_id ?? 0);
-        const myBeforeRow = selectedLeagueSimulation?.rowByRosterId?.get(myRosterId);
-        const myAfterRow = simPreview.rowByRosterId.get(myRosterId);
-        const oppAfterRow = simPreview.rowByRosterId.get(Number(trade.oppRosterId));
+        const oppRosterId = Number(trade.oppRosterId);
         const statLine = (label: string, before?: number, after?: number) => {
           if (before == null || after == null) return null;
           const delta = Math.round((after - before) * 10) / 10;
@@ -608,12 +613,23 @@ export default function TradeCard({
             </span>
           );
         };
+        if (!simPreview && !simImpact) return null;
         return (
           <div className="mt-3 bg-slate-800/50 rounded-lg px-3 py-2 flex flex-col gap-1">
             <div className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Simulator Preview</div>
             <div className="flex flex-wrap gap-x-4 gap-y-1">
-              {statLine("Your Playoff Odds", myBeforeRow?.playoffOdds, myAfterRow?.playoffOdds)}
-              {statLine("Their Playoff Odds", oppPlayoffOdds ?? undefined, oppAfterRow?.playoffOdds)}
+              {simPreview ? (
+                <>
+                  {statLine("Your Title Odds", simPreview.before.rowByRosterId.get(myRosterId)?.titleOdds, simPreview.after.rowByRosterId.get(myRosterId)?.titleOdds)}
+                  {statLine("Your Playoff Odds", simPreview.before.rowByRosterId.get(myRosterId)?.playoffOdds, simPreview.after.rowByRosterId.get(myRosterId)?.playoffOdds)}
+                  {statLine("Their Playoff Odds", simPreview.before.rowByRosterId.get(oppRosterId)?.playoffOdds, simPreview.after.rowByRosterId.get(oppRosterId)?.playoffOdds)}
+                </>
+              ) : simImpact && (
+                <>
+                  {statLine("Your Title Odds", simImpact.myTitleBefore, simImpact.myTitleAfter)}
+                  {statLine("Your Playoff Odds", simImpact.myPlayoffBefore, simImpact.myPlayoffAfter)}
+                </>
+              )}
             </div>
           </div>
         );
@@ -627,7 +643,7 @@ export default function TradeCard({
         >
           Open in Calculator &#8594;
         </button>
-        {hasPlayerMovement && (
+        {hasPlayerMovement && !simImpact && (
           <button
             onClick={handleSimPreview}
             className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-blue-700 text-blue-400 hover:border-blue-500 hover:text-blue-300 transition shrink-0"

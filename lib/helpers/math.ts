@@ -38,6 +38,19 @@ export const createSeededRandom = (seed: number) => {
   };
 };
 
+/** Hashes numbers into one well-mixed seed. createSeededRandom's first draw is a straight line in its
+ *  seed, so nearby seeds give nearly the same draw: use this when each stream takes only a few. */
+export const mixSeed = (...parts: number[]): number => {
+  let hash = 0x9e3779b9;
+  for (const part of parts) {
+    hash = Math.imul(hash ^ (part | 0), 0x85ebca6b);
+    hash ^= hash >>> 13;
+    hash = Math.imul(hash, 0xc2b2ae35);
+    hash ^= hash >>> 16;
+  }
+  return hash >>> 0;
+};
+
 /** Box-Muller transform — generates a standard-normal random variate
  *  from a uniform RNG returned by createSeededRandom(). */
 export const randomNormal = (rng: () => number) => {

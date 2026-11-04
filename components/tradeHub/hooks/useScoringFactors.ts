@@ -208,6 +208,7 @@ export function createScoringFactors({
       oppValid: oppAfter.valid,
       valid: myAfter.emptySlots === 0 && oppAfter.emptySlots === 0 && !blocksForDepth,
       blocksForDepth,
+      lineupGain,
       reserveTotalDrop,
       reserveFlexDrop,
       reserveQbDrop,

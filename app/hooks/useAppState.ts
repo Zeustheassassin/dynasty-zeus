@@ -1764,7 +1764,10 @@ const saveSnapshotNow = async () => {
   useEffect(() => {
     const leagueId = selectedLeague?.league_id;
     if (!leagueId) return;
-    if (!((mainTab === "LEAGUES" && leagueHubTab === "SIMULATOR") || simRunActive)) return;
+    // The Trade Finder and Calculator measure trades with this sim too. Without these scores it
+    // runs on a generated schedule with no past results, not the league's real season.
+    const measuresTrades = mainTab === "TRADE_HUB" && (tradeHubSection === "FINDER" || tradeHubSection === "CALCULATOR");
+    if (!((mainTab === "LEAGUES" && leagueHubTab === "SIMULATOR") || measuresTrades || simRunActive)) return;
     const inFlight = weeklyMatchupsInFlightRef.current;
     if (inFlight.has(leagueId)) return;
     const regularSeasonWeeks = getRegularSeasonWeeks(selectedLeague);
@@ -1815,7 +1818,7 @@ const saveSnapshotNow = async () => {
     };
 
     loadLeagueWeeklyHistory();
-  }, [mainTab, leagueHubTab, simRunActive, simRunStartedAt, selectedLeague, currentNflWeek, leagueWeeklyMatchups, liveWeekMatchupsFetchedAt, setLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups]);
+  }, [mainTab, leagueHubTab, tradeHubSection, simRunActive, simRunStartedAt, selectedLeague, currentNflWeek, leagueWeeklyMatchups, liveWeekMatchupsFetchedAt, setLeagueWeeklyMatchups, setLoadingLeagueWeeklyMatchups]);
 
   const selectedLeagueDirection = useMemo((): RosterDirectionProfile | null => {
     if (!selectedLeague || !rosters.length || !user?.user_id) return null;

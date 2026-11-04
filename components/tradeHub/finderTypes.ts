@@ -8,6 +8,13 @@ export type MarketSignal = "SELL_HIGH" | "BUY_LOW" | "LIQUID" | "NONE";
 // posture, regardless of what the direction engine actually computed for this team.
 export type FinderStrategyOverride = "AUTO" | "TANK" | "CONTEND";
 
+// The trade shape to look for, on top of whichever strategy is set (user, 2026-11-04). See
+// FinderScoring.tierShapeRank.
+export type FinderTierMode = "ANY" | "TIER_UP" | "TIER_DOWN";
+
+// How to order the board. The two impact views are for win-now teams; see tradeImpactPasses.
+export type FinderSortMode = "recommended" | "playoffImpact" | "championshipImpact";
+
 export type TradeResult = {
   give: PlayerWithValue[]; receive: PlayerWithValue[];
   givePicks: PickWithValue[]; receivePicks: PickWithValue[];
@@ -22,6 +29,9 @@ export type TradeResult = {
   // Where the trade lands against the fair mark (FinderScoring.computeTradeFairness) — set by
   // runFinderPipeline on every trade it returns; drives the results order and the card's line.
   fairness?: TradeFairness;
+  // In a tier mode, 0 for the shape the user asked for (2 for 1 / 1 for 2) and 1 for a related one
+  // (FinderScoring.tierShapeRank). The headline shape always shows first.
+  tierRank?: 0 | 1;
 };
 
 // The give side with any value-neutral sweetener stripped out. EVERY scoring term that reads
