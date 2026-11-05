@@ -1099,6 +1099,9 @@ export interface AversionTags {
 // ── Scouting Hub ──────────────────────────────────────────────
 
 export type ChartingDecision = "fully_charted" | "partial_chart" | "charting" | "pending" | "not_charting";
+/** Charting priority (migration 084; lib/scouting/focusTag.ts). Separate from
+ *  ChartingDecision, which tracks charting progress. */
+export type FocusTag = "focus_now" | "monitor" | "low_priority" | "off_board";
 export type RouteType =
   | "nine" | "post" | "dig" | "curl" | "slant" | "screen"
   | "flat" | "comeback" | "out" | "corner" | "other";
@@ -1134,6 +1137,11 @@ export interface Prospect {
   will_play_post: string;
   charting_decision: ChartingDecision;
   charting_notes: string;
+  /** Charting priority (migration 084): first filled by a one-time import
+   *  from the user's 2027 Scouting Board sheet, then edited on the Roster tab.
+   *  Optional: absent before the migration, and never sent on insert. Null =
+   *  untagged. */
+  focus_tag?: FocusTag | null;
   draft_round: number | null;
   draft_pick: number | null;
   draft_team: string | null;

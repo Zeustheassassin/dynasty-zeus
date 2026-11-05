@@ -15,6 +15,8 @@ import { useRecruitIndex } from "../../../hooks/useRecruitIndex";
 import { lookupConference } from "../../../lib/scouting/schoolConferences";
 import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
 import RecruitStarBadge from "../RecruitStarBadge";
+import FocusTagChip from "../FocusTagChip";
+import { focusSortValue } from "../../../lib/scouting/focusTag";
 
 const QBChartingBoard  = dynamic(() => import("./QBChartingBoard"),   { ssr: false });
 const ProspectRosterSheet = dynamic(() => import("../ProspectRosterSheet"), { ssr: false });
@@ -45,7 +47,7 @@ export interface QBHubProps {
 }
 
 type HubView = "list" | "roster";
-type SortKey = "personal_rank" | "name" | "school" | "draft_class_year";
+type SortKey = "personal_rank" | "focus" | "name" | "school" | "draft_class_year";
 
 export default function QBHub({
   prospectsWithStats,
@@ -90,6 +92,7 @@ export default function QBHub({
     return [...base].sort((a, b) => {
       let av: string | number = 0, bv: string | number = 0;
       if (sortKey === "personal_rank") { av = a.personal_rank ?? 9999; bv = b.personal_rank ?? 9999; }
+      else if (sortKey === "focus")    { av = focusSortValue(a); bv = focusSortValue(b); }
       else if (sortKey === "name")     { av = a.name ?? ""; bv = b.name ?? ""; }
       else if (sortKey === "school")   { av = a.school ?? ""; bv = b.school ?? ""; }
       else if (sortKey === "draft_class_year") { av = a.draft_class_year ?? 9999; bv = b.draft_class_year ?? 9999; }
@@ -210,8 +213,8 @@ export default function QBHub({
           {/* Sort controls */}
           <div className="flex flex-wrap gap-2 mb-4">
             <span className="text-xs text-slate-500 self-center">Sort:</span>
-            {(["personal_rank", "name", "school", "draft_class_year"] as SortKey[]).map((k) => {
-              const labels: Record<SortKey, string> = { personal_rank: "Rank", name: "Name", school: "School", draft_class_year: "Draft Yr" };
+            {(["personal_rank", "focus", "name", "school", "draft_class_year"] as SortKey[]).map((k) => {
+              const labels: Record<SortKey, string> = { personal_rank: "Rank", focus: "Focus", name: "Name", school: "School", draft_class_year: "Draft Yr" };
               return (
                 <button key={k} onClick={() => toggleSort(k)}
                   className={`px-3 py-1 rounded text-xs font-medium transition ${
@@ -284,10 +287,13 @@ export default function QBHub({
                       gap) and the stats wrap underneath; the stats used to squeeze it to an
                       initial. From sm up the row is one line, as before. */}
                   <span className="text-sm font-medium text-white min-w-0 truncate w-[calc(100%-1.375rem)] sm:w-auto">{p.name}</span>
+                  {/* Focus Tag: beside the name from sm up; on phones it leads the stats line. */}
+                  <FocusTagChip tag={p.focus_tag} className="hidden sm:inline-flex" />
                   <span className="text-xs text-slate-400 truncate hidden sm:block">
                     {p.school}{p.conference ? ` · ${p.conference}` : ""}
                   </span>
                   <div className="ml-[1.375rem] sm:ml-auto flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 min-w-0 sm:flex-shrink-0">
+                    <FocusTagChip tag={p.focus_tag} className="inline-flex sm:hidden" />
                     <span className="sm:w-20 flex justify-center empty:hidden sm:empty:flex">
                       <RecruitStarBadge recruit={matchProspect({ name: p.name, position: p.position, draft_class_year: p.draft_class_year })} />
                     </span>

@@ -5,7 +5,8 @@ import { lookupConference } from "../../lib/scouting/schoolConferences";
 import { classYearOptionsWith } from "../../lib/helpers/season";
 import { reorderRanksWithinClass } from "../../lib/scouting/rankReorder";
 import { logger } from "../../lib/logger";
-import type { ProspectWithStats, ChartingDecision } from "../../lib/types";
+import type { ProspectWithStats, ChartingDecision, FocusTag } from "../../lib/types";
+import { FOCUS_TAGS, focusSortValue, parseFocusTag } from "../../lib/scouting/focusTag";
 import PffBioFillPanel from "./pff/PffBioFillPanel";
 import { usePffBioFill } from "./pff/usePffBioFill";
 
@@ -29,6 +30,7 @@ interface RowState {
   eligible_thru_year: number | null;
   should_play: string;
   charting_decision: ChartingDecision;
+  focus_tag: FocusTag | null;
   charting_notes: string;
 }
 
@@ -43,6 +45,7 @@ function rowState(p: ProspectWithStats): RowState {
     eligible_thru_year: p.eligible_thru_year ?? null,
     should_play: p.should_play,
     charting_decision: p.charting_decision,
+    focus_tag: p.focus_tag ?? null,
     charting_notes: p.charting_notes,
   };
 }
@@ -60,6 +63,7 @@ function syncChanged(local: RowState, before: RowState, after: RowState): RowSta
     eligible_thru_year: pick("eligible_thru_year"),
     should_play: pick("should_play"),
     charting_decision: pick("charting_decision"),
+    focus_tag: pick("focus_tag"),
     charting_notes: pick("charting_notes"),
   };
 }
@@ -200,6 +204,18 @@ function RosterRow({ p, nflRoles, sizes, rank, onRankCommit }: RosterRowProps) {
       </td>
 
       <td className={tdShrink}>
+        <select className={sel} value={local.focus_tag ?? ""} aria-label={`Focus Tag for ${p.name}`}
+          onChange={(e) => {
+            const v = parseFocusTag(e.target.value);
+            setLocal((l) => ({ ...l, focus_tag: v }));
+            saveFields({ focus_tag: v });
+          }}>
+          <option value="">—</option>
+          {FOCUS_TAGS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+        </select>
+      </td>
+
+      <td className={tdShrink}>
         <input type="number" className={inpNum} size={4} aria-label={`Rank for ${p.name}`}
           value={rankEdit ?? (rank ?? "")}
           onFocus={() => setRankEdit(rank != null ? String(rank) : "")}
@@ -228,7 +244,7 @@ function RosterRow({ p, nflRoles, sizes, rank, onRankCommit }: RosterRowProps) {
   );
 }
 
-type SortKey = "name" | "draft_class_year" | "eligible_thru_year" | "personal_rank";
+type SortKey = "name" | "draft_class_year" | "eligible_thru_year" | "personal_rank" | "focus";
 
 interface Props {
   prospects: ProspectWithStats[];
@@ -373,6 +389,10 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
       if (sortKey === "name") { va = a.name; vb = b.name; }
       else if (sortKey === "draft_class_year") { va = a.draft_class_year; vb = b.draft_class_year; }
       else if (sortKey === "eligible_thru_year") { va = a.eligible_thru_year ?? 9999; vb = b.eligible_thru_year ?? 9999; }
+      else if (sortKey === "focus") {
+        va = focusSortValue({ focus_tag: a.focus_tag, personal_rank: rankFor(a) });
+        vb = focusSortValue({ focus_tag: b.focus_tag, personal_rank: rankFor(b) });
+      }
       else { va = rankFor(a) ?? 9999; vb = rankFor(b) ?? 9999; }
       if (typeof va === "string")
         return sortDir === "asc" ? va.localeCompare(vb as string) : (vb as string).localeCompare(va);
@@ -485,6 +505,15 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
                 </button>
               </th>
               <th className={thShrink} style={shrinkStyle}>Charting</th>
+              <th className={thShrink} style={shrinkStyle}>
+                <button
+                  onClick={() => toggleSort("focus")}
+                  className="text-slate-500 hover:text-white transition"
+                  title="Focus Tag: charting priority (first filled from your 2027 Scouting Board sheet; edit it here)"
+                >
+                  Focus{sortIndicator("focus")}
+                </button>
+              </th>
               <th className={thShrink} style={shrinkStyle}>
                 <button
                   onClick={() => toggleSort("personal_rank")}

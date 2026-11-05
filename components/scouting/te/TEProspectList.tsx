@@ -13,8 +13,10 @@ import { useRecruitIndex } from "../../../hooks/useRecruitIndex";
 import { lookupConference } from "../../../lib/scouting/schoolConferences";
 import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
 import RecruitStarBadge from "../RecruitStarBadge";
+import FocusTagChip from "../FocusTagChip";
+import { focusSortValue } from "../../../lib/scouting/focusTag";
 
-type SortKey = "personal_rank" | "name" | "school" | "draft_class_year";
+type SortKey = "personal_rank" | "focus" | "name" | "school" | "draft_class_year";
 
 function SortBtn({ label, k, sortKey, sortDir, onToggle }: {
   label: string; k: SortKey; sortKey: SortKey; sortDir: "asc" | "desc";
@@ -94,6 +96,7 @@ export default function TEProspectList({
       if (sortKey === "name") { va = a.name; vb = b.name; }
       else if (sortKey === "school") { va = a.school; vb = b.school; }
       else if (sortKey === "personal_rank") { va = a.personal_rank ?? 9999; vb = b.personal_rank ?? 9999; }
+      else if (sortKey === "focus") { va = focusSortValue(a); vb = focusSortValue(b); }
       else if (sortKey === "draft_class_year") { va = a.draft_class_year; vb = b.draft_class_year; }
       if (typeof va === "string")
         return sortDir === "asc" ? va.localeCompare(vb as string) : (vb as string).localeCompare(va);
@@ -165,6 +168,7 @@ export default function TEProspectList({
       <div className="flex flex-wrap gap-2 mb-4">
         <span className="text-xs text-slate-500 self-center">Sort:</span>
         <SortBtn label="Rank" k="personal_rank" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+        <SortBtn label="Focus" k="focus" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
         <SortBtn label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
         <SortBtn label="School" k="school" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
         <SortBtn label="Draft Yr" k="draft_class_year" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
@@ -224,8 +228,11 @@ export default function TEProspectList({
                     gap) and the stats wrap underneath; the stats used to squeeze it to an
                     initial. From sm up the row is one line, as before. */}
                 <span className="text-sm font-medium text-white min-w-0 truncate w-[calc(100%-1.375rem)] sm:w-auto">{p.name}</span>
+                {/* Focus Tag: beside the name from sm up; on phones it leads the stats line. */}
+                <FocusTagChip tag={p.focus_tag} className="hidden sm:inline-flex" />
                 <span className="text-xs text-slate-400 truncate hidden sm:block">{p.school}</span>
                 <div className="ml-[1.375rem] sm:ml-auto flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 min-w-0 sm:flex-shrink-0">
+                  <FocusTagChip tag={p.focus_tag} className="inline-flex sm:hidden" />
                   <span className="sm:w-20 flex justify-center empty:hidden sm:empty:flex">
                     <RecruitStarBadge recruit={matchProspect({ name: p.name, position: p.position, draft_class_year: p.draft_class_year })} />
                   </span>
