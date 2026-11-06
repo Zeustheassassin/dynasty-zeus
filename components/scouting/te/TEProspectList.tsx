@@ -15,8 +15,9 @@ import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
 import RecruitStarBadge from "../RecruitStarBadge";
 import FocusTagChip from "../FocusTagChip";
 import { focusSortValue } from "../../../lib/scouting/focusTag";
+import { watchSortValue } from "../../../lib/scouting/watchRank";
 
-type SortKey = "personal_rank" | "focus" | "name" | "school" | "draft_class_year";
+type SortKey = "personal_rank" | "focus" | "watch" | "name" | "school" | "draft_class_year";
 
 function SortBtn({ label, k, sortKey, sortDir, onToggle }: {
   label: string; k: SortKey; sortKey: SortKey; sortDir: "asc" | "desc";
@@ -97,6 +98,7 @@ export default function TEProspectList({
       else if (sortKey === "school") { va = a.school; vb = b.school; }
       else if (sortKey === "personal_rank") { va = a.personal_rank ?? 9999; vb = b.personal_rank ?? 9999; }
       else if (sortKey === "focus") { va = focusSortValue(a); vb = focusSortValue(b); }
+      else if (sortKey === "watch") { va = watchSortValue(a); vb = watchSortValue(b); }
       else if (sortKey === "draft_class_year") { va = a.draft_class_year; vb = b.draft_class_year; }
       if (typeof va === "string")
         return sortDir === "asc" ? va.localeCompare(vb as string) : (vb as string).localeCompare(va);
@@ -169,6 +171,7 @@ export default function TEProspectList({
         <span className="text-xs text-slate-500 self-center">Sort:</span>
         <SortBtn label="Rank" k="personal_rank" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
         <SortBtn label="Focus" k="focus" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
+        <SortBtn label="Watch" k="watch" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
         <SortBtn label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
         <SortBtn label="School" k="school" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />
         <SortBtn label="Draft Yr" k="draft_class_year" sortKey={sortKey} sortDir={sortDir} onToggle={toggleSort} />

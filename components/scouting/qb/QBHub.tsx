@@ -17,6 +17,7 @@ import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
 import RecruitStarBadge from "../RecruitStarBadge";
 import FocusTagChip from "../FocusTagChip";
 import { focusSortValue } from "../../../lib/scouting/focusTag";
+import { watchSortValue } from "../../../lib/scouting/watchRank";
 
 const QBChartingBoard  = dynamic(() => import("./QBChartingBoard"),   { ssr: false });
 const ProspectRosterSheet = dynamic(() => import("../ProspectRosterSheet"), { ssr: false });
@@ -47,7 +48,7 @@ export interface QBHubProps {
 }
 
 type HubView = "list" | "roster";
-type SortKey = "personal_rank" | "focus" | "name" | "school" | "draft_class_year";
+type SortKey = "personal_rank" | "focus" | "watch" | "name" | "school" | "draft_class_year";
 
 export default function QBHub({
   prospectsWithStats,
@@ -93,6 +94,7 @@ export default function QBHub({
       let av: string | number = 0, bv: string | number = 0;
       if (sortKey === "personal_rank") { av = a.personal_rank ?? 9999; bv = b.personal_rank ?? 9999; }
       else if (sortKey === "focus")    { av = focusSortValue(a); bv = focusSortValue(b); }
+      else if (sortKey === "watch")    { av = watchSortValue(a); bv = watchSortValue(b); }
       else if (sortKey === "name")     { av = a.name ?? ""; bv = b.name ?? ""; }
       else if (sortKey === "school")   { av = a.school ?? ""; bv = b.school ?? ""; }
       else if (sortKey === "draft_class_year") { av = a.draft_class_year ?? 9999; bv = b.draft_class_year ?? 9999; }
@@ -213,8 +215,8 @@ export default function QBHub({
           {/* Sort controls */}
           <div className="flex flex-wrap gap-2 mb-4">
             <span className="text-xs text-slate-500 self-center">Sort:</span>
-            {(["personal_rank", "focus", "name", "school", "draft_class_year"] as SortKey[]).map((k) => {
-              const labels: Record<SortKey, string> = { personal_rank: "Rank", focus: "Focus", name: "Name", school: "School", draft_class_year: "Draft Yr" };
+            {(["personal_rank", "focus", "watch", "name", "school", "draft_class_year"] as SortKey[]).map((k) => {
+              const labels: Record<SortKey, string> = { personal_rank: "Rank", focus: "Focus", watch: "Watch", name: "Name", school: "School", draft_class_year: "Draft Yr" };
               return (
                 <button key={k} onClick={() => toggleSort(k)}
                   className={`px-3 py-1 rounded text-xs font-medium transition ${

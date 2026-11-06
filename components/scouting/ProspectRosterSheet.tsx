@@ -7,6 +7,7 @@ import { reorderRanksWithinClass } from "../../lib/scouting/rankReorder";
 import { logger } from "../../lib/logger";
 import type { ProspectWithStats, ChartingDecision, FocusTag } from "../../lib/types";
 import { FOCUS_TAGS, focusSortValue, parseFocusTag } from "../../lib/scouting/focusTag";
+import { formatWatchScore, watchSortValue } from "../../lib/scouting/watchRank";
 import PffBioFillPanel from "./pff/PffBioFillPanel";
 import { usePffBioFill } from "./pff/usePffBioFill";
 
@@ -215,6 +216,11 @@ function RosterRow({ p, nflRoles, sizes, rank, onRankCommit }: RosterRowProps) {
         </select>
       </td>
 
+      {/* Watch Score: read only, copied from the sheet (re-imported on request). */}
+      <td className={`${tdShrink} text-right text-xs tabular-nums text-slate-300`}>
+        {formatWatchScore(p.watch_score)}
+      </td>
+
       <td className={tdShrink}>
         <input type="number" className={inpNum} size={4} aria-label={`Rank for ${p.name}`}
           value={rankEdit ?? (rank ?? "")}
@@ -244,7 +250,7 @@ function RosterRow({ p, nflRoles, sizes, rank, onRankCommit }: RosterRowProps) {
   );
 }
 
-type SortKey = "name" | "draft_class_year" | "eligible_thru_year" | "personal_rank" | "focus";
+type SortKey = "name" | "draft_class_year" | "eligible_thru_year" | "personal_rank" | "focus" | "watch";
 
 interface Props {
   prospects: ProspectWithStats[];
@@ -393,6 +399,7 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
         va = focusSortValue({ focus_tag: a.focus_tag, personal_rank: rankFor(a) });
         vb = focusSortValue({ focus_tag: b.focus_tag, personal_rank: rankFor(b) });
       }
+      else if (sortKey === "watch") { va = watchSortValue(a); vb = watchSortValue(b); }
       else { va = rankFor(a) ?? 9999; vb = rankFor(b) ?? 9999; }
       if (typeof va === "string")
         return sortDir === "asc" ? va.localeCompare(vb as string) : (vb as string).localeCompare(va);
@@ -512,6 +519,15 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
                   title="Focus Tag: charting priority (first filled from your 2027 Scouting Board sheet; edit it here)"
                 >
                   Focus{sortIndicator("focus")}
+                </button>
+              </th>
+              <th className={thShrink} style={shrinkStyle}>
+                <button
+                  onClick={() => toggleSort("watch")}
+                  className="text-slate-500 hover:text-white transition"
+                  title="Watch Score from your 2027 Scouting Board sheet. Sorts by its Watch Rank: highest score (watch first) at the top."
+                >
+                  Watch Score{sortIndicator("watch")}
                 </button>
               </th>
               <th className={thShrink} style={shrinkStyle}>

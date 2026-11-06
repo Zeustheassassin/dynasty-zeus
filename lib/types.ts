@@ -1142,6 +1142,12 @@ export interface Prospect {
    *  Optional: absent before the migration, and never sent on insert. Null =
    *  untagged. */
   focus_tag?: FocusTag | null;
+  /** Watch priority within the position, 1 = watch first (migration 085),
+   *  and the score behind it. Copied by a one-time import from the user's
+   *  2027 Scouting Board sheet; not edited in the app. Optional: absent
+   *  before the migration, and never sent on insert. Null = not on the sheet. */
+  watch_rank?: number | null;
+  watch_score?: number | null;
   draft_round: number | null;
   draft_pick: number | null;
   draft_team: string | null;
