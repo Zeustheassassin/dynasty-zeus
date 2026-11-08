@@ -23,6 +23,7 @@ import {
   fetchFantasyCalcValues,
   withFcValues,
   computeScoringMultipliers,
+  applyScoringMultipliers,
   DEFAULT_SCORING,
   getLeagueNumQbs,
   buildLeagueLineupStatus,
@@ -1139,6 +1140,16 @@ useEffect(() => {
   }
 }, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague, loadCalcValues, loadRedraftValues]);
 
+// The Rosters and Opp Rosters tabs show league-adjusted values and per-position ranks, both read
+// from calcFcValues — but nothing loaded it here, so opening either tab first showed raw superflex
+// values (no TE premium / pass-TD scaling) and every rank as "—" until another hub happened to
+// load it (found 2026-11-08 comparing against the shared /roster page, which loads it itself).
+useEffect(() => {
+  if (mainTab === "LEAGUES" && (leagueHubTab === "ROSTERS" || leagueHubTab === "OPP_ROSTERS") && selectedLeague?.league_id) {
+    loadCalcValues(getLeagueNumQbs(selectedLeague));
+  }
+}, [mainTab, leagueHubTab, selectedLeague?.league_id, selectedLeague, loadCalcValues]);
+
 useEffect(() => {
   if (mainTab === "LEAGUES" && leagueHubTab === "ACTIVITY" && selectedLeague?.league_id) {
     setActivityTransactions([]);
@@ -1555,14 +1566,7 @@ const saveSnapshotNow = async () => {
   const leagueAdjustedFcValues = useMemo((): Record<string, number> => {
     const scoring = selectedLeague?.scoring_settings;
     if (!scoring || Object.keys(calcFcValues).length === 0) return calcFcValues;
-    const multipliers = computeScoringMultipliers(scoring);
-    const adjusted: Record<string, number> = {};
-    for (const [id, value] of Object.entries(calcFcValues)) {
-      const pos = players[id]?.position ?? "";
-      const mult = multipliers[pos] ?? 1;
-      adjusted[id] = Math.round(value * mult);
-    }
-    return adjusted;
+    return applyScoringMultipliers(calcFcValues, computeScoringMultipliers(scoring), players);
   }, [selectedLeague?.scoring_settings, calcFcValues, players]);
 
   // ── Personal-ranking buy/sell signal → Trade Finder (Phase 2 swap) ───────
@@ -1601,14 +1605,7 @@ const saveSnapshotNow = async () => {
   const leagueAdjustedRedraftValues = useMemo((): Record<string, number> => {
     const scoring = selectedLeague?.scoring_settings;
     if (!scoring || Object.keys(redraftValues).length === 0) return redraftValues;
-    const multipliers = computeScoringMultipliers(scoring);
-    const adjusted: Record<string, number> = {};
-    for (const [id, value] of Object.entries(redraftValues)) {
-      const pos = players[id]?.position ?? "";
-      const mult = multipliers[pos] ?? 1;
-      adjusted[id] = Math.round(value * mult);
-    }
-    return adjusted;
+    return applyScoringMultipliers(redraftValues, computeScoringMultipliers(scoring), players);
   }, [selectedLeague?.scoring_settings, redraftValues, players]);
 
   // ── Projected rookies per roster for the season simulator ────────────────

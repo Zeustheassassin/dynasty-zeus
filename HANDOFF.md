@@ -3,7 +3,9 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-11-05, HEAD `887ff5e` (working tree) — **Watch Rank sort.** The user's 2027 Scouting Board sheet gained a formula-driven Watch Score and Watch Rank (1 = watch first within the position), and they wanted to sort by it when choosing whose games to watch. Migration [085](supabase/migrations/085_prospect_watch_rank.sql) adds nullable `prospects.watch_rank` + `watch_score`. A **Watch** sort sits on all four position lists, with no row label (the user asked for sort only). Prospect Data has a read-only, sortable **Watch Score** column, so the user can see the scores when moving high-score 2028/2029 players into 2027 by hand. Same one-time-import rule as the Focus Tag: 085 is applied and the import ran (389 prospects, read back with 0 mismatches). See "Watch Rank" in §11. 2798 tests, 196 files.*
+> *Last reviewed: 2026-11-08, HEAD `fd9fd28` (working tree) — **Shareable roster page.** The user wanted a link like Sleeper's `sleeper.com/roster/{league}/{roster}` to send a friend: no login, the full depth chart in value order (QB, RB, WR, TE, Picks) in the Rosters tab layout, but nothing personal (no Core/Neutral tags, no free agents, no scores). New public route [/roster/[leagueId]/[rosterId]](app/roster/[leagueId]/[rosterId]/page.tsx) and a **Share roster** button on League Hub → Rosters. Comparing it with the user's Rosters tab found a real bug: that tab never loaded the league-format values, so opened first it showed raw superflex numbers (no TE premium or pass-TD scaling) and every position rank as "—"; it loads them now. See "Shared roster page" in §5. No migration. 2811 tests, 197 files.*
+>
+> *Prior review: 2026-11-05, HEAD `887ff5e` (working tree; committed as `fd9fd28`) — **Watch Rank sort.** The user's 2027 Scouting Board sheet gained a formula-driven Watch Score and Watch Rank (1 = watch first within the position), and they wanted to sort by it when choosing whose games to watch. Migration [085](supabase/migrations/085_prospect_watch_rank.sql) adds nullable `prospects.watch_rank` + `watch_score`. A **Watch** sort sits on all four position lists, with no row label (the user asked for sort only). Prospect Data has a read-only, sortable **Watch Score** column, so the user can see the scores when moving high-score 2028/2029 players into 2027 by hand. Same one-time-import rule as the Focus Tag: 085 is applied and the import ran (389 prospects, read back with 0 mismatches). See "Watch Rank" in §11. 2798 tests, 196 files.*
 >
 > *Prior review: 2026-11-05, HEAD `541b71e` (working tree; committed as `a9d88ba`, notes `887ff5e`) — **Focus Tag on prospects.** The user keeps a "2027 Scouting Board" Google Sheet with a Focus Tag per player (Focus now / Monitor / Low priority / Off 2027 board) and wanted it on their prospects to see who to chart first: a one-time import, never a live link to the sheet. Migration [084](supabase/migrations/084_prospect_focus_tag.sql) adds nullable `prospects.focus_tag`; each position list shows a chip and a Focus sort, and Prospect Data has an editable Focus column. 126 of the sheet's 145 players matched a prospect (13 of them in the user's 2028/2029 classes, tagged at the user's request with their class unchanged); 19 matched nobody and stay untagged. 084 is applied and the import ran (126 tagged, read back). See "Focus Tag" in §11. 2794 tests, 195 files.*
 >
@@ -672,7 +674,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (2789 tests, 194 files)](#20-test-suite-scope-2789-tests-194-files)
+20. [Test suite scope (2811 tests, 197 files)](#20-test-suite-scope-2811-tests-197-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -875,6 +877,18 @@ League Hub → Rosters → **Roster Crunch** ([RosterCrunchTab.tsx](components/L
 - **Picks:** `ownedPicksByRound` from `LeagueOverviewEntry.tradedPicks`, not `entry.picks`: the overview pool stops at 4 rounds, and 5 of the user's leagues draft 5. The season is `pickSeasonWindow(drafts)[0]`, the same window every pick pool uses.
 - **Danger is derived, never stored.** `withDangerTags` lays `DANGER` over untagged, Core and Pricey players on the list, in the map `useAppState` hands every tag reader; Shopping and Offload stay, since they already say sell. Nothing writes it to `league_player_tags`, so the real tag is back as soon as the player is off the list. The list is compared as a JSON string so the 2-minute overview poll doesn't re-run Trade Finder unless someone moved on or off. The bare player-id key only exists for the user's own roster, so opponents' `opponentAssetKey` tags are untouched. A User Scout view passes its own empty tag map and gets none of this.
 - **Known limit:** Danger lifts the Core block, but `LOW_VALUE_FLOOR` (700) still keeps a sub-700 player out of Trade Finder's pool. On 2026-11-03 that was 304 of 344 Danger players. The user decided to leave it (11/03): the point of Danger is that a listed player no longer reads Core, not that sub-700 players get offered in trades.
+
+### Shared roster page (2026-11-08)
+
+`/roster/{leagueId}/{rosterId}` — same shape as Sleeper's roster links — is the one page outside the logged-in single-page app. Anyone with the link sees one team read-only: QB/RB/WR/TE each sorted by value (not starter-first like the Rosters tab), the Starter/Bench/Taxi/IR label under each name, position rank "of N", total value and average age, then the picks column. Nothing personal: no dispositions, no free agents, no records or points (user, 11/08: "this is really just to share what my roster looks like").
+
+- **Files:** [page.tsx](app/roster/[leagueId]/[rosterId]/page.tsx) (server: id validation + link-preview title), [PublicRosterView.tsx](components/PublicRosterView.tsx) (client: loads + renders), [publicRoster.ts](lib/helpers/publicRoster.ts) (pure view model, tested in `__tests__/lib/helpers/publicRoster.test.ts`), [ShareLinkButton.tsx](components/shared/ShareLinkButton.tsx).
+- **Loading:** client-side through the same public proxies the app uses — `sleeperApi` (league, rosters, users, traded picks, drafts), `/api/players`, `getFcValuesRaw(numQbs)` — so it adds no new Sleeper or FantasyCalc path and draws on the same budgets and caches. None of those routes need a login. The roster can trail Sleeper by the rosters proxy window (5 min), same as the app.
+- **Values** are the Rosters tab's: FantasyCalc dynasty for the league's QB format × `computeScoringMultipliers`, via the shared `applyScoringMultipliers` (scoring.ts — useAppState and the sim cron use it too). Ranks come from `getLeaguePositionalBaseline`, the same baseline as the Roster Direction card.
+- **Picks:** `buildLeaguePickPool(…, "perLeague")` + `sortOwnerPicks`. Acquired picks read "via {original owner}", the team's own read "Own". A current-season pick shows its slot ("1.04") only when the original owner is in the draft's `draft_order`; otherwise "1st", because perLeague mode fills a roster-id slot before the order is set and a friend would read it as real.
+- **Link preview:** `generateMetadata` makes the title "{team} · {league}" from three Data-cached Sleeper calls (`fetchSleeperJson`, which takes a budget slot only on a miss). Any failure falls back to a generic title. The page is `noindex`.
+- **Bad links:** an unknown league or roster shows "Roster not found". A malformed id calls `notFound()`, which serves the 404 page with HTTP 200 (the root `loading.tsx` makes every page stream, and Next can't change the status once streaming starts — see the notFound docs).
+- **Share button:** on a touch device it opens the phone's share sheet; on a desktop it copies the link ("Link copied"), with a prompt fallback if the clipboard is blocked. In the User Scout view it shares the scouted user's roster, which is public on Sleeper anyway.
 
 ## 6. Identity & Auth
 
@@ -1340,6 +1354,8 @@ Raw FantasyCalc values assume a fixed baseline ([`FC_BASELINE_SCORING`](lib/help
 In [useAppState](app/hooks/useAppState.ts#L1268), these multipliers produce:
 - `leagueAdjustedFcValues` — raw `calcFcValues` scaled per position (falls back to raw `calcFcValues` when no league is selected).
 - `leagueAdjustedRedraftValues` — the same multipliers applied to raw `redraftValues`.
+
+Both go through `applyScoringMultipliers` (scoring.ts), shared with the sim cron and the shared roster page so the numbers can't drift apart. League Hub's Rosters and Opp Rosters tabs trigger `loadCalcValues` themselves (2026-11-08); before, opened first they showed raw superflex values and "—" ranks until another hub loaded them.
 
 These adjusted maps are what TradeHub, LeagueHub, the Direction engine, and the simulator consume. Absolute dynasty rankings in DataHub/DraftHub deliberately use **raw** `calcFcValues` instead, so a league's scoring quirks don't distort the universal board.
 
@@ -2801,7 +2817,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (2789 tests, 194 files)
+## 20. Test suite scope (2811 tests, 197 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering**. There are no e2e tests. A handful of narrow component-render tests (via `@testing-library/react`) live under [__tests__/components/](__tests__/components/), each pinning one piece of UI behavior (e.g. the Injury Report panels, the Analysis min filters, the Big Board's Above Exp columns).
 

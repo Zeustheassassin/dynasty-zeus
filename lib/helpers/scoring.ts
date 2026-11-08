@@ -213,6 +213,23 @@ export function computeScoringMultipliers(
   };
 }
 
+/** Raw FantasyCalc values (Sleeper ID -> value) scaled by a league's per-position multipliers and
+ *  rounded — the "league-adjusted" dynasty values the app shows everywhere a league is selected
+ *  (useAppState), the weekly sim cron, and the public shared-roster page. A player the map has no
+ *  position for keeps his raw value (multiplier 1). */
+export function applyScoringMultipliers(
+  values: Record<string, number>,
+  multipliers: Record<string, number>,
+  players: Record<string, { position?: string } | undefined>
+): Record<string, number> {
+  const adjusted: Record<string, number> = {};
+  for (const [id, value] of Object.entries(values)) {
+    const pos = players[id]?.position ?? "";
+    adjusted[id] = Math.round(value * (multipliers[pos] ?? 1));
+  }
+  return adjusted;
+}
+
 /** Returns scoring keys that deviate from STANDARD_SCORING. */
 export const getNonStandardRules = (scoring: Record<string, number>) => {
   const changes: Array<{ key: string; value: number }> = [];

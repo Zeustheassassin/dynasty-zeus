@@ -49,7 +49,7 @@ import { safeFetch, withConcurrency, createPacer } from "../../../../lib/sleeper
 import { getFcValues, type FcRawEntry } from "../../../../lib/server/fcValues";
 import {
   CURRENT_YEAR, BASE_YEAR,
-  computeScoringMultipliers, computeLeagueFpts,
+  computeScoringMultipliers, applyScoringMultipliers, computeLeagueFpts,
   getLeagueNumQbs, normalizeRookieName, DEFAULT_SCORING, isDynastyLeague,
   buildLeaguePickPool, isValidNflState,
 } from "../../../../lib/helpers";
@@ -190,20 +190,6 @@ function parseFcRawEntries(raw: FcRawEntry[]): FcValueMap {
 async function loadFcMap(numQbs: number, isDynasty: boolean): Promise<FcValueMap | null> {
   const result = await getFcValues(numQbs === 1 ? 1 : 2, isDynasty);
   return result ? parseFcRawEntries(result.data) : null;
-}
-
-function applyMultipliers(
-  values: Record<string, number>,
-  multipliers: Record<string, number>,
-  players: Record<string, SimPlayer>
-): Record<string, number> {
-  const adjusted: Record<string, number> = {};
-  for (const [id, value] of Object.entries(values)) {
-    const pos = players[id]?.position ?? "";
-    const mult = multipliers[pos] ?? 1;
-    adjusted[id] = Math.round(value * mult);
-  }
-  return adjusted;
 }
 
 // ── Sleeper-only projections (mirrors hooks/useProjections.ts's Sleeper
@@ -694,8 +680,8 @@ export async function GET(req: NextRequest): Promise<Response> {
 
       const scoringSettings = league.scoring_settings ?? DEFAULT_SCORING;
       const multipliers = computeScoringMultipliers(scoringSettings);
-      const leagueAdjustedFcValues = applyMultipliers(fcDynasty.bySleeperId, multipliers, players);
-      const leagueAdjustedRedraftValues = applyMultipliers(fcRedraft.bySleeperId, multipliers, players);
+      const leagueAdjustedFcValues = applyScoringMultipliers(fcDynasty.bySleeperId, multipliers, players);
+      const leagueAdjustedRedraftValues = applyScoringMultipliers(fcRedraft.bySleeperId, multipliers, players);
 
       const projectionData = buildProjectionRows(rawProjItems, projIsSeasonMode, scoringSettings, players);
       const projectionWeek = projIsSeasonMode ? 0 : currentWeek;

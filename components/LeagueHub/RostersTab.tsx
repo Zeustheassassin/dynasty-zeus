@@ -15,6 +15,7 @@ import { useValues } from "../../lib/ValuesContext";
 import { useMyRoster } from "../../lib/RosterContext";
 import { MY_DISPOSITIONS, pickDispositionKey } from "../../lib/helpers/dispositions";
 import { DispositionPicker } from "../shared/DispositionPicker";
+import { ShareLinkButton } from "../shared/ShareLinkButton";
 import { buildConsensusOrder, reconcilePersonalOrdering } from "../../lib/helpers/personalRankings";
 import type { SleeperLeague, SleeperUser, SleeperTradedPick, SleeperPlayer, AssetDisposition, LeagueAssetDispositions } from "../../lib/types";
 
@@ -163,10 +164,18 @@ function RostersTab({
       {selectedLeague && roster && (
         <>
           <button onClick={() => setSelectedLeague(null)} className="mb-2 text-sm text-slate-400">← Back</button>
-          <div className="mb-4">
-            <h2 className="text-lg font-bold">{selectedLeague.name}</h2>
-            <div className="text-xs text-slate-400">{roster.settings?.team_name || "Your Team"}</div>
-            <div className="text-xs text-blue-400 mt-1">{getLineupSettings(selectedLeague)}</div>
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold">{selectedLeague.name}</h2>
+              <div className="text-xs text-slate-400">{roster.settings?.team_name || "Your Team"}</div>
+              <div className="text-xs text-blue-400 mt-1">{getLineupSettings(selectedLeague)}</div>
+            </div>
+            {/* Public read-only page (no tags, no free agents) a friend can open without logging in. */}
+            <ShareLinkButton
+              path={`/roster/${selectedLeague.league_id}/${roster.roster_id}`}
+              title={`${selectedLeague.name} roster`}
+              label="Share roster"
+            />
           </div>
           {dir && (
             <div className="mb-3 bg-slate-900 border border-slate-800 rounded-xl p-3">

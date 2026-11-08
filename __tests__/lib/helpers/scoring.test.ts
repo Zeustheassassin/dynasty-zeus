@@ -5,6 +5,7 @@ import {
   FC_BASELINE_SCORING,
   computeLeagueFpts,
   computeScoringMultipliers,
+  applyScoringMultipliers,
   getNonStandardRules,
   formatRule,
   groupRules,
@@ -190,6 +191,18 @@ describe("computeScoringMultipliers", () => {
   it("returns QB, WR, RB, TE keys", () => {
     const result = computeScoringMultipliers(FC_BASELINE_SCORING);
     expect(Object.keys(result).sort()).toEqual(["QB", "RB", "TE", "WR"].sort());
+  });
+});
+
+describe("applyScoringMultipliers", () => {
+  it("scales each value by its player's position multiplier and rounds", () => {
+    const players = { a: { position: "TE" }, b: { position: "WR" } };
+    expect(applyScoringMultipliers({ a: 1000, b: 999 }, { TE: 1.1058, WR: 0.5 }, players)).toEqual({ a: 1106, b: 500 });
+  });
+
+  it("keeps the raw value for a player with no position or no multiplier", () => {
+    const players = { k: { position: "K" } };
+    expect(applyScoringMultipliers({ k: 40, missing: 70 }, { QB: 1.2 }, players)).toEqual({ k: 40, missing: 70 });
   });
 });
 
