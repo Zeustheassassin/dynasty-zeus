@@ -3,7 +3,9 @@
 > **Audience:** a developer who has just been handed the keys and has never seen this project.
 > **Goal:** explain what the app is, how the code is structured, how data flows, and how every major subsystem actually works — in enough depth to debug and extend it on day one.
 >
-> *Last reviewed: 2026-11-08, HEAD `fd9fd28` (working tree) — **Shareable roster page.** The user wanted a link like Sleeper's `sleeper.com/roster/{league}/{roster}` to send a friend: no login, the full depth chart in value order (QB, RB, WR, TE, Picks) in the Rosters tab layout, but nothing personal (no Core/Neutral tags, no free agents, no scores). New public route [/roster/[leagueId]/[rosterId]](app/roster/[leagueId]/[rosterId]/page.tsx) and a **Share roster** button on League Hub → Rosters. Comparing it with the user's Rosters tab found a real bug: that tab never loaded the league-format values, so opened first it showed raw superflex numbers (no TE premium or pass-TD scaling) and every position rank as "—"; it loads them now. See "Shared roster page" in §5. No migration. 2811 tests, 197 files.*
+> *Last reviewed: 2026-11-08, HEAD `146f720` (working tree) — **Invite-only sign-up.** The user is sharing roster links with friends and wanted new accounts locked to people they approve, to keep the app personal and its costs from growing. Create Account now asks for an invite code, and [/api/signup](app/api/signup/route.ts) checks it against `SIGNUP_INVITE_CODE` (Vercel env var the user sets; unset = closed) before creating the user with the service role. The real lock is Supabase's "Allow new users to sign up" switch, which has to be OFF so the browser's anon key can't call sign-up directly — an owner step, see §23. Existing accounts and their data are untouched (user, 11/08: "this will apply to new accounts only"). See "Invite-only sign-up" in §6. No migration. 2825 tests, 198 files.*
+>
+> *Prior review: 2026-11-08, HEAD `fd9fd28` (working tree; committed as `146f720`) — **Shareable roster page.** The user wanted a link like Sleeper's `sleeper.com/roster/{league}/{roster}` to send a friend: no login, the full depth chart in value order (QB, RB, WR, TE, Picks) in the Rosters tab layout, but nothing personal (no Core/Neutral tags, no free agents, no scores). New public route [/roster/[leagueId]/[rosterId]](app/roster/[leagueId]/[rosterId]/page.tsx) and a **Share roster** button on League Hub → Rosters. Comparing it with the user's Rosters tab found a real bug: that tab never loaded the league-format values, so opened first it showed raw superflex numbers (no TE premium or pass-TD scaling) and every position rank as "—"; it loads them now. See "Shared roster page" in §5. No migration. 2811 tests, 197 files.*
 >
 > *Prior review: 2026-11-05, HEAD `887ff5e` (working tree; committed as `fd9fd28`) — **Watch Rank sort.** The user's 2027 Scouting Board sheet gained a formula-driven Watch Score and Watch Rank (1 = watch first within the position), and they wanted to sort by it when choosing whose games to watch. Migration [085](supabase/migrations/085_prospect_watch_rank.sql) adds nullable `prospects.watch_rank` + `watch_score`. A **Watch** sort sits on all four position lists, with no row label (the user asked for sort only). Prospect Data has a read-only, sortable **Watch Score** column, so the user can see the scores when moving high-score 2028/2029 players into 2027 by hand. Same one-time-import rule as the Focus Tag: 085 is applied and the import ran (389 prospects, read back with 0 mismatches). See "Watch Rank" in §11. 2798 tests, 196 files.*
 >
@@ -674,7 +676,7 @@
 17. [Dev workflow: build, lint, test](#17-dev-workflow-build-lint-test)
 18. [CI pipeline (GitHub Actions)](#18-ci-pipeline-github-actions)
 19. [ESLint & TypeScript rules that bite](#19-eslint--typescript-rules-that-bite)
-20. [Test suite scope (2811 tests, 197 files)](#20-test-suite-scope-2811-tests-197-files)
+20. [Test suite scope (2825 tests, 198 files)](#20-test-suite-scope-2825-tests-198-files)
 21. [Common failure modes & where to look](#21-common-failure-modes--where-to-look)
 22. [Things intentionally NOT done (and why)](#22-things-intentionally-not-done-and-why)
 23. [Known open items & time bombs for the next owner](#23-known-open-items--time-bombs-for-the-next-owner)
@@ -918,7 +920,7 @@ The anon key is safe to ship to the browser because **RLS** does the real access
 Session handling lives in [app/hooks/useAuthState.ts](app/hooks/useAuthState.ts):
 - On mount it calls `supabase.auth.getUser()` to hydrate the current session, then subscribes via `supabase.auth.onAuthStateChange` and stores the user in React state (`supabaseUser`). Updates go through `sameAuthUser` (id + updated_at + email) so auth-js re-emitting SIGNED_IN on tab refocus keeps the same object reference and does not re-run the ~15 effects keyed on `[supabaseUser]`. The subscription is cleaned up on unmount ([useAuthState.ts:26](app/hooks/useAuthState.ts#L26)).
 - `signIn()` ([useAuthState.ts:68](app/hooks/useAuthState.ts#L68)) wraps `signInWithPassword` in a 10-second timeout race so a dead network/Supabase project surfaces a real error instead of hanging. It deliberately **does not** set `supabaseUser` itself — it lets `onAuthStateChange` fire and update state, avoiding a race with sign-out ([useAuthState.ts:97](app/hooks/useAuthState.ts#L97)).
-- `signUp()` uses `supabase.auth.signUp` (email confirmation expected), and `resetPassword()` uses `resetPasswordForEmail` with `redirectTo` set to the app origin.
+- `signUp(inviteCode)` posts to `/api/signup` (invite-only — see below) and then signs in, and `resetPassword()` uses `resetPasswordForEmail` with `redirectTo` set to the app origin.
 - The last-used email is remembered in `localStorage["lastLoginEmail"]` for convenience; the password is never persisted.
 
 The login UI is [app/components/AuthSection.tsx](app/components/AuthSection.tsx): a fixed full-screen modal (`z-index: 9999`) that renders only when `supabaseUser` is `null` (`if (supabaseUser) return null;` at [AuthSection.tsx:34](app/components/AuthSection.tsx#L34)) — i.e. it is the gate that blocks the whole app until you log in. It's a pure presentational component; all logic is passed in from `useAuthState`.
@@ -926,6 +928,17 @@ The login UI is [app/components/AuthSection.tsx](app/components/AuthSection.tsx)
 The authenticated user is then shared app-wide via [lib/AuthContext.tsx](lib/AuthContext.tsx), a small memoized context exposing `{ supabaseUser, isLoggedIn }`. It is mounted in [app/providers/AppProviders.tsx](app/providers/AppProviders.tsx#L50) (`<AuthProvider supabaseUser={supabaseUser}>`), and consumers read it with `useAuth()`. **Important:** this context carries *only* the Supabase identity — it knows nothing about Sleeper.
 
 `signOut()` lives in [useAppState.ts](app/hooks/useAppState.ts#L480) (not in `useAuthState`) because logging out has to tear down far more than auth state: it clears notes, league management data, watchlists, dashboard alerts, several `localStorage` keys, **and calls `disconnectSleeper()`** so the app returns fully to the logged-out, unconnected state.
+
+### Invite-only sign-up (2026-11-08)
+
+The app is personal, and every account adds cost (the crons walk every registered user's leagues), so new accounts need the owner's invite code. Existing accounts were never touched: sign-in, password reset and all their data work as before.
+
+- **Two locks, both needed.** (1) Supabase → Authentication → "Allow new users to sign up" is **off**, so `supabase.auth.signUp` from the browser (the anon key is public) is refused. Check it with `GET {SUPABASE_URL}/auth/v1/settings` (anon key header): `disable_signup` must be `true`. (2) [/api/signup](app/api/signup/route.ts) is then the only way in: it checks the code with [inviteCode.ts](lib/server/inviteCode.ts) (sha256 + `timingSafeEqual`, trimmed, case-sensitive) and calls `auth.admin.createUser`, which the switch doesn't block.
+- **The code** is the Vercel env var `SIGNUP_INVITE_CODE` (Production). Unset or blank = sign-ups closed ("New accounts are closed right now."). Changing it means editing the var and redeploying. Make it long: the route's 5/min/IP limit is per warm instance in production (lib/rateLimit.ts), so it slows guessing but doesn't stop it.
+- **Order of checks:** rate limit → code configured → code matches → email/password shape → service role present → `createUser`. The code comes first, so without it the route reveals nothing about which emails exist. Supabase's own 4xx messages (email already registered, weak password) are passed through; anything else is a generic 502.
+- **No confirmation email.** Accounts are created with `email_confirm: true` and the browser signs straight in. That matches the project as it was: `mailer_autoconfirm` was already on, so the old "check your email" message after sign-up never applied.
+- **UI:** [AuthSection.tsx](app/components/AuthSection.tsx) — Create Account switches the modal to create mode (Invite code field, Create Account / Back to Sign In); the submit stays disabled until a code is typed.
+- **The owner can still add someone by hand** in the Supabase dashboard (Authentication → Users → Add user), which bypasses both locks.
 
 ### Connecting a Sleeper user
 
@@ -2817,7 +2830,7 @@ The flat config in [eslint.config.mjs](eslint.config.mjs) is minimal: it just sp
 
 Beyond ESLint, TypeScript is strict at the `tsc` step. `tsconfig.json` enables `strict`, plus `noUnusedLocals` and `noUnusedParameters` — so an unused import, variable, or function parameter is a **build/type-check failure**, not a warning. This is the single most common reason a local edit that "looks fine" red-X's in CI.
 
-## 20. Test suite scope (2811 tests, 197 files)
+## 20. Test suite scope (2825 tests, 198 files)
 
 Run via PowerShell. The suite is [Vitest](vitest.config.mts) in a `jsdom` environment, globbing `**/__tests__/**/*.{ts,tsx}` and `**/*.{test,spec}.{ts,tsx}`. It deliberately covers **pure logic and server routes, not UI rendering**. There are no e2e tests. A handful of narrow component-render tests (via `@testing-library/react`) live under [__tests__/components/](__tests__/components/), each pinning one piece of UI behavior (e.g. the Injury Report panels, the Analysis min filters, the Big Board's Above Exp columns).
 
@@ -2901,6 +2914,10 @@ The remaining files cover helpers (math, scoring, lineup, lineup availability an
 - **No leaguemate-trade alerts feed.** A prior cron wrote one `alerts` row per league-wide trade; it was pure noise (the same trades already appear under the Trades tab) and was removed. See [memory: project_leaguemate_alerts_server_side_april28.md](C:/Users/bstefely.NPCSEALANTS/.claude/projects/c--Users-bstefely-NPCSEALANTS-dynastyzeus-app/memory/project_leaguemate_alerts_server_side_april28.md) for the history.
 
 ## 23. Known open items & time bombs for the next owner
+
+### Invite-only sign-up needs two owner settings (2026-11-08)
+
+Until both are done, the lock is incomplete: (1) Supabase → Authentication → turn **off** "Allow new users to sign up" — while it's on, anyone can still create an account by calling Supabase directly with the public anon key; (2) Vercel → Settings → Environment Variables → add `SIGNUP_INVITE_CODE` (Production) and redeploy — while it's unset, the app's Create Account says sign-ups are closed. Verify (1) with `/auth/v1/settings` → `disable_signup: true`. See "Invite-only sign-up" in §6.
 
 ### A contender's board can run out of time
 

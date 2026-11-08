@@ -59,19 +59,36 @@ export function useAuthState() {
     else setNotes(data ?? []);
   }, [supabaseUser]);
 
-  const signUp = async () => {
+  // Invite-only: Supabase's public sign-up is off, so accounts are made by /api/signup, which checks
+  // the owner's invite code server-side. The account comes back already confirmed (the project never
+  // required email confirmation), so this signs straight in.
+  const signUp = async (inviteCode: string) => {
     setSupabaseError("");
     setSupabaseMessage("");
     setLoginLoading(true);
     try {
       const email = loginEmail.trim();
-      const { error } = await supabase.auth.signUp({ email, password: loginPassword });
-      if (error) {
-        setSupabaseError(error.message);
+      const res = await fetch("/api/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password: loginPassword, inviteCode }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setSupabaseError(body?.error || "Couldn't create the account. Try again in a minute.");
         return;
       }
       setLocalStorageItem(LAST_LOGIN_EMAIL_KEY, email);
-      setSupabaseMessage("Account created. Check your email for a confirmation link, then sign in.");
+      const { error } = await supabase.auth.signInWithPassword({ email, password: loginPassword });
+      if (error) {
+        setSupabaseMessage("Account created. Sign in with your email and password.");
+        return;
+      }
+      // onAuthStateChange sets supabaseUser, which closes the sign-in screen.
+      setShowLoginPassword(false);
+      setLoginPassword("");
+    } catch {
+      setSupabaseError("Couldn't reach the server. Check your connection and try again.");
     } finally {
       setLoginLoading(false);
     }

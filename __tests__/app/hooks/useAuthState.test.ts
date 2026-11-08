@@ -6,11 +6,13 @@ import type { User } from "@supabase/auth-js";
 type AuthCb = (event: string, session: { user: User } | null) => void;
 let authCb: AuthCb | null = null;
 const getUser = vi.fn();
+const signInWithPassword = vi.fn();
 
 vi.mock("@/lib/supabaseclient", () => ({
   supabase: {
     auth: {
       getUser: () => getUser(),
+      signInWithPassword: (creds: unknown) => signInWithPassword(creds),
       onAuthStateChange: (cb: AuthCb) => {
         authCb = cb;
         return { data: { subscription: { unsubscribe: vi.fn() } } };
@@ -69,5 +71,51 @@ describe("useAuthState supabaseUser identity", () => {
 
     act(() => authCb!("SIGNED_OUT", null));
     expect(result.current.supabaseUser).toBeNull();
+  });
+});
+
+describe("useAuthState signUp (invite-only)", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    signInWithPassword.mockReset();
+    signInWithPassword.mockResolvedValue({ data: { user: mkUser() }, error: null });
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  const setUp = async () => {
+    const hook = renderHook(() => useAuthState());
+    await waitFor(() => expect(authCb).not.toBeNull());
+    act(() => { hook.result.current.setLoginEmail(" pal@example.com "); hook.result.current.setLoginPassword("hunter22"); });
+    return hook;
+  };
+
+  it("sends email, password and code to /api/signup, then signs in", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const { result } = await setUp();
+    await act(() => result.current.signUp("the-code"));
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/signup", expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ email: "pal@example.com", password: "hunter22", inviteCode: "the-code" });
+    expect(signInWithPassword).toHaveBeenCalledWith({ email: "pal@example.com", password: "hunter22" });
+    expect(result.current.supabaseError).toBe("");
+    expect(result.current.loginPassword).toBe("");
+  });
+
+  it("shows the server's error and does not sign in", async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: "That invite code isn't right." }), { status: 403 }));
+    const { result } = await setUp();
+    await act(() => result.current.signUp("wrong"));
+
+    expect(result.current.supabaseError).toBe("That invite code isn't right.");
+    expect(signInWithPassword).not.toHaveBeenCalled();
+    expect(result.current.loginLoading).toBe(false);
+  });
+
+  it("reports a network failure", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    const { result } = await setUp();
+    await act(() => result.current.signUp("the-code"));
+    expect(result.current.supabaseError).toMatch(/Couldn't reach the server/);
   });
 });
