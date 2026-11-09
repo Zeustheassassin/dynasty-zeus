@@ -471,8 +471,8 @@ export default function ScoutingHub() {
       buildProspectsWithStats(prospects, routeStatsRows, gameRouteCells ?? [], games, {
         qbThrowsByProspect,
         teRoutesByProspect,
-      }, wrModel, gameAlignment, routeTagCells),
-    [prospects, routeStatsRows, gameRouteCells, games, qbThrowsByProspect, teRoutesByProspect, wrModel, gameAlignment, routeTagCells],
+      }, wrModel, gameAlignment, routeTagCells, pffTotals),
+    [prospects, routeStatsRows, gameRouteCells, games, qbThrowsByProspect, teRoutesByProspect, wrModel, gameAlignment, routeTagCells, pffTotals],
   );
 
   async function handleAddProspect(data: Omit<Prospect, "id" | "user_id" | "created_at" | "updated_at">) {

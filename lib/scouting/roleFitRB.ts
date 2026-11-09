@@ -62,8 +62,8 @@ import { computeRBRoleSlices } from "./aboveExpected";
 import { parseHeightInches } from "./prospectAge";
 import { traitAverages, type TraitAverage } from "./traits";
 import {
-  buildRoleFit, contrastFeature, shrinkAE, signed, skillFeature, usageFeature, RUN_SIDE_GAP, RUN_SIDE_MIN_RUNS,
-  type AESliceValue, type BucketRecipe, type Feature, type FeatureSet, type RoleFit, type RoleTag,
+  buildRoleFit, contrastFeature, rateFeature, shrinkAE, signed, skillFeature, usageFeature, NO_RATE, RUN_SIDE_GAP, RUN_SIDE_MIN_RUNS,
+  type AESliceValue, type BucketRecipe, type Feature, type FeatureSet, type Rate, type RoleFit, type RoleTag,
 } from "./roleFit";
 
 // Fewer known runs than this: no bucket.
@@ -137,10 +137,8 @@ const RB_SLICES = {
 };
 type RBSliceKey = keyof typeof RB_SLICES;
 
-// A rate: hits over tries.
-interface Rate { hits: number; n: number }
+// A rate: hits over tries (Rate, rateFeature: roleFit.ts).
 const rateOf = (plays: RBPlay[], pred: (pl: RBPlay) => boolean): Rate => ({ hits: plays.filter(pred).length, n: plays.length });
-const pctOf = (r: Rate) => (r.n > 0 ? (r.hits / r.n) * 100 : null);
 
 // The plays each rate counts over, and what counts as a hit.
 const routesOf = (plays: RBPlay[]) => plays.filter((pl) => pl.run_type === "route");
@@ -158,18 +156,6 @@ const RATES = {
 };
 type RateKey = keyof typeof RATES;
 
-/** His rate minus the league's, as a skill feature. `perUnit` shows a count per rep (missed tackles can be 2+ on one carry) instead of a %; a string names it (e.g. " yds after contact per carry"). */
-function rateFeature(label: string, his: Rate, league: Rate, prior: number, scale: number, unit: string, lowerIsBetter = false, perUnit: boolean | string = false): Feature {
-  const h = pctOf(his), l = pctOf(league);
-  const diff = h != null && l != null ? (lowerIsBetter ? l - h : h - l) : null;
-  const f = skillFeature(label, diff, his.n, prior, scale, unit);
-  if (h == null || l == null) return f;
-  const show = (v: number) => (perUnit ? (v / 100).toFixed(2) : `${v.toFixed(0)}%`);
-  const per = typeof perUnit === "string" ? perUnit : perUnit ? " per carry" : "";
-  return { ...f, display: `${show(h)} vs ${show(l)} league${per} on ${his.n} ${unit}` };
-}
-
-const NO_RATE: Rate = { hits: 0, n: 0 };
 
 // A bell-cow's build: weight ramped from BUILD_LB[0] (0) to BUILD_LB[1] (1).
 // The user's call (2026-10-02): good size is part of what makes a workhorse,

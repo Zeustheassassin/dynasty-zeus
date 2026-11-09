@@ -717,22 +717,22 @@ describe("BigBoard WR alignment", () => {
 describe("BigBoard Role column", () => {
   const match = (role: RoleFit["best"], pct: number) => ({ role, pct, sizeDrop: 0, sizeNote: null, drivers: [], proven: true });
   const FIT: RoleFit = {
-    pos: "WR", best: "x", also: ["y"], versatile: true, usedAs: "x", confidence: "high",
+    pos: "WR", best: "x", also: ["z"], versatile: true, usedAs: "x", confidence: "high",
     sample: { n: 240, unit: "routes" }, skillOnly: false, features: {},
-    matches: [match("x", 82), match("y", 79), match("slot", 55), match("gadget", 40)],
+    matches: [match("x", 82), match("z", 79), match("slot", 55), match("gadget", 40)],
   };
 
   it("shows the best-case role with V for Versatile, every role's match in the tooltip, and — without one", () => {
     renderBoard([prospect("wr1", "Wide One", "WR", 1, { role_fit: FIT }), prospect("rb1", "Running One", "RB", 2)]);
     const td = within(rowFor("Wide One")).getAllByRole("cell")[headerLabels().indexOf("Role")];
-    expect(td.textContent).toBe("X / YV");
-    expect(td.getAttribute("title")).toContain("Best case: X, equally a Y");
-    expect(td.getAttribute("title")).toContain("X 82% · Y 79% · Slot 55% · Gadget 40%");
+    expect(td.textContent).toBe("X / ZV");
+    expect(td.getAttribute("title")).toContain("Best case: X, equally a Z");
+    expect(td.getAttribute("title")).toContain("X 82% · Z 79% · Slot 55% · Gadget 40%");
     expect(cell("Running One", "Role")).toBe("—");
   });
 
   it("sorts by role, players without one sinking", () => {
-    const slot: RoleFit = { ...FIT, best: "slot", also: [], matches: [match("x", 40), match("y", 50), match("slot", 80), match("gadget", 60)] };
+    const slot: RoleFit = { ...FIT, best: "slot", also: [], matches: [match("x", 40), match("z", 50), match("slot", 80), match("gadget", 60)] };
     renderBoard([
       prospect("a", "No Role", "RB", 1),
       prospect("b", "Slot Guy", "WR", 2, { role_fit: slot }),

@@ -1,6 +1,8 @@
 // Role buckets: which NFL role each prospect projects to, from his charting
-// plus height and weight (the user's ask, 2026-10-02). WRs sort into Gadget,
-// Slot, Y and X; RBs, TEs and QBs into their own buckets (ROLES below). Each
+// plus height and weight (the user's ask, 2026-10-02). WRs sort into Special
+// Teams, Gadget, Slot, Z and X (Z was labeled Y until 2026-11-09, when the
+// user had it renamed: the off-the-line outside receiver is the Z, the
+// flanker); RBs, TEs and QBs into their own buckets (ROLES below). Each
 // position's features and recipes live in roleFitWR / roleFitRB / roleFitTE /
 // roleFitQB; this file holds the scoring they share.
 //
@@ -25,7 +27,7 @@
 //   (`nameFrom`, RB Goal-line).
 // - Match % = 100 × the weighted feature average × (1 − size drop). Every
 //   bucket gets its own %, so they don't add to 100: a player can be 86% X and
-//   84% Y.
+//   84% Z.
 //
 // The scale is fixed, never a rank within the pool: skill scales are in AE
 // points, usage ramps in shares, size floors in inches and pounds. Adding or
@@ -42,7 +44,7 @@
 
 export type RolePos = "QB" | "RB" | "WR" | "TE";
 
-export type WRRole = "x" | "y" | "slot" | "gadget";
+export type WRRole = "x" | "z" | "slot" | "gadget" | "special_teams";
 export type RBRole = "three_down" | "zone" | "gap" | "scheme_versatile" | "receiving" | "two_down" | "third_down" | "big_play" | "goal_line" | "blocking_st";
 export type TERole = "all_around" | "inline_y" | "move" | "h_back" | "blocking";
 export type QBRole = "creator" | "distributor" | "vertical" | "dual_threat";
@@ -58,14 +60,21 @@ export interface RoleInfo {
    *  leads; equal tiers go to the higher match. At a LEVELED position (RB) it's
    *  the role's level instead (see LEVELED). */
   tier: number;
-  /** The catch-all: never competes, and leads only when every other bucket is
-   *  under FALLBACK_LINE. */
+  /** A catch-all: never competes, and leads only when every other bucket is
+   *  under FALLBACK_LINE (other catch-alls aside). A position's catch-alls are
+   *  tried in ROLES order, so the first one named wins. */
   fallback?: true;
   /** A catch-all's stricter rule, in place of FALLBACK_LINE: named only with
-   *  every other bucket under `under` and its own match at least `atLeast`.
-   *  RB Blocking/ST (the user, 2026-10-08: only when he's truly terrible at
-   *  everything but blocking). */
+   *  every other bucket (other catch-alls aside) under `under` and its own
+   *  match at least `atLeast`. RB Blocking/ST (the user, 2026-10-08: only when
+   *  he's truly terrible at everything but blocking); WR Gadget (2026-11-09:
+   *  the catch-all, but only with high YAC). */
   fallbackRule?: { under: number; atLeast: number };
+  /** The last resort, a catch-all with no recipe: its % is 100 minus his best
+   *  match at every other role, catch-alls included, and it's named when all of
+   *  them are under FALLBACK_LINE. WR Special Teams (the user, 2026-11-09: the
+   *  "YOU SUCK AT EVERYTHING role"). */
+  remainder?: true;
   /** An all-round role, named only at this match or above (and proven), and
    *  then his whole label: it leads over every other bucket and takes no
    *  hybrid. Below it the bucket is graded but never named. TE All-Around
@@ -75,9 +84,10 @@ export interface RoleInfo {
 
 // Each position's buckets, highest ceiling first. The user wants the best case
 // first, with a % for every other bucket. WR tiers are the user's (2026-10-02):
-// X and Y are the same level, Slot a step below (more limited to the short
+// X and Z are the same level, Slot a step below (more limited to the short
 // game), and Gadget catches the receivers who aren't good enough for any of
-// the three. The TE / QB orders are a proposal the user hasn't weighed in on.
+// the three, if they have high YAC; Special Teams takes the rest (2026-11-09:
+// under 50% at all four). The TE / QB orders are a proposal the user hasn't weighed in on.
 // RB tiers are levels, all the user's (2026-10-08): A Three-down; B Zone,
 // Gap/Power or Scheme Versatile (2026-10-15), whichever he fits best; C
 // Receiving, 2-Down or 3rd-Down; D Big-play, Goal-line or Blocking/ST (LEVELED).
@@ -88,9 +98,10 @@ export const ALL_AROUND_LINE = 65;
 export const ROLES: Record<RolePos, readonly RoleInfo[]> = {
   WR: [
     { key: "x",      label: "X",      short: "X",      tier: 0, description: "Excels vs press and man on slants, nines, comebacks, digs, corners and posts. Needs 10+ in-app press reps to be proven (X? until then). Reads release vs press too once he has 10+ tagged press reps." },
-    { key: "y",      label: "Y",      short: "Y",      tier: 0, description: "Good across most of the route tree; better vs man and zone than vs press. Same level as X." },
+    { key: "z",      label: "Z",      short: "Z",      tier: 0, description: "The flanker, outside off the line: good across most of the route tree; better vs man and zone than vs press. Same level as X." },
     { key: "slot",   label: "Slot",   short: "Slot",   tier: 1, description: "More limited to the short game: strong vs zone on slants, curls and flats; decent vs man; press doesn't count against him." },
-    { key: "gadget", label: "Gadget", short: "Gadget", tier: 2, fallback: true, description: "The catch-all for a receiver who isn't good enough for X, Y or Slot (all under 50%): a special-teamer or one-touch-a-game role. Its % is how much his game is screens, flats and slants." },
+    { key: "gadget", label: "Gadget", short: "Gadget", tier: 2, fallback: true, fallbackRule: { under: 50, atLeast: 50 }, description: "Schemed touches and yards after the catch: named only when he isn't good enough for X, Z or Slot (all under 50%) and his YAC reads 50%+. Its % is mostly his yards after the catch and missed tackles per catch (PFF), with a little for screens, flats and backfield snaps." },
+    { key: "special_teams", label: "Special Teams", short: "ST", tier: 3, fallback: true, remainder: true, description: "Under 50% at every role, Gadget included: not good enough for X, Z or Slot, and no YAC to be a Gadget. Its % is 100 minus his best match anywhere else." },
   ],
   RB: [
     { key: "three_down",  label: "Three-down",  short: "3-Down",   tier: 0, description: "The workhorse: wins on zone and gap runs, reliable hands (no drops), holds up in pass protection, and the build to carry the load. Level A: when he reaches it, it's his whole label." },
@@ -157,11 +168,11 @@ export function standAloneRuleText(pos: RolePos): string | null {
 }
 
 // Two buckets within this many points are a near tie: the higher-ceiling one
-// leads and the other shows as the hybrid ("X / Y"). Not at a LEVELED
+// leads and the other shows as the hybrid ("X / Z"). Not at a LEVELED
 // position.
 export const NEAR_TIE = 5;
-// The catch-all bucket (WR Gadget) leads when every other bucket is under
-// this: he isn't at least average at any real role.
+// A catch-all without its own fallbackRule (WR Special Teams) leads when every
+// other bucket is under this: he isn't at least average at any real role.
 export const FALLBACK_LINE = 50;
 // Positions labeled by level rather than by near tie, with the match each
 // level's best role has to reach, top level first: RB (the user, 2026-10-08).
@@ -213,7 +224,7 @@ export function noLevelReached(fit: RoleFit): boolean {
 export const VERSATILE_PCT = 70;
 // A position's own Versatile rule, where it has one: every listed bucket
 // above `above`, and proven. null = no Versatile at the position. All the
-// user's calls (2026-10-02): a WR is Versatile above 60% at both X and Y (an
+// user's calls (2026-10-02): a WR is Versatile above 60% at both X and Z (an
 // X? doesn't count). RB and QB have none: Three-down already is the all-round
 // back, and Creator and Dual-threat are the all-round QBs. TE keeps the
 // default, VERSATILE_PCT+ in two or more buckets, but All-Around already means
@@ -221,7 +232,7 @@ export const VERSATILE_PCT = 70;
 // (standsAloneAt) never counts toward the two, and its player is never V.
 export interface VersatileRule { roles: readonly RoleKey[]; above: number }
 export const VERSATILE_RULES: Partial<Record<RolePos, VersatileRule | null>> = {
-  WR: { roles: ["x", "y"], above: 60 },
+  WR: { roles: ["x", "z"], above: 60 },
   RB: null,
   QB: null,
 };
@@ -390,6 +401,22 @@ export function skillFeature(label: string, ae: number | null | undefined, n: nu
   };
 }
 
+/** A rate: hits over tries (a count per rep when hits can pass one per rep, e.g. missed tackles or yards). */
+export interface Rate { hits: number; n: number }
+export const NO_RATE: Rate = { hits: 0, n: 0 };
+const pctOf = (r: Rate) => (r.n > 0 ? (r.hits / r.n) * 100 : null);
+
+/** His rate minus the league's, as a skill feature. `perUnit` shows a count per rep (missed tackles can be 2+ on one carry) instead of a %; a string names it (e.g. " yds after contact per carry"). */
+export function rateFeature(label: string, his: Rate, league: Rate, prior: number, scale: number, unit: string, lowerIsBetter = false, perUnit: boolean | string = false): Feature {
+  const h = pctOf(his), l = pctOf(league);
+  const diff = h != null && l != null ? (lowerIsBetter ? l - h : h - l) : null;
+  const f = skillFeature(label, diff, his.n, prior, scale, unit);
+  if (h == null || l == null) return f;
+  const show = (v: number) => (perUnit ? (v / 100).toFixed(2) : `${v.toFixed(0)}%`);
+  const per = typeof perUnit === "string" ? perUnit : perUnit ? " per carry" : "";
+  return { ...f, display: `${show(h)} vs ${show(l)} league${per} on ${his.n} ${unit}` };
+}
+
 /** A skill contrast: how much better he is at A than B (both shrunk first). */
 export function contrastFeature(
   label: string,
@@ -529,21 +556,25 @@ const byPctIn = (order: readonly RoleInfo[]) => {
 
 // Whether a catch-all may be named: under its fallbackRule, every other
 // bucket under the rule's line and itself at the rule's match; without one,
-// every other bucket under FALLBACK_LINE.
+// every other bucket under FALLBACK_LINE. Other catch-alls don't count against
+// it, except for the last resort (remainder), which needs every bucket under
+// the line (WR Special Teams: Gadget too).
 function catchAllNamed(m: RoleMatch, matches: readonly RoleMatch[]): boolean {
-  const rule = roleInfo(m.role).fallbackRule;
-  const top = Math.max(...matches.filter((x) => x.role !== m.role).map((x) => x.pct));
-  return rule ? top < rule.under && m.pct >= rule.atLeast : top < FALLBACK_LINE;
+  const info = roleInfo(m.role);
+  const others = matches.filter((x) => x.role !== m.role && (info.remainder || !roleInfo(x.role).fallback));
+  const top = Math.max(...others.map((x) => x.pct));
+  return info.fallbackRule ? top < info.fallbackRule.under && m.pct >= info.fallbackRule.atLeast : top < FALLBACK_LINE;
 }
 
 // The headline and its hybrid, by near tie: of the buckets within NEAR_TIE of
 // the top, the highest ceiling tier (equal tiers: the higher match), but only
 // a proven bucket wins a tie. An unproven one leads only when no proven bucket
 // is within NEAR_TIE (shown "X?"): an untested X isn't demoted to a worse
-// role, and isn't promoted over a better-supported one either. The catch-all
-// doesn't compete; it leads only when catchAllNamed. A bucket he's too small
-// to be named for (`unnamed`) is left out. An all-round role (standsAloneAt)
-// doesn't compete either: at its line, proven, it's his whole label.
+// role, and isn't promoted over a better-supported one either. A catch-all
+// doesn't compete; it leads only when catchAllNamed, the first in ROLES order
+// (WR Gadget before Special Teams). A bucket he's too small to be named for
+// (`unnamed`) is left out. An all-round role (standsAloneAt) doesn't compete
+// either: at its line, proven, it's his whole label.
 function pickByNearTie(order: readonly RoleInfo[], matches: readonly RoleMatch[]): RoleMatch[] {
   const byPct = byPctIn(order);
   const tierOf = (k: RoleKey) => roleInfo(k).tier;
@@ -552,8 +583,8 @@ function pickByNearTie(order: readonly RoleInfo[], matches: readonly RoleMatch[]
     return line != null && m.pct >= line && m.proven && !m.unnamed;
   });
   if (allRound) return [allRound];
-  const fallback = matches.find((m) => roleInfo(m.role).fallback);
-  if (fallback && catchAllNamed(fallback, matches)) return [fallback];
+  const fallback = matches.find((m) => roleInfo(m.role).fallback && catchAllNamed(m, matches));
+  if (fallback) return [fallback];
   const pool = matches.filter((m) => !roleInfo(m.role).fallback && !m.unnamed && roleInfo(m.role).standsAloneAt == null);
   const top = Math.max(...pool.map((m) => m.pct));
   const contenders = pool.filter((m) => top - m.pct <= NEAR_TIE);
@@ -588,11 +619,17 @@ function pickByLevel(order: readonly RoleInfo[], matches: readonly RoleMatch[], 
 
 export function buildRoleFit(inp: FitInputs): RoleFit {
   const order = ROLES[inp.pos];
-  const matches = order.map((info) => {
+  const scored = order.map((info): RoleMatch => {
     const recipe = inp.recipes.find((r) => r.role === info.key);
     return recipe
       ? scoreBucket(recipe, inp.features, inp.heightIn, inp.weightLb)
       : { role: info.key, pct: 0, sizeDrop: 0, sizeNote: null, drivers: [], proven: true };
+  });
+  // The last resort (remainder): 100 minus his best match anywhere else.
+  const matches = scored.map((m): RoleMatch => {
+    if (!roleInfo(m.role).remainder) return m;
+    const top = scored.filter((x) => !roleInfo(x.role).remainder).sort((a, b) => b.pct - a.pct)[0];
+    return top ? { ...m, pct: 100 - top.pct, drivers: [`Best other role: ${roleInfo(top.role).label} ${top.pct}%`] } : m;
   });
   const lines = LEVELED[inp.pos];
   const [best, ...also] = lines ? pickByLevel(order, matches, lines) : pickByNearTie(order, matches);
@@ -621,7 +658,7 @@ export function matchFor(fit: RoleFit, role: RoleKey): RoleMatch | undefined {
 // A role's name, with "?" while it's unproven (e.g. an X without press tape).
 const named = (fit: RoleFit, role: RoleKey) => `${roleInfo(role).label}${matchFor(fit, role)?.proven === false ? "?" : ""}`;
 
-/** "X", "X / Y", "Zone / 2-Down / Goal-line", "X?" for an unproven role, and any tag after a dot
+/** "X", "X / Z", "Zone / 2-Down / Goal-line", "X?" for an unproven role, and any tag after a dot
  *  ("Zone / Goal-line · Inside"). */
 export function roleLabel(fit: RoleFit): string {
   const roles = [fit.best, ...fit.also].map((r) => named(fit, r)).join(" / ");

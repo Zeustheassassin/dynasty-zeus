@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildRoleFit, scoreBucket, skillFeature, usageFeature, inverseUsageFeature, contrastFeature, shrinkAE,
-  roleLabel, roleFitTooltip, matchTooltip, aeOf, mergeAESums,
+  roleLabel, roleFitTooltip, matchTooltip, matchFor, aeOf, mergeAESums,
   ELITE_SIZE_SHARE, NEAR_TIE, VERSATILE_PCT, FALLBACK_LINE, LEVELED, levelRuleText, noLevelReached, versatileRuleText, hasVersatile, ROLES,
   ALL_AROUND_LINE, standAloneRuleText,
   type BucketRecipe, type FeatureSet, type Feature, type RolePos,
@@ -102,7 +102,7 @@ describe("buildRoleFit", () => {
   // Four WR buckets on one feature each, plus one usage feature for X.
   const recipes: BucketRecipe[] = [
     { role: "x", ingredients: [{ feature: "x", weight: 1 }, { feature: "ux", weight: 0.5 }] },
-    { role: "y", ingredients: [{ feature: "y", weight: 1 }] },
+    { role: "z", ingredients: [{ feature: "z", weight: 1 }] },
     { role: "slot", ingredients: [{ feature: "slot", weight: 1 }, { feature: "us", weight: 0.5 }] },
     { role: "gadget", ingredients: [{ feature: "g", weight: 1 }] },
   ];
@@ -112,35 +112,36 @@ describe("buildRoleFit", () => {
   });
 
   it("leads with the best fit, every role scored on its own", () => {
-    const r = fit({ x: skill(0.4), y: skill(0.6), slot: skill(0.9), g: skill(0.3) });
+    const r = fit({ x: skill(0.4), z: skill(0.6), slot: skill(0.9), g: skill(0.3) });
     expect(r.best).toBe("slot");
     expect(r.also).toEqual([]);
-    expect(r.matches.map((m) => m.role)).toEqual(["x", "y", "slot", "gadget"]);
-    expect(r.matches.map((m) => m.pct)).toEqual([40, 60, 90, 30]);
+    expect(r.matches.map((m) => m.role)).toEqual(["x", "z", "slot", "gadget", "special_teams"]);
+    // Special Teams has no recipe: 100 minus his best match anywhere else.
+    expect(r.matches.map((m) => m.pct)).toEqual([40, 60, 90, 30, 10]);
   });
 
   it("on a near tie leads with the higher-ceiling role and shows the other as the hybrid", () => {
-    const r = fit({ x: skill(0.78), y: skill(0.6), slot: skill(0.8), g: skill(0.3) });
+    const r = fit({ x: skill(0.78), z: skill(0.6), slot: skill(0.8), g: skill(0.3) });
     expect(80 - 78).toBeLessThanOrEqual(NEAR_TIE);
     expect(r.best).toBe("x");
     expect(r.also).toEqual(["slot"]);
     expect(roleLabel(r)).toBe("X / Slot");
   });
 
-  it("calls a WR Versatile above 60% at both X and Y, and only with a proven X", () => {
-    expect(fit({ x: skill(0.61), y: skill(0.62), slot: skill(0.4), g: skill(0.3) }).versatile).toBe(true);
-    expect(fit({ x: skill(0.61), y: skill(0.6), slot: skill(0.4), g: skill(0.3) }).versatile).toBe(false);
-    // Strong elsewhere doesn't count: it's X and Y.
-    expect(fit({ x: skill(0.9), y: skill(0.5), slot: skill(0.9), g: skill(0.9) }).versatile).toBe(false);
+  it("calls a WR Versatile above 60% at both X and Z, and only with a proven X", () => {
+    expect(fit({ x: skill(0.61), z: skill(0.62), slot: skill(0.4), g: skill(0.3) }).versatile).toBe(true);
+    expect(fit({ x: skill(0.61), z: skill(0.6), slot: skill(0.4), g: skill(0.3) }).versatile).toBe(false);
+    // Strong elsewhere doesn't count: it's X and Z.
+    expect(fit({ x: skill(0.9), z: skill(0.5), slot: skill(0.9), g: skill(0.9) }).versatile).toBe(false);
     const unproven = buildRoleFit({
       pos: "WR",
       recipes: recipes.map((r) => (r.role === "x" ? { ...r, requires: { feature: "x", minN: 10, why: "needs 10 reps" } } : r)),
-      features: { x: { ...skill(0.7), n: 3 }, y: skill(0.7), slot: skill(0.4), g: skill(0.3) },
+      features: { x: { ...skill(0.7), n: 3 }, z: skill(0.7), slot: skill(0.4), g: skill(0.3) },
       heightIn: null, weightLb: null, sample: { n: 150, unit: "routes" }, confidenceAt: { medium: 100, high: 200 },
     });
     expect(unproven.versatile).toBe(false);
-    expect(versatileRuleText("WR")).toBe("above 60% at both X and Y");
-    expect(roleFitTooltip(fit({ x: skill(0.65), y: skill(0.66), slot: skill(0.4), g: skill(0.3) }))).toContain("Versatile: above 60% at both X and Y");
+    expect(versatileRuleText("WR")).toBe("above 60% at both X and Z");
+    expect(roleFitTooltip(fit({ x: skill(0.65), z: skill(0.66), slot: skill(0.4), g: skill(0.3) }))).toContain("Versatile: above 60% at both X and Z");
   });
 
   // One recipe per role, one feature each, for any position.
@@ -202,28 +203,28 @@ describe("buildRoleFit", () => {
   });
 
   it("says what his usage alone points to, which can differ from where he projects", () => {
-    const r = fit({ x: skill(0.9), ux: usage(0.1), y: skill(0.5), slot: skill(0.5), us: usage(0.9), g: skill(0.5) });
+    const r = fit({ x: skill(0.9), ux: usage(0.1), z: skill(0.5), slot: skill(0.5), us: usage(0.9), g: skill(0.5) });
     expect(r.best).toBe("x");
     expect(r.usedAs).toBe("slot");
     expect(roleFitTooltip(r)).toContain("Used as: Slot");
   });
 
   it("flags skill only when there's no usage data at all", () => {
-    const r = fit({ x: skill(0.6), y: skill(0.5), slot: skill(0.5), g: skill(0.5) });
+    const r = fit({ x: skill(0.6), z: skill(0.5), slot: skill(0.5), g: skill(0.5) });
     expect(r.skillOnly).toBe(true);
     expect(r.usedAs).toBeNull();
     expect(roleFitTooltip(r)).toContain("skill only");
   });
 
   it("grades confidence by the tape behind it", () => {
-    const f = { x: skill(0.6), y: skill(0.5), slot: skill(0.5), g: skill(0.5) };
+    const f = { x: skill(0.6), z: skill(0.5), slot: skill(0.5), g: skill(0.5) };
     expect([fit(f, 60).confidence, fit(f, 150).confidence, fit(f, 250).confidence]).toEqual(["low", "medium", "high"]);
   });
 
   it("shows an unproven role with a ?, leading only as the outright top match", () => {
     const gated: BucketRecipe[] = recipes.map((r) => (r.role === "x" ? { ...r, requires: { feature: "x", minN: 10, why: "needs 10 reps" } } : r));
     const run = (xFit: number, n: number) => buildRoleFit({
-      pos: "WR", recipes: gated, features: { x: { ...skill(xFit), n }, y: skill(0.5), slot: skill(0.8), g: skill(0.3) },
+      pos: "WR", recipes: gated, features: { x: { ...skill(xFit), n }, z: skill(0.5), slot: skill(0.8), g: skill(0.3) },
       heightIn: null, weightLb: null, sample: { n: 150, unit: "routes" }, confidenceAt: { medium: 100, high: 200 },
     });
     expect(roleLabel(run(0.9, 3))).toBe("X?");                                      // top outright: X?
@@ -233,22 +234,36 @@ describe("buildRoleFit", () => {
     expect(roleFitTooltip(run(0.9, 3))).toContain("X?: needs 10 reps (has 3)");
   });
 
-  it("treats X and Y as one level: a near tie goes to the higher match, and either beats Slot", () => {
-    expect(fit({ x: skill(0.76), y: skill(0.8), slot: skill(0.5), g: skill(0.3) }).best).toBe("y");
-    expect(roleLabel(fit({ x: skill(0.8), y: skill(0.77), slot: skill(0.5), g: skill(0.3) }))).toBe("X / Y");
-    expect(fit({ x: skill(0.5), y: skill(0.76), slot: skill(0.8), g: skill(0.3) }).best).toBe("y");
+  it("treats X and Z as one level: a near tie goes to the higher match, and either beats Slot", () => {
+    expect(fit({ x: skill(0.76), z: skill(0.8), slot: skill(0.5), g: skill(0.3) }).best).toBe("z");
+    expect(roleLabel(fit({ x: skill(0.8), z: skill(0.77), slot: skill(0.5), g: skill(0.3) }))).toBe("X / Z");
+    expect(fit({ x: skill(0.5), z: skill(0.76), slot: skill(0.8), g: skill(0.3) }).best).toBe("z");
   });
 
-  it("makes Gadget the catch-all: it leads only when X, Y and Slot are all under 50%, and never competes", () => {
-    const weak = fit({ x: skill(0.45), y: skill(0.4), slot: skill(0.48), g: skill(0.3) });
-    expect(weak.best).toBe("gadget");
-    expect(weak.also).toEqual([]);
-    expect(roleLabel(weak)).toBe("Gadget");
+  it("makes Gadget the catch-all with high YAC: it leads only when X, Z and Slot are all under 50% and it reads 50%+, and never competes", () => {
+    const yac = fit({ x: skill(0.45), z: skill(0.4), slot: skill(0.48), g: skill(0.6) });
+    expect(yac.best).toBe("gadget");
+    expect(yac.also).toEqual([]);
+    expect(roleLabel(yac)).toBe("Gadget");
+    expect(fit({ x: skill(0.45), z: skill(0.4), slot: skill(0.48), g: skill(0.5) }).best).toBe("gadget");
     // A higher Gadget % doesn't beat a real role that clears the line.
-    const slot = fit({ x: skill(0.3), y: skill(0.4), slot: skill(0.55), g: skill(0.9) });
+    const slot = fit({ x: skill(0.3), z: skill(0.4), slot: skill(0.55), g: skill(0.9) });
     expect(slot.best).toBe("slot");
     expect(slot.also).toEqual([]);
     expect(FALLBACK_LINE).toBe(50);
+  });
+
+  it("makes Special Teams the last resort: under 50% everywhere, Gadget included, and 100 minus his best match", () => {
+    const weak = fit({ x: skill(0.45), z: skill(0.4), slot: skill(0.48), g: skill(0.3) });
+    expect(weak.best).toBe("special_teams");
+    expect(weak.also).toEqual([]);
+    expect(roleLabel(weak)).toBe("Special Teams");
+    expect(matchFor(weak, "special_teams")).toMatchObject({ pct: 52, drivers: ["Best other role: Slot 48%"] });
+    expect(roleFitTooltip(weak)).toContain("Best case: Special Teams");
+    // Gadget just short of the line still goes to Special Teams.
+    expect(fit({ x: skill(0.45), z: skill(0.4), slot: skill(0.48), g: skill(0.49) }).best).toBe("special_teams");
+    // A real role at 50 is named, never Special Teams.
+    expect(fit({ x: skill(0.5), z: skill(0.4), slot: skill(0.3), g: skill(0.2) }).best).toBe("x");
   });
 
   // RB order: Three-down, Zone, Gap/Power, Receiving, 2-Down, 3rd-Down, Big-play, Goal-line, Blocking/ST.
@@ -317,7 +332,7 @@ describe("buildRoleFit", () => {
   });
 
   it("explains one role's match in its tooltip", () => {
-    const r = fit({ x: { ...skill(0.9), label: "Press", display: "+8 pts" }, y: skill(0.5), slot: skill(0.5), g: skill(0.5) });
+    const r = fit({ x: { ...skill(0.9), label: "Press", display: "+8 pts" }, z: skill(0.5), slot: skill(0.5), g: skill(0.5) });
     expect(matchTooltip(r, "x")).toMatch(/^X 90%: Excels vs press/);
     expect(matchTooltip(r, "x")).toContain("+ Press: +8 pts");
   });

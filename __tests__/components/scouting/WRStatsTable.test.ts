@@ -40,19 +40,19 @@ describe("WR stats: Lined Up (in-app)", () => {
 describe("WR stats: Role Fit", () => {
   const match = (role: RoleFit["best"], pct: number, drivers: string[] = []) => ({ role, pct, sizeDrop: 0, sizeNote: null, drivers, proven: true });
   const FIT: RoleFit = {
-    pos: "WR", best: "x", also: ["y"], versatile: true, usedAs: "slot", confidence: "medium",
+    pos: "WR", best: "x", also: ["z"], versatile: true, usedAs: "slot", confidence: "medium",
     sample: { n: 150, unit: "routes" }, skillOnly: false, features: {},
-    matches: [match("x", 82, ["+ vs press (in-app): +9.0 pts on 40 in-app routes"]), match("y", 79), match("slot", 55), match("gadget", 40)],
+    matches: [match("x", 82, ["+ vs press (in-app): +9.0 pts on 40 in-app routes"]), match("z", 79), match("slot", 55), match("gadget", 40)],
   };
   const withFit = (role_fit: RoleFit | null) => ({ ...wr(null), role_fit }) as ProspectWithStats;
 
   it("shows the best case, every role's match, usage, Versatile and confidence, with the why in each cell's tooltip", () => {
     const [row] = buildWRStatRows([withFit(FIT)]);
-    expect(row.role).toBe("X / Y");
-    expect([row.role_x, row.role_y, row.role_slot, row.role_gadget]).toEqual([82, 79, 55, 40]);
+    expect(row.role).toBe("X / Z");
+    expect([row.role_x, row.role_z, row.role_slot, row.role_gadget]).toEqual([82, 79, 55, 40]);
     expect([row.role_used, row.role_vers, row.role_conf]).toEqual(["Slot", "Yes", "Medium"]);
     expect(row.role_x_tip).toContain("+ vs press (in-app): +9.0 pts on 40 in-app routes");
-    expect(row.role_tip).toContain("Best case: X, equally a Y");
+    expect(row.role_tip).toContain("Best case: X, equally a Z");
   });
 
   it("is blank under the floor", () => {
@@ -70,6 +70,6 @@ describe("WR stats: Role Fit", () => {
   it("sits right after Identity, one % column per role", () => {
     const groups = [...new Set(WR_STAT_COLS.map((c) => c.group))];
     expect(groups.slice(0, 2)).toEqual(["Identity", "Role Fit"]);
-    expect(WR_STAT_COLS.filter((c) => c.group === "Role Fit").map((c) => c.label)).toEqual(["Role", "X%", "Y%", "Slot%", "Gadget%", "Used as", "Vers", "Conf"]);
+    expect(WR_STAT_COLS.filter((c) => c.group === "Role Fit").map((c) => c.label)).toEqual(["Role", "X%", "Z%", "Slot%", "Gadget%", "ST%", "Used as", "Vers", "Conf"]);
   });
 });

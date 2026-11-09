@@ -82,24 +82,39 @@ describe("WR role buckets", () => {
     expect(matchFor(wrRoleFit(inputs(thin, null))!, "x")!.proven).toBe(false);
   });
 
-  it("reads Gadget % as how much his game is the quick game, not as being good everywhere", () => {
-    const everywhere = skill({ screen: 12, flat: 12, slant: 12, nine: 12, post: 12, dig: 12, curl: 12, comeback: 12, out: 12, corner: 12 }, { zone: 10, man: 10, press: 8 });
-    const limited = skill({ screen: 12, flat: 12, slant: 12, nine: -8, post: -8, dig: -8, curl: -8, comeback: -8, out: -8, corner: -8 }, { zone: 6, man: -8, press: -8 });
-    const g = (sk: WRRoleSkill) => matchFor(wrRoleFit(inputs(sk, null))!, "gadget")!.pct;
-    expect(g(limited)).toBeGreaterThan(g(everywhere) + 20);
-    expect(wrRoleFit(inputs(everywhere, null))!.best).not.toBe("gadget");
+  // PFF over his charted games: yards after the catch and missed tackles, each
+  // over catches, against a pool at 5.7 yds and 0.17 per catch.
+  const POOL = { leaguePffYac: { hits: 5700, n: 1000 }, leaguePffYacMtf: { hits: 170, n: 1000 } };
+  const yac = (yds: number, mtf: number, catches = 40) => ({ ...POOL, pffYac: { hits: yds * catches, n: catches }, pffYacMtf: { hits: Math.round(mtf * catches), n: catches } });
+  const WEAK = skill({ screen: 4, flat: 2, slant: -4, nine: -10, post: -10, dig: -10, curl: -8, comeback: -10, out: -10, corner: -10 }, { zone: -6, man: -10, press: -10 });
+
+  it("reads Gadget % from yards after the catch and missed tackles (PFF), not from the route tree", () => {
+    const g = (extra: Partial<WRRoleInputs>, sk = WEAK) => matchFor(wrRoleFit(inputs(sk, null, extra))!, "gadget")!.pct;
+    expect(g(yac(8.5, 0.35))).toBeGreaterThan(75);
+    expect(g(yac(3.5, 0.06))).toBeLessThan(25);
+    expect(g({})).toBe(50);  // no PFF catches: average
+    // The route tree doesn't move it.
+    expect(g(yac(8.5, 0.35), X_SKILL)).toBe(g(yac(8.5, 0.35)));
+    const f = wrFeatures(inputs(WEAK, null, yac(8.5, 0.35)));
+    expect(f.yac!.display).toBe("8.50 vs 5.70 league yds after the catch per catch on 40 catches");
+    expect(f.yacMtf!.display).toBe("0.35 vs 0.17 league per catch on 40 catches");
   });
 
-  it("drops a receiver who isn't good enough for X, Y or Slot into Gadget", () => {
-    const weak = skill({ screen: 4, flat: 2, slant: -4, nine: -10, post: -10, dig: -10, curl: -8, comeback: -10, out: -10, corner: -10 }, { zone: -6, man: -10, press: -10 });
-    const fit = wrRoleFit(inputs(weak, null))!;
-    expect(fit.best).toBe("gadget");
-    expect(Math.max(...fit.matches.filter((m) => m.role !== "gadget").map((m) => m.pct))).toBeLessThan(50);
+  it("makes a receiver who isn't good enough for X, Z or Slot a Gadget with high YAC, else Special Teams", () => {
+    const gadget = wrRoleFit(inputs(WEAK, null, yac(8, 0.3)))!;
+    expect(gadget.best).toBe("gadget");
+    expect(Math.max(...gadget.matches.filter((m) => m.role !== "gadget" && m.role !== "special_teams").map((m) => m.pct))).toBeLessThan(50);
+    const st = wrRoleFit(inputs(WEAK, null, yac(4, 0.08)))!;
+    expect(st.best).toBe("special_teams");
+    expect(roleLabel(st)).toBe("Special Teams");
+    expect(matchFor(st, "gadget")!.pct).toBeLessThan(50);
+    // High YAC never pulls a real role down to Gadget.
+    expect(wrRoleFit(inputs(X_SKILL, lined(140, 30, 30), yac(9, 0.4)))!.best).toBe("x");
   });
 
   it("lets alignment only nudge: a press winner lined up off the line still projects X", () => {
     const fit = wrRoleFit(inputs(X_SKILL, lined(40, 120, 40)))!;
-    expect(fit.usedAs).toBe("y");
+    expect(fit.usedAs).toBe("z");
     expect(fit.best).toBe("x");
   });
 

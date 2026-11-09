@@ -32,8 +32,9 @@ import { COVERAGE_ERAS, coverageEra, coverageEras, type CoverageEra } from "./co
 import { isTaggedPlay } from "./playEra";
 import { correctionDesign, enabledSpecs, fitTagCorrection, GARBAGE_TIME_WEIGHT, RECENTER_TAGGED } from "./tagCorrection";
 import { parseHeightInches } from "./prospectAge";
-import type { AESum } from "./roleFit";
+import type { AESum, Rate } from "./roleFit";
 import { wrRoleFit, type WRRoleSkill } from "./roleFitWR";
+import type { PffTotals } from "../pff/totals";
 
 const ROUTE_TYPES: RouteType[] = [
   "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
@@ -681,6 +682,26 @@ function releaseByProspect(tagRows: readonly ProspectGameRouteTagCellsRow[]): { 
   return { byProspect, league: n > 0 ? won / n : null };
 }
 
+// PFF over each WR's charted games, and pooled over every WR's, for the
+// Gadget bucket (roleFitWR.ts): yards after the catch and missed tackles
+// forced, each over catches.
+function wrPffRates(prospects: readonly Prospect[], pff: ReadonlyMap<string, PffTotals> | undefined) {
+  const rate = (hitsOf: (s: PffTotals["sum"]) => number | null) => {
+    const mine = new Map<string, Rate>();
+    const pool: Rate = { hits: 0, n: 0 };
+    for (const p of prospects) {
+      if (p.position !== "WR") continue;
+      const s = pff?.get(p.id)?.sum;
+      const hits = s ? hitsOf(s) : null, n = s?.receptions ?? null;
+      if (hits == null || !n) continue;
+      mine.set(p.id, { hits, n });
+      pool.hits += hits; pool.n += n;
+    }
+    return { mine, pool: pool.n > 0 ? pool : null };
+  };
+  return { yac: rate((s) => s.yac), mtf: rate((s) => s.rec_mtf) };
+}
+
 // Each WR's tagged double-coverage routes (migration 072): routes, open, and
 // catches (a caught route carries the broken-tackle tag). A route charted as
 // Double coverage before the tag is already in prospect_route_stats' double.
@@ -789,7 +810,8 @@ export interface ProspectThresholdCounts {
 // (and `tagRows`). `alignmentRows` is prospect_game_alignment (migration 060),
 // for lined_up. `tagRows` is prospect_game_route_tag_cells (migration 064):
 // the tagged routes, judged apart only while the WR model has a tag
-// correction or garbage time is weighted.
+// correction or garbage time is weighted. `pff` is PFF over each prospect's
+// charted games (lib/pff/totals.ts), for the WR Gadget bucket's YAC.
 export function buildProspectsWithStats(
   prospects: Prospect[],
   viewRows: ProspectRouteStatsRow[],
@@ -799,6 +821,7 @@ export function buildProspectsWithStats(
   wrModel: WRDifficultyModel = buildWRModel(gameCellRows, games),
   alignmentRows: readonly ProspectGameAlignmentRow[] = [],
   tagRows: readonly ProspectGameRouteTagCellsRow[] = [],
+  pff?: ReadonlyMap<string, PffTotals>,
 ): ProspectWithStats[] {
   const byProspect = new Map(viewRows.map((r) => [r.prospect_id, r]));
   const eras = coverageEras(games);
@@ -807,6 +830,7 @@ export function buildProspectsWithStats(
   const { qbThrowsByProspect, teRoutesByProspect } = thresholdCounts;
   const release = releaseByProspect(tagRows);
   const taggedDouble = taggedDoubleByProspect(tagRows);
+  const wrPff = wrPffRates(prospects, pff);
 
   return prospects.map((p) => {
     const v = byProspect.get(p.id);
@@ -853,6 +877,10 @@ export function buildProspectsWithStats(
             skill: wrRoleSkill(cells, { ...wrModel, model: wrModel.model }),
             release: release.byProspect.get(p.id) ?? null,
             leagueRelease: release.league,
+            pffYac: wrPff.yac.mine.get(p.id) ?? null,
+            leaguePffYac: wrPff.yac.pool,
+            pffYacMtf: wrPff.mtf.mine.get(p.id) ?? null,
+            leaguePffYacMtf: wrPff.mtf.pool,
             linedUp: lined_up,
             inAppRouteCounts: inAppRouteCounts(cells),
             heightIn: parseHeightInches(p.height),

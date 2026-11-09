@@ -721,7 +721,7 @@ export default function BigBoard({
     return <td className={`${cls} ${color} font-semibold`} title={lines.join("\n")}>{signed(v, 2)}</td>;
   }
   // ── Role cell ─────────────────────────────────────────────────
-  // The best-case role ("X", or "X / Y" on a near tie) with a V for
+  // The best-case role ("X", or "X / Z" on a near tie) with a V for
   // Versatile; the tooltip lists every role's match and why.
   function roleCell(p: ProspectWithStats) {
     const cls = `${tdBase} border-l border-r border-slate-800`;

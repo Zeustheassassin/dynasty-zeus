@@ -47,7 +47,7 @@ const ALIGNMENTS: { key: Alignment; label: string }[] = [
   { key: "slot",      label: "Slot" },
   { key: "backfield", label: "Backfield" },
 ];
-const NFL_ROLES = ["X", "Y", "Slot", "X or Y", "Y or Slot", "Slot/Gadget", "Anything", "Sacrificial X", "Target Hog Y or Slot", ""];
+const NFL_ROLES = ["X", "Z", "Slot", "X or Z", "Z or Slot", "Slot/Gadget", "Anything", "Sacrificial X", "Target Hog Z or Slot", ""];
 
 interface Props {
   prospect: Prospect;

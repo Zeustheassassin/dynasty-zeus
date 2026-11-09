@@ -10,8 +10,8 @@ const PlayerChartingBoard = dynamic(() => import("./PlayerChartingBoard"), { ssr
 const ProspectRosterSheet = dynamic(() => import("../ProspectRosterSheet"), { ssr: false });
 
 const WR_NFL_ROLES = [
-  "X", "Y", "Slot", "X or Y", "Y or Slot",
-  "Slot/Gadget", "Anything", "Sacrificial X", "Target Hog Y or Slot", "",
+  "X", "Z", "Slot", "X or Z", "Z or Slot",
+  "Slot/Gadget", "Anything", "Sacrificial X", "Target Hog Z or Slot", "",
 ];
 
 export interface WRHubProps {
