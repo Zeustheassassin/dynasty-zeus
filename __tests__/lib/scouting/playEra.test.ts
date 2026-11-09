@@ -45,8 +45,8 @@ describe("tag registry", () => {
       const tags = Object.fromEntries(POSITION_TAGS[pos].map((t) => [t.column, t]));
       // 080 retired the single pick for the ball placement toggles.
       expect(tags.ball_placement).toBeUndefined();
-      // 079 added Out of bounds to 078's two answers.
-      expect(tags.incompletion_reason.values).toEqual([...checkValues("incompletion_reason"), "out_of_bounds"]);
+      // 079 added Out of bounds to 078's two answers, 086 Hard catch.
+      expect(tags.incompletion_reason.values).toEqual([...checkValues("incompletion_reason"), "out_of_bounds", "hard_catch"]);
       expect(tags.incompletion_reason.required).toBe(true);
       for (const col of ["ball_placement", "adjusted_to_ball", "hit_at_catch", "sideline_target", "incompletion_reason"]) {
         expect(code).toContain(`ADD COLUMN IF NOT EXISTS ${col} `);
@@ -85,14 +85,36 @@ describe("tag registry", () => {
     const sql = readFileSync(join(process.cwd(), "supabase/migrations/079_incompletion_out_of_bounds.sql"), "utf8");
     const code = sql.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
     const values = [...(code.match(/incompletion_reason IN \(([^)]*)\)/)?.[1] ?? "").matchAll(/''(\w+)''/g)].map((m) => m[1]);
+    expect(values).toEqual(["uncatchable", "broken_up", "out_of_bounds"]);
     for (const pos of ["WR", "TE"] as const) {
       const spec = POSITION_TAGS[pos].find((t) => t.column === "incompletion_reason");
-      expect(spec?.values).toEqual(values);
-      expect(spec?.valueLabels).toEqual(["Uncatchable", "Broken up", "Out of bounds"]);
+      // 086 appended Hard catch; 079's three stay first, in order.
+      expect(spec?.values?.slice(0, 3)).toEqual(values);
     }
     // The one DROP is the approved one (the user, 2026-10-23), after the new check goes on.
     expect(code.match(/\bDROP\b/g)).toHaveLength(1);
     expect(code).toMatch(/DROP CONSTRAINT IF EXISTS %I', tbl, tbl \|\| '_incompletion_reason_check'/);
+    expect(code.indexOf("ADD CONSTRAINT")).toBeLessThan(code.indexOf("DROP CONSTRAINT"));
+    expect(code).not.toMatch(/\b(DELETE|TRUNCATE|UPDATE)\b/);
+  });
+
+  it("matches migration 086's Why incomplete answers (Hard catch), dropping only 079's check, after the new one is on", () => {
+    const sql = readFileSync(join(process.cwd(), "supabase/migrations/086_incompletion_hard_catch.sql"), "utf8");
+    const code = sql.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+    expect(code).toMatch(/ARRAY\['route_plays', 'te_plays'\]/);
+    const values = [...(code.match(/incompletion_reason IN \(([^)]*)\)/)?.[1] ?? "").matchAll(/''(\w+)''/g)].map((m) => m[1]);
+    expect(values).toEqual(["uncatchable", "broken_up", "out_of_bounds", "hard_catch"]);
+    for (const pos of ["WR", "TE"] as const) {
+      const spec = POSITION_TAGS[pos].find((t) => t.column === "incompletion_reason");
+      expect(spec?.values).toEqual(values);
+      expect(spec?.valueLabels).toEqual(["Uncatchable", "Broken up", "Out of bounds", "Hard catch"]);
+      expect(spec).toMatchObject({ entry: "conditional", required: true, appliesTo: "incompletion", step: "target" });
+    }
+    // The one DROP is the approved one (the user, 2026-11-09, "Swap the rule"): 079's check, and
+    // only once the four-answer check is on.
+    expect(code.match(/\bDROP\b/g)).toHaveLength(1);
+    expect(code).toMatch(/DROP CONSTRAINT IF EXISTS %I', tbl, tbl \|\| '_incompletion_reason_values'/);
+    expect(code).toMatch(/ADD CONSTRAINT %I CHECK[^\n]*\n\s*tbl, tbl \|\| '_incompletion_reason_answers'/);
     expect(code.indexOf("ADD CONSTRAINT")).toBeLessThan(code.indexOf("DROP CONSTRAINT"));
     expect(code).not.toMatch(/\b(DELETE|TRUNCATE|UPDATE)\b/);
   });

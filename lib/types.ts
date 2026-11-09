@@ -1242,7 +1242,8 @@ export interface RoutePlay extends CatchDifficultyTags {
 /** 078's single-pick ball placement, retired by 080's toggles (still holds what
  *  was charted with it; 080 copied each into the toggles). */
 export type BallPlacement = "on_target" | "high" | "low" | "behind" | "in_front" | "outside_frame";
-export type IncompletionReason = "uncatchable" | "broken_up" | "out_of_bounds";
+/** Out of bounds from 079; Hard catch (catchable, not a drop) from 086. */
+export type IncompletionReason = "uncatchable" | "broken_up" | "out_of_bounds" | "hard_catch";
 
 /** What made a WR / TE target hard to catch (migrations 078–080, data collection
  *  only): every target, whatever the result; sideline on catches, the reason on

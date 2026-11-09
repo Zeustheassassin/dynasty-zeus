@@ -123,8 +123,11 @@ const CATCH_DIFFICULTY_TAGS: readonly PlayTagSpec[] = [
   { column: "hit_at_catch",        label: "Hit at the catch",          short: "Hit",  entry: "exception", appliesTo: "target", step: "target" },
   // Catches only (the user, 2026-10-23): a throw that ends out of bounds is an Out of bounds incompletion.
   { column: "sideline_target",     label: "Sideline (feet in bounds)", short: "SL",   entry: "exception", appliesTo: "catch", step: "target" },
-  // Out of bounds added 2026-10-23 (the user, migration 079).
-  { column: "incompletion_reason", label: "Why incomplete",            short: "Inc",  entry: "conditional", values: ["uncatchable", "broken_up", "out_of_bounds"], valueLabels: ["Uncatchable", "Broken up", "Out of bounds"], required: true, appliesTo: "incompletion", when: "incompletions only", step: "target" },
+  // Out of bounds added 2026-10-23 (the user, migration 079). Hard catch added 2026-11-09 (the
+  // user, migration 086): catchable, it hit his hands, but the catch was so hard (low, sliding,
+  // diving) that it isn't a drop, and no defender touched it. Catchable, so it counts as a
+  // catchable target if a catch-rate piece is ever built.
+  { column: "incompletion_reason", label: "Why incomplete",            short: "Inc",  entry: "conditional", values: ["uncatchable", "broken_up", "out_of_bounds", "hard_catch"], valueLabels: ["Uncatchable", "Broken up", "Out of bounds", "Hard catch"], required: true, appliesTo: "incompletion", when: "incompletions only", step: "target" },
 ];
 
 /** On all four play tables. */
