@@ -473,7 +473,17 @@ describe("BigBoard Dynasty Score", () => {
     const title = scoreCellOf("Quarter One", "Dynasty+").getAttribute("title")!;
     expect(title).toContain("AE Score ");
     expect(title).toContain("Age 22.3 as a rookie");
-    expect(title).toContain("Drafted: 1st → +2.00");
+    expect(title).toContain("Drafted: 1st round (no pick set, the round's average) → +2.00");
+  });
+
+  it("reads draft capital from the overall pick once one is set", () => {
+    renderBoard([...PROSPECTS.map((p) => (p.id === "qb1" ? { ...p, draft_round: 1, draft_pick: 3, birthday: "2005-06-01" } : p)), ...POOL]);
+    const dyn = Number(cell("Quarter One", "Dynasty"));
+    const plus = Number(cell("Quarter One", "Dynasty+"));
+    // Pick 3 sits above the 1st round's middle: 1.0 + 13.5 × 0.0125 = 1.16875, × 2.
+    // Both cells show 2 decimals, so their gap can be off by up to 0.01.
+    expect(Math.abs(plus - (dyn + 2 * 1.16875))).toBeLessThan(0.0101);
+    expect(scoreCellOf("Quarter One", "Dynasty+").getAttribute("title")).toContain("Drafted: 1st round, pick 3 → +2.34");
   });
 
   it("re-weights from the sliders", () => {

@@ -108,6 +108,45 @@ export const DRAFT_CAPITAL: Record<number, number> = {
   1: 1.0, 2: 0.6, 3: 0.25, 4: -0.15, 5: -0.35, 6: -0.6, 7: -0.7, [UNDRAFTED_ROUND]: -1.0,
 };
 
+// By pick, not just round (the user, 2026-11-10): pick 33 and pick 64 aren't the
+// same investment. The research gives hit rates by round, so each round's value
+// above sits at that round's middle pick, and in between the value runs in a
+// straight line from one round's middle to the next. Each round still averages
+// within about 0.02 of its table value (round 1 exactly), about what the table
+// was rounded by. Middles are from recent drafts: rounds 1 and 2 are 32 picks,
+// and comp picks stretch rounds 3 to 7 (2024: R3 65–100, R7 221–257; 2025: R3
+// 65–102, R7 217–257). Before the 1st round's middle and after the 7th's, the
+// end segments carry on: pick 1 ≈ +1.19, pick 32 ≈ +0.81, pick 257 = −0.75.
+export const ROUND_MIDDLE_PICK: Record<number, number> = {
+  1: 16.5, 2: 48.5, 3: 83, 4: 120, 5: 157, 6: 197, 7: 237,
+};
+
+const CAPITAL_ANCHORS: readonly [number, number][] = [1, 2, 3, 4, 5, 6, 7].map((r) => [ROUND_MIDDLE_PICK[r], DRAFT_CAPITAL[r]]);
+
+/** Draft capital at an overall pick (1 = first pick), on the round table's scale. */
+export function draftCapitalForPick(pick: number): number {
+  const a = CAPITAL_ANCHORS;
+  let i = 0;
+  while (i < a.length - 2 && pick > a[i + 1][0]) i++;
+  const [x0, y0] = a[i];
+  const [x1, y1] = a[i + 1];
+  const v = y0 + ((pick - x0) * (y1 - y0)) / (x1 - x0);
+  // Never below going undrafted.
+  return Math.max(DRAFT_CAPITAL[UNDRAFTED_ROUND], v);
+}
+
+/**
+ * Draft capital for Dynasty+: by overall pick when one is set, else the round's
+ * average. Undrafted is −1 whatever the pick (the Rookie Draft Hub writes an
+ * undrafted rookie as pick 300). Null before a round is set.
+ */
+export function draftCapitalAt(round: number | null, pick: number | null): number | null {
+  if (round == null) return null;
+  if (round === UNDRAFTED_ROUND) return DRAFT_CAPITAL[UNDRAFTED_ROUND];
+  if (pick != null && pick >= 1) return draftCapitalForPick(pick);
+  return DRAFT_CAPITAL[round] ?? null;
+}
+
 // ── Weights (the Big Board sliders) ────────────────────────────────────────
 export interface DynastyWeights { age: number; size: number; draft: number }
 // Draft defaults to 2 (the user's call, 2026-10-01): at 2× a 1st-rounder gets
@@ -127,6 +166,8 @@ export interface DynastyInputs {
   weightLb: number | null;
   /** 1–7, UNDRAFTED_ROUND, or null before the draft. */
   draftRound: number | null;
+  /** Overall pick (1 = first), or null when only the round is known. */
+  draftPick: number | null;
 }
 
 export interface DynastyBreakdown {
@@ -147,7 +188,7 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
   const flags = sizeFlags(inp.pos, inp.heightIn, inp.weightLb);
   const size = flags.reduce((s, f) => s + f.value, 0);
   const dynasty = inp.aeScore + w.age * (window ?? 0) + w.size * size;
-  const draftCapital = inp.draftRound != null ? DRAFT_CAPITAL[inp.draftRound] ?? null : null;
+  const draftCapital = draftCapitalAt(inp.draftRound, inp.draftPick);
   return {
     aeScore: inp.aeScore,
     rookieAge: inp.rookieAge,

@@ -5,10 +5,14 @@ import {
   scoreDynasty,
   DRAFT_CAPITAL,
   DEFAULT_DYNASTY_WEIGHTS,
+  ROUND_MIDDLE_PICK,
   SIZE_CAP,
   WR_LIGHT_PENALTY,
+  draftCapitalAt,
+  draftCapitalForPick,
   type DynastyInputs,
 } from "@/lib/scouting/dynastyScore";
+import { draftCapitalLabel } from "@/lib/draftRound";
 
 describe("careerWindowAdjustment", () => {
   it("credits young rookies and docks old ones, more so at short-prime positions", () => {
@@ -67,7 +71,7 @@ describe("sizeFlags", () => {
 
 describe("scoreDynasty", () => {
   const base: DynastyInputs = {
-    pos: "RB", aeScore: 0.8, rookieAge: { years: 21, estimated: false }, heightIn: 71, weightLb: 211, draftRound: null,
+    pos: "RB", aeScore: 0.8, rookieAge: { years: 21, estimated: false }, heightIn: 71, weightLb: 211, draftRound: null, draftPick: null,
   };
 
   it("adds the weighted window and size flags to the AE Score", () => {
@@ -105,5 +109,65 @@ describe("scoreDynasty", () => {
     expect(vals[0]).toBe(1);
     expect(vals[7]).toBe(-1);
     for (let i = 1; i < vals.length; i++) expect(vals[i]).toBeLessThan(vals[i - 1]);
+  });
+
+  it("reads draft capital from the overall pick once one is set", () => {
+    const early = scoreDynasty({ ...base, draftRound: 2, draftPick: 33 }, DEFAULT_DYNASTY_WEIGHTS);
+    const late = scoreDynasty({ ...base, draftRound: 2, draftPick: 64 }, DEFAULT_DYNASTY_WEIGHTS);
+    expect(early.draftCapital).toBeCloseTo(draftCapitalForPick(33), 12);
+    expect(early.plus! - late.plus!).toBeCloseTo(2 * (draftCapitalForPick(33) - draftCapitalForPick(64)), 9);
+    expect(early.plus!).toBeGreaterThan(late.plus!);
+  });
+});
+
+describe("draft capital by pick", () => {
+  it("puts each round's table value at the round's middle pick", () => {
+    for (const r of [1, 2, 3, 4, 5, 6, 7]) {
+      expect(draftCapitalForPick(ROUND_MIDDLE_PICK[r])).toBeCloseTo(DRAFT_CAPITAL[r], 12);
+    }
+  });
+
+  it("falls with every later pick, across round lines", () => {
+    for (let pick = 2; pick <= 262; pick++) {
+      expect(draftCapitalForPick(pick)).toBeLessThan(draftCapitalForPick(pick - 1));
+    }
+    // The last pick in round 1 and the first in round 2 sit next to each other.
+    expect(draftCapitalForPick(32) - draftCapitalForPick(33)).toBeCloseTo(0.0125, 9);
+  });
+
+  it("keeps each round's average at about its table value", () => {
+    const avg = (from: number, to: number) => {
+      let s = 0;
+      for (let p = from; p <= to; p++) s += draftCapitalForPick(p);
+      return s / (to - from + 1);
+    };
+    // Round 1 is one straight line, so it averages exactly.
+    expect(avg(1, 32)).toBeCloseTo(DRAFT_CAPITAL[1], 9);
+    // Later rounds bend at their middle pick: within 0.025 (2025's round lines).
+    const rounds: [number, number, number][] = [[2, 33, 64], [3, 65, 102], [4, 103, 138], [5, 139, 176], [6, 177, 216], [7, 217, 257]];
+    for (const [r, from, to] of rounds) expect(Math.abs(avg(from, to) - DRAFT_CAPITAL[r])).toBeLessThan(0.025);
+  });
+
+  it("carries the end segments past the first and last middles, never below undrafted", () => {
+    expect(draftCapitalForPick(1)).toBeCloseTo(1.19375, 9);
+    expect(draftCapitalForPick(32)).toBeCloseTo(0.80625, 9);
+    expect(draftCapitalForPick(257)).toBeCloseTo(-0.75, 9);
+    expect(draftCapitalForPick(2000)).toBe(DRAFT_CAPITAL[8]);
+  });
+
+  it("uses the pick when set, the round's average without one, and −1 for undrafted", () => {
+    expect(draftCapitalAt(null, 20)).toBeNull();
+    expect(draftCapitalAt(5, null)).toBe(DRAFT_CAPITAL[5]);
+    expect(draftCapitalAt(5, 0)).toBe(DRAFT_CAPITAL[5]);
+    expect(draftCapitalAt(1, 20)).toBeCloseTo(draftCapitalForPick(20), 12);
+    // The Rookie Draft Hub writes undrafted as round 8, pick 300.
+    expect(draftCapitalAt(8, 300)).toBe(-1);
+    expect(draftCapitalAt(8, null)).toBe(-1);
+  });
+
+  it("labels what the capital was read from", () => {
+    expect(draftCapitalLabel(1, 20)).toBe("1st round, pick 20");
+    expect(draftCapitalLabel(5, null)).toBe("5th round (no pick set, the round's average)");
+    expect(draftCapitalLabel(8, 300)).toBe("Undrafted");
   });
 });

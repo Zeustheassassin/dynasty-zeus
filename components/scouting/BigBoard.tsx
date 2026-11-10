@@ -12,7 +12,7 @@ import {
   type DynastyBreakdown, type DynastyWeights,
 } from "../../lib/scouting/dynastyScore";
 import { type ProspectAge } from "../../lib/scouting/prospectAge";
-import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftRoundLabel } from "../../lib/draftRound";
+import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftCapitalLabel, draftRoundLabel } from "../../lib/draftRound";
 import { classDraftedBy, makeLock } from "../../lib/scouting/scoreLock";
 import type { ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
 import { HEADLINE_LABEL, type HeadlineKey, type MetricContext } from "../../lib/scouting/contextGrading";
@@ -89,7 +89,7 @@ const BOARD_SCORES_DELAY_MS = 1000;
 const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }[] = [
   { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
   { key: "size",  label: "Size",  hint: "How much size counts: RBs and WRs carrying more weight for their height gain, lean and very light ones lose" },
-  { key: "draft", label: "Draft", hint: "How much draft round counts in Dynasty Score Plus" },
+  { key: "draft", label: "Draft", hint: "How much draft capital counts in Dynasty Score Plus: by overall pick, or the round's average when no pick is set" },
 ];
 
 // Derived per-prospect values the sort reads.
@@ -640,7 +640,7 @@ export default function BigBoard({
     else lines.push("Size: no flag → +0.00");
     lines.push(`= Dynasty ${signed(d.dynasty, 2)}`);
     if (plus && d.draftCapital != null) {
-      lines.push(`Drafted: ${draftRoundLabel(p.draft_round!)} → ${signed(weights.draft * d.draftCapital, 2)}`);
+      lines.push(`Drafted: ${draftCapitalLabel(p.draft_round!, p.draft_pick)} → ${signed(weights.draft * d.draftCapital, 2)}`);
       lines.push(`= Dynasty+ ${signed(d.plus!, 2)}`);
     }
     const v = plus ? d.plus! : d.dynasty;

@@ -15,6 +15,17 @@ export function draftRoundLabel(round: number): string {
   return ORDINAL[round] ?? `Rd ${round}`;
 }
 
+/**
+ * What Dynasty+'s draft capital was read from: "1st round, pick 20", "1st round
+ * (no pick set, the round's average)", or "Undrafted" (dynastyScore.draftCapitalAt).
+ */
+export function draftCapitalLabel(round: number, pick: number | null): string {
+  if (round === UNDRAFTED_ROUND) return "Undrafted";
+  return pick != null && pick >= 1
+    ? `${draftRoundLabel(round)} round, pick ${pick}`
+    : `${draftRoundLabel(round)} round (no pick set, the round's average)`;
+}
+
 /** A compact NFL draft slot: "KC · R1 · #8", "KC · Undrafted". Null when empty. */
 export function nflDraftSlotLabel(info: { team?: string | null; round?: number | null; pick?: number | null }): string | null {
   const undrafted = info.round === UNDRAFTED_ROUND;

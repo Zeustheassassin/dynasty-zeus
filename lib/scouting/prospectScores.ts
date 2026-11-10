@@ -318,6 +318,7 @@ export function dynastyScores(
       heightIn: parseHeightInches(p.height),
       weightLb: p.weight,
       draftRound: p.draft_round,
+      draftPick: p.draft_pick,
     }, weights));
   }
   return m;
