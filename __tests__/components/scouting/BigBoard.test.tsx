@@ -60,6 +60,8 @@ vi.mock("@/lib/scouting/aboveExpected", () => {
     computeRBRoleSlices: () => new Map(),
     computeQBRoleSlices: () => new Map(),
     computeTERoleSlices: () => new Map(),
+    // The QB throw-difficulty component (chartedComponents.ts): no plays here.
+    qbThrowDifficulty: () => new Map(),
     MIN_SAMPLE: 15,
   };
 });

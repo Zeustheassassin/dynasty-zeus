@@ -109,6 +109,9 @@ describe("the component lists", () => {
       pff_te_yprr: 0.5, pff_te_cc: 0.1, pff_te_mtf: 0.05, pff_te_fum: 0,
     });
     expect(CHARTED_COMPONENT_WEIGHTS.ch_rb_pb).toBe(0.15);
+    // QB reads and throw difficulty (the user's picks, 2026-11-10).
+    expect(CHARTED_COMPONENT_WEIGHTS).toMatchObject({ ch_qb_p2s: 0.2, ch_qb_reads: 0.2, ch_qb_diff: 0.2 });
+    expect(CHARTED_COMPONENTS.filter((d) => d.pos === "QB").map((d) => d.key)).toEqual(["ch_qb_p2s", "ch_qb_reads", "ch_qb_diff"]);
     expect(TAG_COMPONENT_WEIGHTS.tag_wr_press).toBe(0.15);
     // QB-fault sacks are shown, not scored: the charted sacks already score sacks.
     expect(TAG_COMPONENTS.map((d) => d.key)).not.toContain("tag_qb_qbsack");
@@ -166,6 +169,33 @@ describe("per-game counts", () => {
     expect(chartedGameCounts("ch_qb_p2s", inp)).toEqual([{ prospectId: "Q", gameId: "q", num: 1, den: 2 }]);
     expect(chartedGameCounts("ch_rb_pb", inp)).toEqual([{ prospectId: "R", gameId: "r", num: 1, den: 2 }]);
     expect(chartedGameCounts("ch_wr_drop", inp)).toEqual([{ prospectId: "W", gameId: "w", num: 1, den: 7 }]);
+  });
+
+  it("charted: QB reads count only throws from a read (2026-11-10)", () => {
+    const qb = (timing: QBPlay["timing"], over: Partial<QBPlay> = {}) => ({ game_id: "q", play_type: "pass", timing, ...over }) as QBPlay;
+    const inp = {
+      games: [game("q", "Q")], rbPlays: [], wrRouteCounts: [],
+      qbPlays: [
+        qb("first_option"), qb("first_option", { play_type: "rpo" }), qb("second_option"), qb("checkdown"),
+        // Off script or no read: not counted.
+        qb("extended_play"), qb("scramble"), qb("sack"), qb("throw_away"), qb(null), qb("second_option", { play_type: "run" }),
+      ],
+    };
+    expect(chartedGameCounts("ch_qb_reads", inp)).toEqual([{ prospectId: "Q", gameId: "q", num: 2, den: 4 }]);
+  });
+
+  it("charted: QB throw difficulty sums each graded throw's difficulty per game", () => {
+    const qb = (id: string, game_id: string) => ({ id, game_id, play_type: "pass" }) as QBPlay;
+    const inp = {
+      games: [game("q1", "Q"), game("q2", "Q")], rbPlays: [], wrRouteCounts: [],
+      qbPlays: [qb("a", "q1"), qb("b", "q1"), qb("c", "q2"), qb("ungraded", "q2")],
+      qbDifficulty: new Map([["a", 0.05], ["b", -0.01], ["c", 0.02]]),
+    };
+    const c = chartedGameCounts("ch_qb_diff", inp);
+    expect(c).toHaveLength(2);
+    expect(c[0]).toMatchObject({ prospectId: "Q", gameId: "q1", den: 2 });
+    expect(c[0].num).toBeCloseTo(0.04, 12);
+    expect(c[1]).toEqual({ prospectId: "Q", gameId: "q2", num: 0.02, den: 1 });
   });
 });
 

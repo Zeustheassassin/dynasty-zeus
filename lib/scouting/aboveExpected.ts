@@ -442,7 +442,7 @@ interface QBBaselines {
   throws:   QBPlay[];    // the same throws, for the tag correction
 }
 
-export function buildQBBaselines(leaguePlays: QBPlay[]): QBBaselines {
+export function buildQBBaselines(leaguePlays: readonly QBPlay[]): QBBaselines {
   const b: QBBaselines = {
     depth: {}, cvg: { man: { v: 0, n: 0 }, zone: { v: 0, n: 0 } },
     timing: {}, pressure: {}, platform: {}, route: {},
@@ -668,6 +668,32 @@ function modelAAESample(ratedPasses: QBPlay[], R: ResolvedBaselines, weightOf?: 
 // sample gate — see computeRBAboveExpectedForPlays for why.
 export function computeQBAAEForPlays(plays: QBPlay[], baselines: ResolvedBaselines): number | null {
   return modelAAE(plays.filter(isQBGradedThrow), baselines);
+}
+
+// Throw difficulty, for the AE Score's ch_qb_diff (chartedComponents.ts): how
+// much harder each graded throw was than the league's average graded throw,
+// by the same expected AAE judges it against (the difficulty model plus the
+// tag correction). Positive = harder. Keyed by play id; over every graded
+// throw the mean is exactly 0. The user's call (2026-11-10): AAE stays
+// accuracy only, and this sits beside it in the AE Score at 0.2, because a
+// QB's harder-throw games came in ~0.46 pts below expected per point of
+// difficulty (within his own games, 26 QBs, 76 games). The model is fair
+// throw by throw; it misses something shared across a hard game.
+export function qbThrowDifficulty(leaguePlays: readonly QBPlay[]): Map<string, number> {
+  const out = new Map<string, number>();
+  const R = resolveBaselines(buildQBBaselines(leaguePlays));
+  if (!R.model) return out;
+  const exp: [string, number][] = [];
+  let sum = 0;
+  for (const pl of leaguePlays) {
+    if (!isQBGradedThrow(pl)) continue;
+    const e = expectedForPlay(pl, R)!;
+    exp.push([pl.id, e]);
+    sum += e;
+  }
+  const mean = sum / exp.length;
+  for (const [id, e] of exp) out.set(id, mean - e);
+  return out;
 }
 
 function toAaeRow(dim: { expected: number | null; actual: number | null; n: number }): { aae: number | null; n: number } {

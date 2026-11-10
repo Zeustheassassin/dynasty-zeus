@@ -24,6 +24,7 @@ import {
   computeQBRoleSlices,
   computeTERoleSlices,
   aeValues,
+  qbThrowDifficulty,
 } from "@/lib/scouting/aboveExpected";
 import { aboveExpectedSampleForPlays, expectedFromModel } from "@/lib/scouting/difficultyModel";
 import { SEASON_DECAY } from "@/lib/scouting/seasonWeight";
@@ -383,6 +384,25 @@ describe("QB AAE difficulty model", () => {
       bigR,
     )!;
     expect(Math.abs(hit - 8)).toBeLessThan(2);
+  });
+
+  it("throw difficulty: harder throws read positive, the league averages exactly 0, run plays and tipped balls aren't graded", () => {
+    const withIds = [
+      ...league.map((pl, i) => ({ ...pl, id: `t${i}` })),
+      { ...qbPlay("g_bg", { accuracy: "tipped_ball", depth_zone: "deep_center" }), id: "tip" },
+      { ...qbPlay("g_bg", { accuracy: null, play_type: "run" }), id: "run" },
+    ];
+    const d = qbThrowDifficulty(withIds);
+    expect(d.size).toBe(300);
+    expect(d.has("tip")).toBe(false);
+    expect(d.has("run")).toBe(false);
+    const mean = [...d.values()].reduce((a, v) => a + v, 0) / d.size;
+    expect(Math.abs(mean)).toBeLessThan(1e-12);
+    // Clean short (t0–t99) is the easy throw; clean deep (t100–t199) is hard.
+    expect(d.get("t0")!).toBeLessThan(0);
+    expect(d.get("t100")!).toBeGreaterThan(0);
+    expect(d.get("t100")! - d.get("t0")!).toBeGreaterThan(0.1); // 90% vs 60% throws, less the ridge's pull
+    expect(qbThrowDifficulty([]).size).toBe(0);
   });
 });
 
