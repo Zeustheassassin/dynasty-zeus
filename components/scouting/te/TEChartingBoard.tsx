@@ -36,7 +36,7 @@ import { usualTEAlignment } from "../../../lib/scouting/usualAlignment";
 import type { PlayFacts } from "../../../lib/scouting/playTags";
 import TEPlayerCharts from "./TEPlayerCharts";
 import {
-  isTEBlock, teBlockDefaults, tePlayTypeForPositioning, TE_ROUTE_DEFAULTS, TE_TARGET_DEFAULTS,
+  isTEBlock, teBlockDefaults, tePlayTypeForPositioning, teRetiredTargetFlags, TE_ROUTE_DEFAULTS,
 } from "../../../lib/scouting/teChartingDefaults";
 import {
   buildTERouteBaselines, computeTERouteAboveExpectedForPlays,
@@ -96,9 +96,6 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
   const [wasOpen, setWasOpen]                 = useState<boolean | null>(null);
   const [targeted, setTargeted]               = useState<boolean | null>(TE_ROUTE_DEFAULTS.targeted);
   const [targetOutcome, setTargetOutcome]     = useState<TargetOutcome>(null);
-  const [contestedTarget, setContestedTarget] = useState<boolean | null>(null);
-  const [contestedCatch, setContestedCatch]   = useState<boolean | null>(null);
-  const [brokenTackle, setBrokenTackle]       = useState(false);
   const [playNotes, setPlayNotes]             = useState("");
   const [savingPlay, setSavingPlay]           = useState(false);
   const [playError, setPlayError]             = useState<string | null>(null);
@@ -165,10 +162,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
     const targets       = routePlays.filter((p) => p.targeted === true);
     const catches       = targets.filter((p) => p.caught === true);
     const drops         = targets.filter((p) => p.dropped === true);
-    const contestedTgts = targets.filter((p) => p.contested_target === true);
-    const contestedCtch = contestedTgts.filter((p) => p.contested_catch === true);
     const openRoutes    = routePlays.filter((p) => p.was_open === true);
-    const brokenTackles = plays.filter((p) => p.broken_tackle === true && p.caught === true);
 
     const blockSuc    = blockPlays.filter((p) => p.block_success === true).length;
     const runBlockSuc = runBlocks.filter((p) => p.block_success === true).length;
@@ -219,13 +213,10 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
       targets: targets.length,
       catches: catches.length,
       drops: drops.length,
-      contestedTargets: contestedTgts.length,
       openRoutes: openRoutes.length,
-      brokenTackles: brokenTackles.length,
       openPct:   pct(openRoutes.length, routePlays.length),
       targetPct: pct(targets.length, routePlays.length),
       catchPct:  pct(catches.length, targets.length),
-      contestedCatchPct: pct(contestedCtch.length, contestedTgts.length),
       blockSuc,
       blockSucPct:      pct(blockSuc, blockPlays.length),
       runBlockAttempts: runBlocks.length,
@@ -308,12 +299,9 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
     if (playType === "decoy") return true;
     if (playType === "run_block" || playType === "pass_block") return blockType !== null && blockSuccess !== null;
     if (!coverage || !routeType || wasOpen === null || targeted === null) return false;
-    if (targeted) {
-      if (targetOutcome === null || contestedTarget === null) return false;
-      if (contestedTarget && contestedCatch === null) return false;
-    }
+    if (targeted && targetOutcome === null) return false;
     return true;
-  }, [selectedGameId, playType, blockType, blockSuccess, coverage, routeType, wasOpen, targeted, targetOutcome, contestedTarget, contestedCatch]);
+  }, [selectedGameId, playType, blockType, blockSuccess, coverage, routeType, wasOpen, targeted, targetOutcome]);
   const canLog = playReady && !tagsMissing && !variantMissing;
 
   // The next play starts blank (the user, 10/23): where he lines up most (Left / Inline with
@@ -327,8 +315,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
     setBlockType(null); setBlockSuccess(null);
     setCoverage(TE_ROUTE_DEFAULTS.coverage); setRouteType(null); variant.reset(null); setWasOpen(null);
     setTargeted(TE_ROUTE_DEFAULTS.targeted);
-    setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null);
-    setBrokenTackle(false); setPlayNotes("");
+    setTargetOutcome(null); setPlayNotes("");
   }
 
   // Picking a play type fills its defaults for where he lined up; picking the one already on
@@ -345,11 +332,11 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
     }
     if (next === "route_run") {
       setCoverage(TE_ROUTE_DEFAULTS.coverage); setTargeted(TE_ROUTE_DEFAULTS.targeted);
-      setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null); setBrokenTackle(false);
+      setTargetOutcome(null);
     }
     if (next === "decoy") {
       setCoverage(null); setRouteType(null); variant.reset(null); setWasOpen(null); setTargeted(null);
-      setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null); setBrokenTackle(false);
+      setTargetOutcome(null);
     }
   }
 
@@ -383,9 +370,6 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
     setWasOpen(pl.was_open ?? null);
     setTargeted(pl.targeted ?? null);
     setTargetOutcome(pl.targeted ? (pl.caught ? "caught" : pl.dropped ? "dropped" : "incomplete") : null);
-    setContestedTarget(pl.contested_target ?? null);
-    setContestedCatch(pl.contested_catch ?? null);
-    setBrokenTackle(pl.broken_tackle ?? false);
     setPlayNotes(pl.play_notes ?? "");
   }
 
@@ -403,9 +387,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
       was_open: isRoute ? wasOpen : null, targeted: isRoute ? targeted : null,
       caught: isTargeted ? targetOutcome === "caught" : null,
       dropped: isTargeted ? targetOutcome === "dropped" : null,
-      contested_target: isTargeted ? contestedTarget : null,
-      contested_catch: isTargeted && contestedTarget ? contestedCatch : null,
-      broken_tackle: isTargeted && targetOutcome === "caught" ? brokenTackle : false,
+      // Contested and broken tackles aren't charted since 2026-11-10 (PFF's counts).
+      ...teRetiredTargetFlags(plays.find((p) => p.id === editingPlayId), isTargeted, isTargeted && targetOutcome === "caught"),
       // No tag columns at all when the play predates the tags.
       ...tags.payload(tagFacts),
       play_notes: playNotes || null,
@@ -432,9 +415,8 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
       was_open: isRoute ? wasOpen : null, targeted: isRoute ? targeted : null,
       caught: isTargeted ? targetOutcome === "caught" : null,
       dropped: isTargeted ? targetOutcome === "dropped" : null,
-      contested_target: isTargeted ? contestedTarget : null,
-      contested_catch: isTargeted && contestedTarget ? contestedCatch : null,
-      broken_tackle: isTargeted && targetOutcome === "caught" ? brokenTackle : false,
+      // contested_target / contested_catch / broken_tackle: not charted since
+      // 2026-11-10 (PFF's counts); the columns' defaults (NULL, NULL, false).
       ...tags.payload(tagFacts),
       play_notes: playNotes || null,
     }).select().single();
@@ -531,7 +513,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
                 {[
                   { label: "Total Plays",  value: stats.totalPlays,       color: "text-blue-400" },
                   { label: "Routes",       value: stats.routeAttempts,    color: "text-green-400" },
@@ -539,7 +521,6 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                   { label: "Targets",      value: stats.targets,          color: "text-amber-400" },
                   { label: "Catches",      value: stats.catches,          color: "text-emerald-300" },
                   { label: "Drops",        value: stats.drops,            color: "text-red-400" },
-                  { label: "Contested",    value: stats.contestedTargets, color: "text-orange-400" },
                   { label: "Games",        value: games.length,           color: "text-slate-300" },
                 ].map((s) => (
                   <div key={s.label} className="p-3 bg-slate-900 rounded-lg border border-slate-800">
@@ -550,12 +531,11 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
               </div>
 
               {stats.routeAttempts > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {[
                     { label: "Open Rate",            value: fmtPct(stats.openPct),           color: "text-emerald-400" },
                     { label: "Target Rate",          value: fmtPct(stats.targetPct),         color: "text-amber-400" },
                     { label: "Catch Rate",           value: fmtPct(stats.catchPct),          color: "text-emerald-300" },
-                    { label: "Contested Catch Rate", value: fmtPct(stats.contestedCatchPct), color: "text-orange-400" },
                   ].map((s) => (
                     <div key={s.label} className="p-3 bg-slate-900 rounded-lg border border-slate-800">
                       <div className="text-xs text-slate-500 mb-1">{s.label}</div>
@@ -727,19 +707,6 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                 </div>
               )}
 
-              {stats.totalPlays > 0 && (
-                <div className="p-4 bg-slate-900 rounded-lg border border-slate-800">
-                  <div className="text-xs text-slate-500 mb-3">Play Flags</div>
-                  <div className="flex gap-4">
-                    <div className="p-3 bg-slate-800/50 rounded-lg text-center min-w-[100px]">
-                      <div className="text-xs text-slate-500 mb-1">Broken Tackles</div>
-                      <div className="text-xl font-bold text-amber-400">{stats.brokenTackles}</div>
-                      <div className="text-xs text-slate-500 mt-0.5">{fmtPct(pct(stats.brokenTackles, stats.catches))} of catches</div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               <PlayerNotesList
                 totalPlays={stats.totalPlays}
                 notes={plays.map((p) => p.play_notes).filter((n): n is string => !!(n?.trim()))}
@@ -886,9 +853,9 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                   <div className="flex-1 whitespace-nowrap">
                     <div className="text-xs text-slate-500 mb-2">Targeted?</div>
                     <div className="flex gap-1.5">
-                      <button onClick={() => { setTargeted(true); if (contestedTarget === null) setContestedTarget(TE_TARGET_DEFAULTS.contestedTarget); }}
+                      <button onClick={() => setTargeted(true)}
                         className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${targeted === true ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
-                      <button onClick={() => { setTargeted(false); setTargetOutcome(null); setContestedTarget(null); setContestedCatch(null); }}
+                      <button onClick={() => { setTargeted(false); setTargetOutcome(null); }}
                         className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${targeted === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                     </div>
                   </div>
@@ -900,45 +867,15 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
                       <div className="flex gap-2">
                         <button onClick={() => setTargetOutcome("caught")}
                           className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "caught" ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>✓ Caught</button>
-                        <button onClick={() => { setTargetOutcome("dropped"); setBrokenTackle(false); }}
+                        <button onClick={() => setTargetOutcome("dropped")}
                           className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "dropped" ? "bg-red-600 text-white ring-2 ring-red-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>✗ Drop</button>
-                        <button onClick={() => { setTargetOutcome("incomplete"); setContestedCatch(null); setBrokenTackle(false); }}
+                        <button onClick={() => setTargetOutcome("incomplete")}
                           className={`flex-1 whitespace-nowrap px-4 py-2 rounded text-xs font-bold transition ${targetOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Incomplete</button>
                       </div>
                     </div>
-                    <div>
-                      <div className="text-xs text-slate-500 mb-2">Contested Target?</div>
-                      <div className="flex gap-1.5">
-                        <button onClick={() => setContestedTarget(true)}
-                          className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${contestedTarget === true ? "bg-orange-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
-                        <button onClick={() => { setContestedTarget(false); setContestedCatch(null); }}
-                          className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${contestedTarget === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
-                      </div>
-                    </div>
-                    {contestedTarget === true && (
-                      <div>
-                        <div className="text-xs text-slate-500 mb-2">Contested Catch?</div>
-                        <div className="flex gap-1.5">
-                          <button onClick={() => setContestedCatch(true)}
-                            className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${contestedCatch === true ? "bg-orange-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
-                          <button onClick={() => setContestedCatch(false)}
-                            className={`flex-1 whitespace-nowrap px-4 h-9 rounded text-xs font-medium transition ${contestedCatch === false ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
-                        </div>
-                      </div>
-                    )}
                     <PlayTagControls tags={tags} facts={tagFacts} part="play" step="target" accent="green" />
                   </div>
                 )}
-              </div>
-            )}
-
-            {targetOutcome === "caught" && (
-              <div>
-                <div className="text-xs text-slate-500 mb-2">Play Flags</div>
-                <button onClick={() => setBrokenTackle((v) => !v)}
-                  className={`w-full py-2 rounded text-sm font-medium transition ${brokenTackle ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
-                  Broken Tackle
-                </button>
               </div>
             )}
 

@@ -9,16 +9,19 @@
 //
 //   QB  sacks taken under pressure (pocket management; AAE leaves sacks out)
 //   RB  pass protection · hands (drops per target) · getting open on routes
-//   WR  hands (drops per catchable target) · contested catches (SAE reads
-//       getting open, not the catch)
+//   WR  hands (drops per catchable target; SAE reads getting open, not the
+//       catch)
 //
-// PFF's versions of the same skills (pressures allowed, drops, contested
-// catches, pressure-to-sack) stay out of the score, so a skill isn't counted
-// twice; they still show in the PFF columns. RB broken tackles and explosive
-// runs used to be here too; since 2026-10-07 PFF's missed tackles and 10+
-// yard runs score them instead (pffComponents.ts) and the RB board no longer
+// PFF's versions of the same skills (pressures allowed, drops,
+// pressure-to-sack) stay out of the score, so a skill isn't counted twice;
+// they still show in the PFF columns. RB broken tackles and explosive runs
+// used to be here too; since 2026-10-07 PFF's missed tackles and 10+ yard
+// runs score them instead (pffComponents.ts) and the RB board no longer
 // charts them (rb_plays.broken_tackle / explosive_play stay on old plays,
-// unread). These rates exist on every charted game, old ones included (no
+// unread). WR contested catches (CC%) went the same way on 2026-11-10: PFF's
+// contested catch rate scores them and the WR board's Contested button is
+// gone (route_plays.contested and the imported summary_contested counts stay
+// on old games, shown only where PFF has nothing). These rates exist on every charted game, old ones included (no
 // re-charting), and go through the same pipeline as PFF's results
 // (countComponents.ts): season-weighted, pool-relative, opponent-adjusted,
 // weighted by reliability, per player.
@@ -33,8 +36,6 @@ export interface ProspectGameRouteCountsRow {
   targets: number;
   catches: number;
   drops: number;
-  contested: number;
-  contested_catches: number;
 }
 
 interface PlayCountDef<T> extends CountStatDef {
@@ -71,9 +72,6 @@ export const WR_CHARTED: readonly RouteCountDef[] = [
   { key: "ch_wr_drop", label: "Drop%", source: "charted", pos: "WR", dir: -1, scale: 100, unit: "catchable targets", floor: 15, suffix: "%",
     description: "Drops per catchable target (catches + drops), from your charting.",
     of: (r) => (r.catches + r.drops > 0 ? { num: r.drops, den: r.catches + r.drops } : null) },
-  { key: "ch_wr_cc", label: "CC%", source: "charted", pos: "WR", dir: 1, scale: 100, unit: "contested targets", floor: 5, suffix: "%",
-    description: "Contested catches per contested target, from your charting.",
-    of: (r) => (r.contested > 0 ? { num: r.contested_catches, den: r.contested } : null) },
 ];
 
 export const CHARTED_COMPONENTS: readonly CountStatDef[] = [...QB_CHARTED, ...RB_CHARTED, ...WR_CHARTED];
@@ -124,5 +122,5 @@ export function chartedGameCounts(key: string, inp: ChartedInputs): GameCount[] 
 export const CHARTED_COMPONENT_WEIGHTS: Readonly<Record<string, number>> = {
   ch_qb_p2s: 0.2,
   ch_rb_pb: 0.15, ch_rb_drop: 0.1, ch_rb_open: 0.1,
-  ch_wr_drop: 0.2, ch_wr_cc: 0.1,
+  ch_wr_drop: 0.2,
 };

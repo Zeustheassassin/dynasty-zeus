@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  isTEBlock, teBlockDefaults, tePlayTypeForPositioning, TE_ROUTE_DEFAULTS, TE_TARGET_DEFAULTS,
+  isTEBlock, teBlockDefaults, tePlayTypeForPositioning, teRetiredTargetFlags, TE_ROUTE_DEFAULTS,
 } from "@/lib/scouting/teChartingDefaults";
 
 // The user's TE charting defaults (2026-10-19): pre-filled, changeable picks by alignment.
@@ -40,9 +40,19 @@ describe("tePlayTypeForPositioning", () => {
 });
 
 describe("route and block helpers", () => {
-  it("a route starts in Zone, not targeted; a target starts uncontested", () => {
+  it("a route starts in Zone, not targeted", () => {
     expect(TE_ROUTE_DEFAULTS).toEqual({ coverage: "zone", targeted: false });
-    expect(TE_TARGET_DEFAULTS).toEqual({ contestedTarget: false });
+  });
+
+  it("an edit keeps an older play's contested / broken tackle picks unless it makes them impossible (2026-11-10)", () => {
+    const contested = { contested_target: true };
+    // Still a catch: untouched.
+    expect(teRetiredTargetFlags(contested, true, true)).toEqual({});
+    // No longer caught: no broken tackle, and a contested target wasn't a contested catch.
+    expect(teRetiredTargetFlags(contested, true, false)).toEqual({ broken_tackle: false, contested_catch: false });
+    expect(teRetiredTargetFlags({ contested_target: null }, true, false)).toEqual({ broken_tackle: false, contested_catch: null });
+    // No longer a target: none of them.
+    expect(teRetiredTargetFlags(contested, false, false)).toEqual({ contested_target: null, contested_catch: null, broken_tackle: false });
   });
 
   it("run and pass blocks are block reps; routes and decoys aren't", () => {

@@ -59,17 +59,17 @@
 //
 // YAC is PFF's: yards after the catch and missed tackles forced per catch,
 // summed over his charted games linked to PFF, each against the pool of every
-// charted WR's (pffYac / pffYacMtf). The user also tags a broken tackle after
-// the catch on the board, but only 134 catches across 16 WRs carried it on
-// 2026-11-09 (5 WRs with 10+), too few to read; it's on the activation list
-// to take over the missed tackles once enough WRs have it. With no PFF catches
-// both read as average ("no catches yet").
+// charted WR's (pffYac / pffYacMtf). The board's Broken tackle after catch tag
+// was dropped 2026-11-10 (the user: PFF's count instead; only 134 catches
+// across 16 WRs ever carried it), so PFF's missed tackles stay. With no PFF
+// catches both read as average ("no catches yet").
 //
 // X's 50/50 balls are PFF's contested catch rate (the user's call, 2026-11-09):
 // contested catches over contested targets, summed over his charted games
 // linked to PFF, against the pool of every charted WR's, like the YAC reads.
-// The user's own charted contested catches stay in the AE Score (CC%); the
-// buckets feed no score, so nothing counts twice. The back-shoulder fade
+// The AE Score's CC% is PFF's too since 2026-11-10, when the board stopped
+// charting contested catches; the buckets feed no score, so nothing counts
+// twice. The back-shoulder fade
 // sub-route is too thin to read on its own (4 charted on 2026-11-09). With no
 // PFF contested targets it reads as average.
 //

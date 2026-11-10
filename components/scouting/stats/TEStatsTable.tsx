@@ -53,9 +53,6 @@ export const TE_STAT_COLS: ColDef[] = [
   { key: "tgt_pct",    label: "Tgt%",    group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, weightBy: "routes" },
   { key: "catch_pct",  label: "Catch%",  group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62, weightBy: "raw_tgts" },
   { key: "drop_pct",   label: "Drop%",   group: "Advanced", fmt: "pct",       colorDir: -1, width: 60, weightBy: "raw_tgts" },
-  { key: "cont_tgt_pct",  label: "ContTgt%",  group: "Advanced", fmt: "pct", colorDir: -1, width: 72, weightBy: "routes" },
-  { key: "cont_catch_pct",label: "ContCatch%",group: "Advanced", fmt: "pct", colorDir: 1,  width: 78, weightBy: "raw_cont_tgt" },
-  { key: "btk_pct",    label: "BTkl%",   group: "Advanced", fmt: "pct",       colorDir: 1,  width: 60, weightBy: "snaps" },
   // By Positioning
   { key: "pos_wide_open",  label: "Wide%",  group: "By Positioning", fmt: "pct", colorDir: 1, width: 60, weightBy: "pos_wide_rated_n" },
   { key: "pos_slot_open",  label: "Slot%",  group: "By Positioning", fmt: "pct", colorDir: 1, width: 58, weightBy: "pos_slot_rated_n" },
@@ -99,9 +96,6 @@ export const TE_STAT_COLS: ColDef[] = [
   { key: "raw_tgts",     label: "Tgts",   group: "Raw", fmt: "count", width: 48 },
   { key: "raw_catches",  label: "Catch",  group: "Raw", fmt: "count", width: 50 },
   { key: "raw_drops",    label: "Drops",  group: "Raw", fmt: "count", width: 50 },
-  { key: "raw_cont_tgt", label: "ContTgt",group: "Raw", fmt: "count", width: 60 },
-  { key: "raw_cont_ctch",label: "ContCtch",group:"Raw", fmt: "count", width: 68 },
-  { key: "raw_btk",      label: "BTkl",   group: "Raw", fmt: "count", width: 46 },
   // No charted yards: the app never types yards. PFF's are in the PFF groups.
   // PFF over the charted games
   // The tag-only stats (tagged plays only)
@@ -187,9 +181,6 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
         const tgts = routePlays.filter((pl) => pl.targeted === true);
         const catches = tgts.filter((pl) => pl.caught === true);
         const drops = tgts.filter((pl) => pl.dropped === true);
-        const contTgt = routePlays.filter((pl) => pl.contested_target === true);
-        const contCatch = contTgt.filter((pl) => pl.contested_catch === true);
-        const btk = pPlays.filter((pl) => pl.broken_tackle).length;
 
         const te_saer = teSaerMap.get(p.id) ?? null;
         const te_saeb = teSaebMap.get(p.id) ?? null;
@@ -210,9 +201,6 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
           tgt_pct: pct(tgts.length, routePlays.length),
           catch_pct: pct(catches.length, tgts.length),
           drop_pct: pct(drops.length, tgts.length),
-          cont_tgt_pct: pct(contTgt.length, routePlays.length),
-          cont_catch_pct: pct(contCatch.length, contTgt.length),
-          btk_pct: pct(btk, pPlays.length),
           // By positioning
           ...Object.fromEntries(
             POSITIONINGS.map((pos) => {
@@ -280,9 +268,6 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
           raw_tgts:     tgts.length,
           raw_catches:  catches.length,
           raw_drops:    drops.length,
-          raw_cont_tgt: contTgt.length,
-          raw_cont_ctch: contCatch.length,
-          raw_btk:      btk,
           ...tagRow("TE", tags?.get(p.id)),
           ...pffRow(pff?.get(p.id)),
           ...extras?.get(p.id),

@@ -51,7 +51,7 @@ export type TagStep =
   | "route"     // TE: under the route
   | "coverage"  // WR / TE: under Coverage
   | "target"    // WR / TE: in the targeted box, after the outcome
-  | "catch";    // RB / WR: with a catch
+  | "catch";    // RB: with a catch
 
 /** What a board knows about the play being charted, as far as the tags care. */
 export type PlayFact =
@@ -166,7 +166,10 @@ export const POSITION_TAGS: Readonly<Record<TagPosition, readonly PlayTagSpec[]>
     // the Double coverage button; routes charted as Double before stay so.
     { column: "double_coverage",           label: "Double coverage",           short: "Dbl",   entry: "exception", appliesTo: "route", step: "coverage" },
     { column: "press_release",             label: "Release vs press",          short: "Press", entry: "conditional", values: ["won", "lost"], valueLabels: ["Won", "Lost"], required: true, appliesTo: "press", when: "press snaps only (one required click)", step: "coverage" },
-    { column: "broken_tackle_after_catch", label: "Broken tackle after catch", short: "BT",    entry: "conditional", appliesTo: "catch", when: "catches only", step: "catch" },
+    // broken_tackle_after_catch was dropped 2026-11-10 (the user: PFF's
+    // missed tackles per catch score it). The column stays on old plays; new
+    // plays leave it NULL. Migration 088 gave the tag-cells view its own
+    // caught flag, which this tag used to stand in for.
     ...CATCH_DIFFICULTY_TAGS,
   ],
   TE: [

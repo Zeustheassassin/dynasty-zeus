@@ -82,7 +82,6 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
   const [wasOpen, setWasOpen]         = useState(false);
   const [targeted, setTargeted]       = useState(false);
   const [playOutcome, setPlayOutcome] = useState<"caught" | "drop" | "incomplete" | null>(null);
-  const [contested, setContested]     = useState(false);
   const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
   // No yards entry: yards come from PFF (game log, stats table). Old typed
   // yards stay in route_plays.yards; nothing reads or rewrites them.
@@ -140,7 +139,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
 
   // Per-play tags (migration 062): new plays write all of them, an edit of an
   // older play writes none. Release vs press needs a pick on every press
-  // route; broken tackle shows on a catch; Double on any route; the catch
+  // route; Double on any route; the catch
   // difficulty tags (078) on every target, sideline on a catch, the reason on
   // an incompletion.
   const tags = usePlayTags("WR", selectedGameId, gamePlays);
@@ -159,21 +158,18 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
     const totalSnaps  = plays.length;
     const totalRoutes = routePlays.length;
 
-    let tgt = 0, ctch = 0, drops = 0, contested = 0, contestedCatches = 0;
+    // Contested catches aren't charted here since 2026-11-10 (PFF's count).
+    let tgt = 0, ctch = 0, drops = 0;
     for (const g of games) {
       if (g.summary_targets != null) {
         tgt += g.summary_targets;
         ctch += g.summary_catches ?? 0;
         drops += g.summary_drops ?? 0;
-        contested += g.summary_contested ?? 0;
-        contestedCatches += g.summary_contested_catches ?? 0;
       } else {
         const gPlays = routePlays.filter((p) => p.game_id === g.id);
         tgt += gPlays.filter((p) => p.targeted).length;
         ctch += gPlays.filter((p) => p.targeted && p.success).length;
         drops += gPlays.filter((p) => p.targeted && p.success === false).length;
-        contested += gPlays.filter((p) => p.contested).length;
-        contestedCatches += gPlays.filter((p) => p.contested && p.success === true).length;
       }
     }
 
@@ -239,7 +235,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
 
     return {
       totalSnaps, totalRoutes, total: totalRoutes,
-      targets: tgt, catches: ctch, drops, contested, contestedCatches,
+      targets: tgt, catches: ctch, drops,
       openRate, catchRate, successRate: openRate,
       targetRate: routePct(tgt),
       pctLeft: snapPct(leftN), pctRight: snapPct(rightN), pctSlot: snapPct(slotN), pctBf: snapPct(bfN),
@@ -318,7 +314,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
       was_open: noRouteRun ? false : wasOpen,
       targeted: noRouteRun ? false : targeted,
       success: (!noRouteRun && targeted) ? (playOutcome === "caught" ? true : playOutcome === "drop" ? false : null) : null,
-      contested: (!noRouteRun && targeted) ? contested : false,
+      // contested: not charted since 2026-11-10 (PFF's count); the column's default false.
       ...tags.payload(tagFacts),
       play_notes: playNotes,
     }).select().single();
@@ -370,7 +366,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
     setEditingPlayId(null); setNoRouteRun(true); setRouteType("curl"); variant.reset("curl");
     setAlignment(usual.current?.alignment ?? "right"); setOnLine(usual.current?.onLine ?? true);
     setCoverage(""); setWasOpen(false); setTargeted(false);
-    setPlayOutcome(null); setContested(false); setPlayNotes("");
+    setPlayOutcome(null); setPlayNotes("");
     tags.reset();
   }
 
@@ -383,7 +379,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
     setAlignment(pl.alignment); setOnLine(pl.on_line); setCoverage(pl.coverage ?? "");
     setWasOpen(pl.was_open); setTargeted(pl.targeted);
     setPlayOutcome(pl.targeted ? (pl.success === true ? "caught" : pl.success === false ? "drop" : "incomplete") : null);
-    setContested(pl.contested ?? false); setPlayNotes(pl.play_notes ?? "");
+    setPlayNotes(pl.play_notes ?? "");
   }
 
   async function saveEditedPlay() {
@@ -395,7 +391,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
       alignment, on_line: onLine, coverage: noRouteRun ? "" : coverage,
       was_open: noRouteRun ? false : wasOpen, targeted: noRouteRun ? false : targeted,
       success: (!noRouteRun && targeted) ? (playOutcome === "caught" ? true : playOutcome === "drop" ? false : null) : null,
-      contested: (!noRouteRun && targeted) ? contested : false,
+      // contested isn't written: an older play keeps what was charted.
       // No tag columns at all when the play predates the tags.
       ...tags.payload(tagFacts),
       play_notes: playNotes,
@@ -485,7 +481,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 {[
                   { label: "Snaps",      value: stats.totalSnaps,       color: "text-slate-300" },
                   { label: "Routes",     value: stats.totalRoutes,      color: "text-blue-400" },
@@ -493,8 +489,6 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                   { label: "Targets",    value: stats.targets,          color: "text-amber-400" },
                   { label: "Catches",    value: stats.catches,          color: "text-emerald-400" },
                   { label: "Drops",      value: stats.drops,            color: "text-red-400" },
-                  { label: "Contested",  value: stats.contested,        color: "text-purple-400" },
-                  { label: "Cont. Catch",value: stats.contestedCatches, color: "text-purple-300" },
                 ].map((s) => (
                   <div key={s.label} className="p-3 bg-slate-900 rounded-lg border border-slate-800">
                     <div className="text-xs text-slate-500 mb-1">{s.label}</div>
@@ -849,7 +843,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                   <div className="flex gap-1.5">
                     <button onClick={() => setTargeted(true)}
                       className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${targeted ? "bg-amber-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
-                    <button onClick={() => { setTargeted(false); setPlayOutcome(null); setContested(false); }}
+                    <button onClick={() => { setTargeted(false); setPlayOutcome(null); }}
                       className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${!targeted ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
                   </div>
                 </div>
@@ -858,30 +852,18 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
 
             {!noRouteRun && targeted && (
               <div className="space-y-3 p-3 bg-slate-900/60 rounded-lg border border-slate-800">
-                <div className="flex flex-wrap gap-4">
-                  <div className="flex-1 whitespace-nowrap">
-                    <div className="text-xs text-slate-500 mb-2">Outcome</div>
-                    <div className="flex gap-1.5">
-                      <button onClick={() => setPlayOutcome("caught")}
-                        className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "caught" ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Caught ✓</button>
-                      <button onClick={() => setPlayOutcome("drop")}
-                        className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "drop" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Drop ✗</button>
-                      <button onClick={() => setPlayOutcome("incomplete")}
-                        className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Incomplete</button>
-                    </div>
-                  </div>
-                  <div className="flex-1 whitespace-nowrap">
-                    <div className="text-xs text-slate-500 mb-2">Contested?</div>
-                    <div className="flex gap-1.5">
-                      <button onClick={() => setContested(true)}
-                        className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${contested ? "bg-purple-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Yes</button>
-                      <button onClick={() => setContested(false)}
-                        className={`flex-1 whitespace-nowrap px-3 h-10 rounded text-xs font-medium transition ${!contested ? "bg-slate-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>No</button>
-                    </div>
+                <div>
+                  <div className="text-xs text-slate-500 mb-2">Outcome</div>
+                  <div className="flex gap-1.5">
+                    <button onClick={() => setPlayOutcome("caught")}
+                      className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "caught" ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Caught ✓</button>
+                    <button onClick={() => setPlayOutcome("drop")}
+                      className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "drop" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Drop ✗</button>
+                    <button onClick={() => setPlayOutcome("incomplete")}
+                      className={`flex-1 whitespace-nowrap px-4 h-10 rounded text-xs font-bold transition ${playOutcome === "incomplete" ? "bg-slate-500 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>Incomplete</button>
                   </div>
                 </div>
                 <PlayTagControls tags={tags} facts={tagFacts} part="play" step="target" accent="blue" tall />
-                <PlayTagControls tags={tags} facts={tagFacts} part="play" step="catch" accent="blue" tall />
               </div>
             )}
 

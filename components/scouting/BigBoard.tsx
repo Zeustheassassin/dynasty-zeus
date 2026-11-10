@@ -105,7 +105,7 @@ interface SortContext {
 type SortKey =
   | "pre_draft_grade" | "post_draft_grade" | "grade_delta"
   | "personal_rank" | "overall_rank" | "sample" | "ae_score" | "dynasty" | "dynasty_plus" | "role" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
-  | "total_routes" | "total_games" | "targets" | "catches" | "drops" | "contested" | "contested_catches"
+  | "total_routes" | "total_games" | "targets" | "catches" | "drops"
   | "success_rate" | "target_rate" | "adj_success_above_exp" | `ae_${AEKey}`
   | "pct_left" | "pct_right" | "pct_slot" | "pct_backfield"
   | "depth_behind_los" | "depth_on_los" | "total_snaps"
@@ -201,8 +201,6 @@ function getSortValue(
   if (key === "targets") return p.targets;
   if (key === "catches") return p.catches;
   if (key === "drops") return p.drops;
-  if (key === "contested") return p.contested;
-  if (key === "contested_catches") return p.contested_catches;
   if (key === "success_rate") return p.success_rate ?? -BIG;
   if (key === "target_rate") return p.target_rate ?? -BIG;
   if (key === "adj_success_above_exp") return p.adj_success_above_exp ?? -BIG;
@@ -746,11 +744,11 @@ export default function BigBoard({
     "RB SRAE counts his runs in the NFL's mix (inside zone 37%, outside zone 19.5%, inside gap 28%, outside gap 15.5%; " +
     "zone vs gap from PFF's NFL data), each run type moved from his own share by how many he ran; the SRAE column keeps every run as charted. " +
     "Each position's score also takes in, per player and weighted by how far his sample is trusted: your charting no AE reads " +
-    "(QB sacks under pressure; RB pass pro, drops, open on routes; WR drops, contested catches), " +
-    "PFF's results over the charted games where you don't chart (QB BTT%, TWP%, rushing; RB YCO/A, missed tackles, 10+ yard runs, 15+ of 10+, YPRR; WR/TE YPRR, YAC; RB and QB fumbles), " +
+    "(QB sacks under pressure; RB pass pro, drops, open on routes; WR drops), " +
+    "PFF's results over the charted games where you don't chart (QB BTT%, TWP%, rushing; RB YCO/A, missed tackles, 10+ yard runs, 15+ of 10+, YPRR; WR/TE YPRR, contested catches, missed tackles after the catch; WR YAC; RB and QB fumbles), " +
     "and the tag-only stats once enough tagged plays exist. A player without one keeps his score as it was. " +
     "Opponent strength is taken out (the AE columns keep it): WR cSAE and SAE, QB sacks under pressure, QB PFF fumbles and WR PFF YPRR by the opponent's defensive SP+, " +
-    "everything else but QB AAE by the opponent's P4 / G5 / FCS tier; QB AAE, QB PFF BTT%, WR drops, WR contested catches and RB PFF YPRR by the game's weather too. " +
+    "everything else but QB AAE by the opponent's P4 / G5 / FCS tier; QB AAE, QB PFF BTT%, WR drops and RB PFF YPRR by the game's weather too. " +
     "Each passed a held-out test (Analysis → Grading checks); supporting cast is shown, never scored. " +
     `Older seasons count a little less, here and in the AE columns (each season back ×${SEASON_DECAY}). ` +
     "WRs lined up 75%+ on one side (or, milder, in the slot) lose up to 0.5 (0.2), most at 95%. " +

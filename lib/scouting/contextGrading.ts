@@ -29,6 +29,10 @@
 //   (+13.7%, p .005), WR SAE against SP+ (+1.0%, p .025, joining cSAE), PFF
 //   QB Fum% against SP+ (+5.2%, p .04) and WR charted Drop% weather (+0.5%,
 //   p .045).
+// - 2026-11-10: the WR board stopped charting contested catches (the user);
+//   the AE Score's CC% is now PFF's (pff_wr_cc), and the charted CC%'s
+//   weather switch went with it. PFF's CC% hasn't had its own weather test
+//   yet: it's off until Grading checks shows it passing (activation list).
 import type { AESample } from "../types";
 import type { CompositePos } from "./aeComposite";
 import { adjustForContext, CONTEXT_TEST_MIN_PROSPECTS, fitContext, type ByGame, type ContextFit, type CovariateSpec } from "./contextEffects";
@@ -39,7 +43,7 @@ import {
 /** Metrics (headline AE keys and component keys) judged against opponent defense SP+ instead of tiers. */
 export const OPPONENT_SP: ReadonlySet<string> = new Set(["wr_csae", "ch_qb_p2s", "pff_wr_yprr", "wr_sae", "pff_qb_fum"]);
 /** Metrics whose weather effect counts. */
-export const WEATHER_ON: ReadonlySet<string> = new Set(["ch_wr_cc", "pff_rb_yprr", "qb_aae", "pff_btt", "ch_wr_drop"]);
+export const WEATHER_ON: ReadonlySet<string> = new Set(["pff_rb_yprr", "qb_aae", "pff_btt", "ch_wr_drop"]);
 /** Supporting cast never counts in a score (the user's call); kept for the checks. */
 export const CAST_ON: ReadonlySet<string> = new Set();
 

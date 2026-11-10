@@ -6,7 +6,7 @@
 //   - Inline / Wing Back → the play starts as a Run Block (the user, 10/19,
 //     first said Pass Block); a block rep (run or pass) is an Inline block on
 //     a DL, Success.
-//   - Route Run → Zone coverage, not targeted; once targeted, not contested.
+//   - Route Run → Zone coverage, not targeted.
 // Full Back / Running Back have no block defaults (pick type and outcome).
 // Pure: TEChartingBoard applies these when positioning or play type is picked,
 // and to the next play after one is logged.
@@ -42,8 +42,22 @@ export function teBlockDefaults(positioning: TEPositioning): TEBlockDefaults {
 /** A route rep's pre-filled picks. */
 export const TE_ROUTE_DEFAULTS: { coverage: TECoverage; targeted: boolean } = { coverage: "zone", targeted: false };
 
-/** A target's pre-filled pick once "Targeted? Yes" is on. */
-export const TE_TARGET_DEFAULTS: { contestedTarget: boolean } = { contestedTarget: false };
+/**
+ * Contested target / catch and Broken Tackle aren't charted since 2026-11-10
+ * (the user: PFF's contested catches and missed tackles per catch score
+ * them). A new play leaves the columns at their defaults (NULL, NULL, false);
+ * an edit keeps what an older play had, except what the edit makes
+ * impossible: no target, no contested target or catch; no catch, no broken
+ * tackle and (on a contested target) no contested catch.
+ */
+export function teRetiredTargetFlags(
+  before: { contested_target: boolean | null } | undefined,
+  targeted: boolean, caught: boolean,
+): { contested_target?: null; contested_catch?: boolean | null; broken_tackle?: false } {
+  if (!targeted) return { contested_target: null, contested_catch: null, broken_tackle: false };
+  if (!caught) return { broken_tackle: false, contested_catch: before?.contested_target ? false : null };
+  return {};
+}
 
 /** The play type after moving to `positioning`: Inline and Wing Back start as a Run Block. */
 export function tePlayTypeForPositioning(positioning: TEPositioning, current: TEPlayType): TEPlayType {

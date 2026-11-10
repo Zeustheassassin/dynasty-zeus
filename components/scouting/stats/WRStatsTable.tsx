@@ -44,8 +44,6 @@ export const WR_STAT_COLS: ColDef[] = [
   { key: "tgt_pct",  label: "Tgt%",   group: "Advanced", fmt: "pct",       colorDir: 1,  width: 58, tooltip: "Targets per route run", weightBy: "routes" },
   { key: "catch_pct",label: "Catch%", group: "Advanced", fmt: "pct",       colorDir: 1,  width: 62, tooltip: "Catches per target", weightBy: "raw_tgts" },
   { key: "drop_pct", label: "Drop%",  group: "Advanced", fmt: "pct",       colorDir: -1, width: 60, tooltip: "Drops per target", weightBy: "raw_tgts" },
-  { key: "cont_tgt_pct",   label: "ContTgt%",   group: "Advanced", fmt: "pct", colorDir: -1, width: 72, weightBy: "routes" },
-  { key: "cont_catch_pct", label: "ContCatch%", group: "Advanced", fmt: "pct", colorDir: 1,  width: 78, weightBy: "raw_cont_tgt" },
   // By Coverage
   { key: "cvg_man_open",    label: "Man%",    group: "By Coverage", fmt: "pct", colorDir: 1, width: 60, weightBy: "cvg_man_n" },
   { key: "cvg_zone_open",   label: "Zone%",   group: "By Coverage", fmt: "pct", colorDir: 1, width: 62, weightBy: "cvg_zone_n" },
@@ -90,8 +88,6 @@ export const WR_STAT_COLS: ColDef[] = [
   { key: "raw_tgts",     label: "Tgts",    group: "Raw", fmt: "count", width: 48 },
   { key: "raw_catches",  label: "Catch",   group: "Raw", fmt: "count", width: 50 },
   { key: "raw_drops",    label: "Drops",   group: "Raw", fmt: "count", width: 50 },
-  { key: "raw_cont_tgt", label: "ContTgt", group: "Raw", fmt: "count", width: 60 },
-  { key: "raw_cont_ctch",label: "ContCtch",group: "Raw", fmt: "count", width: 68 },
   { key: "raw_snaps",    label: "Snaps",   group: "Raw", fmt: "count", width: 52 },
   { key: "raw_routes",   label: "Routes",  group: "Raw", fmt: "count", width: 58 },
   // PFF over the charted games (yards live here: none are typed in the app)
@@ -167,8 +163,6 @@ export function buildWRStatRows(prospectsWithStats: ProspectWithStats[], pff?: M
         tgt_pct: p.target_rate,
         catch_pct: p.targets > 0 ? parseFloat(((p.catches / p.targets) * 100).toFixed(1)) : null,
         drop_pct: p.targets > 0 ? parseFloat(((p.drops / p.targets) * 100).toFixed(1)) : null,
-        cont_tgt_pct: p.total_routes > 0 ? parseFloat(((p.contested / p.total_routes) * 100).toFixed(1)) : null,
-        cont_catch_pct: p.contested > 0 ? parseFloat(((p.contested_catches / p.contested) * 100).toFixed(1)) : null,
         // Coverage
         cvg_man_open: cvgOpenPct(p, "man"),
         cvg_zone_open: cvgOpenPct(p, "zone"),
@@ -234,8 +228,6 @@ export function buildWRStatRows(prospectsWithStats: ProspectWithStats[], pff?: M
         raw_tgts: p.targets,
         raw_catches: p.catches,
         raw_drops: p.drops,
-        raw_cont_tgt: p.contested,
-        raw_cont_ctch: p.contested_catches,
         raw_snaps: p.total_snaps,
         raw_routes: p.total_routes,
         ...tagRow("WR", tags?.get(p.id)),

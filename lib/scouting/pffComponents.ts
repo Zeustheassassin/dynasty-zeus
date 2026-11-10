@@ -12,10 +12,14 @@
 // What's here are results, not PFF's grades: a grade is PFF's opinion of the
 // player, and the AE Score is the user's. And only what the user doesn't chart
 // (the user's rule, 2026-10-05: nothing may count twice). Accuracy (ADJ%) is
-// AAE's; pressures allowed, drops, contested catches and pressure-to-sack are
-// the user's own charted pass-block results, drops, contested catches and
-// sacks under pressure (chartedComponents.ts). Those PFF numbers still show in
-// the PFF columns; they just don't score.
+// AAE's; pressures allowed, drops and pressure-to-sack are the user's own
+// charted pass-block results, drops and sacks under pressure
+// (chartedComponents.ts). Those PFF numbers still show in the PFF columns;
+// they just don't score.
+//
+// WR and TE contested catches and missed tackles after the catch went the
+// other way (the user, 2026-11-10): the boards stopped charting them, PFF's
+// count. Neither ever fed SAE / cSAE / TE-SAER, which read getting open.
 //
 // RB missed tackles and 10+ yard runs went the other way (the user,
 // 2026-10-07): PFF's counts replaced the charted Broken Tackle and Explosive
@@ -59,6 +63,31 @@ const fumbles = (pos: PffStatDef["pos"], floor: number): PffStatDef => ({
   count: (r) => ratio(r.fumbles, touchesOf(r)),
 });
 
+/**
+ * Contested catches per contested target (PFF), WR and TE. Replaced the WR
+ * board's charted Contested button in the score (the user, 2026-11-10: "I
+ * just dont want to chart them if i dont have too"); PFF's rate tracked the
+ * charted one at r = 0.89 per WR on 2026-11-09. Floor 5, as the charted CC%
+ * had.
+ */
+const contestedCatches = (pos: "WR" | "TE"): PffStatDef => ({
+  key: `pff_${pos.toLowerCase()}_cc`, label: "CC%", source: "pff", pos, dir: 1, scale: 100, unit: "contested targets", floor: 5, suffix: "%",
+  description: "Contested catches per contested target (PFF): winning the 50/50 ball.",
+  count: (r) => ratio(r.contested_receptions, r.contested_targets),
+});
+
+/**
+ * Missed tackles forced per catch (PFF avoided tackles after the catch), WR
+ * and TE. Replaced the Broken tackle after catch tag (the user, 2026-11-10),
+ * as PFF's MTF/A replaced the RB board's Broken Tackle button on 2026-10-07.
+ * It reads making tacklers miss; YAC/R reads the yards.
+ */
+const missedTacklesPerCatch = (pos: "WR" | "TE", floor: number): PffStatDef => ({
+  key: `pff_${pos.toLowerCase()}_mtf`, label: "MTF/R", source: "pff", pos, dir: 1, scale: 1, unit: "catches", floor, suffix: " per catch",
+  description: "Missed tackles forced per catch (PFF avoided tackles after the catch): making tacklers miss with the ball in his hands.",
+  count: (r) => ratio(r.rec_mtf, r.receptions),
+});
+
 export const PFF_COMPONENTS: readonly PffStatDef[] = [
   // ── QB ──
   { key: "pff_btt", label: "BTT%", source: "pff", pos: "QB", dir: 1, scale: 100, unit: "attempts", floor: 50, suffix: "%",
@@ -96,11 +125,15 @@ export const PFF_COMPONENTS: readonly PffStatDef[] = [
   { key: "pff_wr_yac", label: "YAC/R", source: "pff", pos: "WR", dir: 1, scale: 1, unit: "catches", floor: 15, suffix: " yds/catch",
     description: "Yards after the catch per reception (PFF).",
     count: (r) => ratio(r.yac, r.receptions) },
+  contestedCatches("WR"),
+  missedTacklesPerCatch("WR", 15),
   fumbles("WR", 20),
   // ── TE ──
   { key: "pff_te_yprr", label: "YPRR", source: "pff", pos: "TE", dir: 1, scale: 1, unit: "routes", floor: 40, suffix: " yds/route",
     description: "Receiving yards per route run (PFF yards ÷ PFF routes).",
     count: (r) => ratio(r.rec_yards, r.routes) },
+  contestedCatches("TE"),
+  missedTacklesPerCatch("TE", 10),
   fumbles("TE", 10),
 ];
 
@@ -113,6 +146,10 @@ export const PFF_COMPONENTS: readonly PffStatDef[] = [
 // components together are a median ~25% of a QB or RB score and ~17% of a WR's.
 // RB MTF/A and 10+% took over the charted broken tackles' 0.3 and explosives'
 // 0.2, and 15+ of 10+ the caught-from-behind tag's 0.05 (2026-10-07).
+// WR CC% and MTF/R took over the charted CC%'s 0.1 and the Broken tackle
+// after catch tag's 0.05 (the user, 2026-11-10), and TE got the same two at
+// the same weights (the user's pick: "Add both, same as WR"); neither TE
+// stat counted before, charted or PFF.
 // Fumbles, the user's call (2026-10-07): they matter most for a back (0.2),
 // a little for a QB (0.05), and are only a data point for WR / TE (0: shown,
 // not scored). Fumbles are `additive`: weight × z on top of the score, so a
@@ -121,8 +158,8 @@ export const PFF_COMPONENTS: readonly PffStatDef[] = [
 export const PFF_COMPONENT_WEIGHTS: Readonly<Record<string, number>> = {
   pff_btt: 0.4, pff_twp: 0.4, pff_qb_ypc: 0.3, pff_qb_fum: 0.05,
   pff_rb_yco: 0.3, pff_rb_mtf: 0.3, pff_rb_10p: 0.2, pff_rb_15of10: 0.05, pff_rb_yprr: 0.2, pff_rb_fum: 0.2,
-  pff_wr_yprr: 0.5, pff_wr_yac: 0.2, pff_wr_fum: 0,
-  pff_te_yprr: 0.5, pff_te_fum: 0,
+  pff_wr_yprr: 0.5, pff_wr_yac: 0.2, pff_wr_cc: 0.1, pff_wr_mtf: 0.05, pff_wr_fum: 0,
+  pff_te_yprr: 0.5, pff_te_cc: 0.1, pff_te_mtf: 0.05, pff_te_fum: 0,
 };
 
 /** Each PFF component's per-game counts: charted games still linked to the PFF game their row is for. */

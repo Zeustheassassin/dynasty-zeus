@@ -161,7 +161,11 @@ interface RouteCell extends WRSituation { n: number; open: number; w: number }
 export interface RouteTagCell extends RouteCell {
   tagged: true;
   press_release: "won" | "lost" | null;
+  /** Dropped from the board 2026-11-10; old tagged catches only. */
   bt_after_catch: boolean | null;
+  /** Targeted and caught (migration 088's caught part; before it, the
+   *  broken-tackle tag, which every tagged catch carried until 2026-11-10). */
+  caught: boolean;
 }
 
 const WR_COVERAGES = ["man", "press", "zone", "double"];
@@ -246,8 +250,8 @@ export function parseTagCells(raw: Record<string, [number, number]> | null | und
   const out: RouteTagCell[] = [];
   for (const [key, counts] of Object.entries(raw ?? {})) {
     const p = key.split("|");
-    // 10 parts before migration 072, 11 after (|dbl).
-    if ((p.length !== 10 && p.length !== 11) || !Array.isArray(counts)) continue;
+    // 10 parts before migration 072, 11 after (|dbl), 12 after 088 (|caught).
+    if ((p.length < 10 || p.length > 12) || !Array.isArray(counts)) continue;
     const [n, open] = counts;
     if (!(n > 0)) continue;
     out.push({
@@ -257,6 +261,7 @@ export function parseTagCells(raw: Record<string, [number, number]> | null | und
       press_release: p[8] === "won" || p[8] === "lost" ? p[8] : null,
       bt_after_catch: p[9] === "-" ? null : p[9] === "1",
       double_coverage: p[10] === "1",
+      caught: p.length === 12 ? p[11] === "1" : p[9] !== "-",
     });
   }
   return out;
@@ -709,7 +714,7 @@ function wrPffRates(prospects: readonly Prospect[], pff: ReadonlyMap<string, Pff
 }
 
 // Each WR's tagged double-coverage routes (migration 072): routes, open, and
-// catches (a caught route carries the broken-tackle tag). A route charted as
+// catches (migration 088's caught part). A route charted as
 // Double coverage before the tag is already in prospect_route_stats' double.
 function taggedDoubleByProspect(tagRows: readonly ProspectGameRouteTagCellsRow[]): Map<string, { count: number; open: number; catches: number }> {
   const out = new Map<string, { count: number; open: number; catches: number }>();
@@ -718,7 +723,7 @@ function taggedDoubleByProspect(tagRows: readonly ProspectGameRouteTagCellsRow[]
       if (!c.double_coverage || c.coverage === "double") continue;
       const r = out.get(row.prospect_id) ?? { count: 0, open: 0, catches: 0 };
       r.count += c.n; r.open += c.open;
-      if (c.bt_after_catch != null) r.catches += c.n;
+      if (c.caught) r.catches += c.n;
       out.set(row.prospect_id, r);
     }
   }

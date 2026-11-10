@@ -587,4 +587,29 @@ describe("tagged WR routes", () => {
     const [a] = buildProspectsWithStats([{ id: "A", position: "WR", name: "A" } as unknown as Prospect], stats, [], [], {}, undefined, [], tagRows);
     expect(a.coverage_stats.double).toEqual({ count: 7, open: 3, catches: 2 });
   });
+
+  it("reads caught from 088's 12th key part; before 088 a tagged catch was the one carrying the broken-tackle tag", () => {
+    // After 2026-11-10 a new catch leaves the broken-tackle tag NULL ('-'): caught comes from part 12.
+    expect(parseTagCells({ "curl|man|left|off|0|0|0|0|-|-|1|1": [2, 2] })[0]).toMatchObject({ caught: true, bt_after_catch: null, double_coverage: true });
+    expect(parseTagCells({ "curl|man|left|off|0|0|0|0|-|-|1|0": [2, 2] })[0].caught).toBe(false);
+    // An old tagged catch under 088 carries both.
+    expect(parseTagCells({ "curl|man|left|off|0|0|0|0|-|0|0|1": [1, 1] })[0]).toMatchObject({ caught: true, bt_after_catch: false });
+    // 10- and 11-part keys (before 088): the tag stands in.
+    expect(parseTagCells({ "curl|man|left|off|0|0|0|0|-|1|1": [1, 1] })[0].caught).toBe(true);
+    expect(parseTagCells({ "curl|man|left|off|0|0|0|0|-|-": [1, 1] })[0].caught).toBe(false);
+    // 13 parts isn't a key this app knows.
+    expect(parseTagCells({ "curl|man|left|off|0|0|0|0|-|-|1|1|1": [1, 1] })).toEqual([]);
+  });
+
+  it("counts a doubled catch charted without the broken-tackle tag (088)", () => {
+    const tagRows = [{
+      prospect_id: "A", game_id: "a1",
+      cells: { "curl|man|left|off|0|0|0|0|-|-|1|1": [2, 2], "curl|man|left|off|0|0|0|0|-|-|1|0": [3, 1] } as Record<string, [number, number]>,
+    }];
+    const stats = [{
+      prospect_id: "A", total_routes: 20, open_routes: 10, has_charted_open_data: true, route_stats_raw: {}, coverage_stats_raw: {},
+    }] as unknown as ProspectRouteStatsRow[];
+    const [a] = buildProspectsWithStats([{ id: "A", position: "WR", name: "A" } as unknown as Prospect], stats, [], [], {}, undefined, [], tagRows);
+    expect(a.coverage_stats.double).toEqual({ count: 5, open: 3, catches: 2 });
+  });
 });

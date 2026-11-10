@@ -78,8 +78,19 @@ describe("countStat", () => {
 describe("the component lists", () => {
   it("keep PFF to what the user doesn't chart (no skill counted twice)", () => {
     const pff = PFF_COMPONENTS.map((d) => d.key);
-    for (const doubled of ["pff_qb_p2s", "pff_rb_15p", "pff_rb_pr", "pff_wr_drop", "pff_wr_cc", "pff_te_pr"]) expect(pff).not.toContain(doubled);
-    expect(CHARTED_COMPONENTS.map((d) => d.key)).toEqual(expect.arrayContaining(["ch_qb_p2s", "ch_rb_pb", "ch_wr_drop", "ch_wr_cc"]));
+    for (const doubled of ["pff_qb_p2s", "pff_rb_15p", "pff_rb_pr", "pff_wr_drop", "pff_te_pr"]) expect(pff).not.toContain(doubled);
+    expect(CHARTED_COMPONENTS.map((d) => d.key)).toEqual(expect.arrayContaining(["ch_qb_p2s", "ch_rb_pb", "ch_wr_drop"]));
+  });
+
+  it("score WR / TE contested catches and missed tackles after the catch from PFF, not the old charting (2026-11-10)", () => {
+    expect(CHARTED_COMPONENTS.map((d) => d.key)).not.toContain("ch_wr_cc");
+    expect(TAG_COMPONENTS.map((d) => d.key)).not.toContain("tag_wr_btac");
+    expect(PFF_COMPONENTS.map((d) => d.key)).toEqual(expect.arrayContaining(["pff_wr_cc", "pff_wr_mtf", "pff_te_cc", "pff_te_mtf"]));
+    // The tag's and the charted CC%'s weights moved over; TE got the same.
+    expect(TAG_COMPONENT_WEIGHTS.tag_wr_btac).toBeUndefined();
+    expect(CHARTED_COMPONENT_WEIGHTS.ch_wr_cc).toBeUndefined();
+    expect(componentWeight("pff_wr_cc")).toBe(0.1);
+    expect(componentWeight("pff_te_mtf")).toBe(0.05);
   });
 
   it("score RB broken tackles and explosive runs from PFF, not the old charted buttons (2026-10-07)", () => {
@@ -94,8 +105,8 @@ describe("the component lists", () => {
     expect(PFF_COMPONENT_WEIGHTS).toEqual({
       pff_btt: 0.4, pff_twp: 0.4, pff_qb_ypc: 0.3, pff_qb_fum: 0.05,
       pff_rb_yco: 0.3, pff_rb_mtf: 0.3, pff_rb_10p: 0.2, pff_rb_15of10: 0.05, pff_rb_yprr: 0.2, pff_rb_fum: 0.2,
-      pff_wr_yprr: 0.5, pff_wr_yac: 0.2, pff_wr_fum: 0,
-      pff_te_yprr: 0.5, pff_te_fum: 0,
+      pff_wr_yprr: 0.5, pff_wr_yac: 0.2, pff_wr_cc: 0.1, pff_wr_mtf: 0.05, pff_wr_fum: 0,
+      pff_te_yprr: 0.5, pff_te_cc: 0.1, pff_te_mtf: 0.05, pff_te_fum: 0,
     });
     expect(CHARTED_COMPONENT_WEIGHTS.ch_rb_pb).toBe(0.15);
     expect(TAG_COMPONENT_WEIGHTS.tag_wr_press).toBe(0.15);
@@ -131,6 +142,17 @@ describe("per-game counts", () => {
     expect(count("pff_wr_fum", { fumbles: 0, receptions: 6 })).toEqual([{ prospectId: "R", gameId: "g1", num: 0, den: 6 }]);
   });
 
+  it("PFF: WR / TE contested catches per contested target and missed tackles per catch", () => {
+    const games = [game("g1", "R")];
+    const count = (key: string, over: Partial<PffGameRow>) =>
+      pffGameCounts(PFF_COMPONENTS.find((d) => d.key === key)!, games, [pffRow("g1", "R", over)], () => key.split("_")[1].toUpperCase());
+    expect(count("pff_wr_cc", { contested_targets: 3, contested_receptions: 2 })).toEqual([{ prospectId: "R", gameId: "g1", num: 2, den: 3 }]);
+    expect(count("pff_wr_cc", { contested_targets: 0, contested_receptions: 0 })).toEqual([]);
+    expect(count("pff_te_cc", { contested_targets: 2, contested_receptions: 1 })).toEqual([{ prospectId: "R", gameId: "g1", num: 1, den: 2 }]);
+    expect(count("pff_wr_mtf", { rec_mtf: 1, receptions: 5 })).toEqual([{ prospectId: "R", gameId: "g1", num: 1, den: 5 }]);
+    expect(count("pff_te_mtf", { rec_mtf: 0, receptions: 0 })).toEqual([]);
+  });
+
   it("charted: QB sacks per pressured dropback, RB pass blocks won, WR drops per catchable target", () => {
     const games = [game("q", "Q"), game("r", "R")];
     const qb = (over: Partial<QBPlay>) => ({ game_id: "q", play_type: "pass", pressure: "front_side", timing: "first_option", ...over }) as QBPlay;
@@ -139,12 +161,11 @@ describe("per-game counts", () => {
       games,
       qbPlays: [qb({ timing: "sack" }), qb({}), qb({ pressure: "clean", timing: "sack" }), qb({ play_type: "run" })],
       rbPlays: [rb({}), rb({ success: false }), rb({ success: null }), rb({ run_type: "inside_zone" })],
-      wrRouteCounts: [{ prospect_id: "W", game_id: "w", routes: 30, targets: 8, catches: 6, drops: 1, contested: 2, contested_catches: 1 }],
+      wrRouteCounts: [{ prospect_id: "W", game_id: "w", routes: 30, targets: 8, catches: 6, drops: 1 }],
     };
     expect(chartedGameCounts("ch_qb_p2s", inp)).toEqual([{ prospectId: "Q", gameId: "q", num: 1, den: 2 }]);
     expect(chartedGameCounts("ch_rb_pb", inp)).toEqual([{ prospectId: "R", gameId: "r", num: 1, den: 2 }]);
     expect(chartedGameCounts("ch_wr_drop", inp)).toEqual([{ prospectId: "W", gameId: "w", num: 1, den: 7 }]);
-    expect(chartedGameCounts("ch_wr_cc", inp)).toEqual([{ prospectId: "W", gameId: "w", num: 1, den: 2 }]);
   });
 });
 
@@ -169,7 +190,8 @@ describe("tag stats", () => {
     const reps = tagStatReps({ games: [], qbPlays: [], rbPlays: [], tePlays: [], wrTagRows });
     const v = tagStatValues(reps).get("W")!;
     expect(v.tag_wr_press).toEqual({ rate: (8 / 12) * 100, n: 12 });
-    expect(v.tag_wr_btac).toEqual({ rate: 25, n: 12 });
+    // Broken tackle after catch was dropped 2026-11-10: old tags read nowhere.
+    expect(v.tag_wr_btac).toBeUndefined();
     expect(tagGameCounts("tag_wr_press", reps)).toEqual([{ prospectId: "W", gameId: "w1", num: 8, den: 12 }]);
   });
 

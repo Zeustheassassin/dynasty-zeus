@@ -18,7 +18,8 @@ describe("tag registry", () => {
   it("uses new columns for broken tackles after the catch, never the old NOT NULL broken_tackle", () => {
     for (const pos of ["QB", "RB", "WR", "TE"] as const) expect(tagColumns(pos)).not.toContain("broken_tackle");
     expect(tagColumns("RB")).toContain("broken_tackle_after_catch");
-    expect(tagColumns("WR")).toContain("broken_tackle_after_catch");
+    // WR's was dropped 2026-11-10 (PFF's missed tackles per catch instead).
+    expect(tagColumns("WR")).not.toContain("broken_tackle_after_catch");
   });
 
   it("matches migration 062's enum CHECKs and presets", () => {

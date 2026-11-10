@@ -188,7 +188,7 @@ async function fetchGameView<T>(view: string, select: string): Promise<T[]> {
 // (warn), anything else is an error. Either way only its numbers go blank.
 function logView064(what: string, error: { message?: string; code?: string }) {
   const missing = error.code === "42P01" || error.code === "PGRST205" || /does not exist|could not find/i.test(error.message ?? "");
-  if (missing) log.warn(`${what} view missing (apply migration 064); ${what === "prospect_game_route_counts" ? "charted WR hands / contested components" : "WR tag stats and tag correction"} blank`);
+  if (missing) log.warn(`${what} view missing (apply migration 064); ${what === "prospect_game_route_counts" ? "charted WR hands component" : "WR tag stats and tag correction"} blank`);
   else log.error(`${what} load`, { msg: error.message, code: error.code });
 }
 
@@ -259,7 +259,7 @@ export default function ScoutingHub() {
   // load (or before 063 is applied): the PFF columns show "—".
   const [pffRows, setPffRows] = useState<PffRows>({ games: [], seasons: [] });
   // Migration 064: each WR game's charted receiving counts (the AE Score's
-  // charted hands / contested components) and its TAGGED routes by situation
+  // charted hands component) and its TAGGED routes by situation
   // and tag (WR tag stats, the WR tag correction, the Grading checks). Empty
   // after a failed load (or before 064 is applied): only those go blank.
   const [routeCounts, setRouteCounts] = useState<ProspectGameRouteCountsRow[]>([]);
@@ -325,7 +325,7 @@ export default function ScoutingHub() {
           (error: unknown) => ({ rows: { games: [], seasons: [] } as PffRows, error }),
         ),
         // Migration 064, each its own query (a failure only blanks what it feeds).
-        fetchGameView<ProspectGameRouteCountsRow>("prospect_game_route_counts", "prospect_id,game_id,routes,targets,catches,drops,contested,contested_catches").then(
+        fetchGameView<ProspectGameRouteCountsRow>("prospect_game_route_counts", "prospect_id,game_id,routes,targets,catches,drops").then(
           (rows) => ({ rows, error: null }),
           (error: { message?: string; code?: string }) => ({ rows: [] as ProspectGameRouteCountsRow[], error }),
         ),

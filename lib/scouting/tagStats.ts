@@ -15,8 +15,10 @@
 //       the catch (catches). Caught from behind was dropped 2026-10-07 with
 //       the Explosive button it hung off; PFF's 15+ of 10+ runs reads long
 //       speed instead (pffComponents.ts).
-//   WR  release vs press win rate (press routes) · broken tackle after the
-//       catch (catches)
+//   WR  release vs press win rate (press routes). Broken tackle after the
+//       catch was dropped 2026-11-10 (the user): PFF's missed tackles per
+//       catch score it instead (pffComponents.ts). The column stays on old
+//       plays; new plays leave it NULL.
 //   TE  release vs press win rate (press routes) · chip rate (routes)
 //
 // The quality ones (TAG_COMPONENTS) can also join the AE Score as per-player
@@ -87,8 +89,6 @@ interface CellStat extends TagStatDef { of: (c: RouteTagCell) => { n: number; hi
 const WR_STATS: CellStat[] = [
   { key: "tag_wr_press", label: "Press Win%", pos: "WR", unit: "press routes", dir: 1, description: "Release won vs press (tagged press routes).",
     of: (c) => (c.press_release == null ? null : { n: c.n, hits: c.press_release === "won" ? c.n : 0 }) },
-  { key: "tag_wr_btac", label: "BTAC%", pos: "WR", unit: "catches", dir: 1, description: "Catches with a broken tackle after the catch (tagged).",
-    of: (c) => (c.bt_after_catch == null ? null : { n: c.n, hits: c.bt_after_catch ? c.n : 0 }) },
 ];
 
 export const TAG_STATS: Record<TagPosition, readonly TagStatDef[]> = { QB: QB_STATS, RB: RB_STATS, WR: WR_STATS, TE: TE_STATS };
@@ -191,7 +191,7 @@ export const TAG_COMPONENTS: readonly CountStatDef[] = Object.values(TAG_STATS).
 export const TAG_COMPONENT_WEIGHTS: Readonly<Record<string, number>> = {
   tag_qb_run_succ: 0.1, tag_qb_late: 0.05, tag_qb_better: 0.1,
   tag_rb_missed_read: 0.1, tag_rb_btac: 0.05,
-  tag_wr_press: 0.15, tag_wr_btac: 0.05,
+  tag_wr_press: 0.15,
   tag_te_press: 0.1,
 };
 

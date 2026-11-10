@@ -174,7 +174,7 @@ describe("what shows", () => {
     expect(at("RB", { passProLoss: true }, "block")).toEqual(["pass_pro_loss"]);
     expect(at("RB", { catch: true }, "catch")).toEqual(["broken_tackle_after_catch"]);
     expect(at("WR", { route: true, press: true }, "coverage")).toEqual(["double_coverage", "press_release"]);
-    expect(at("WR", { route: true, catch: true }, "catch")).toEqual(["broken_tackle_after_catch"]);
+    expect(at("WR", { route: true, catch: true }, "catch")).toEqual([]);
     expect(at("TE", { route: true, press: true }, "coverage")).toEqual(["double_coverage", "press_release"]);
     expect(at("TE", { route: true }, "route")).toEqual(["chipped_before_route"]);
     expect(at("TE", TE_BLOCK, "block")).toEqual(["blocked_defender"]);
@@ -290,7 +290,7 @@ describe("editing", () => {
     const play = { red_zone: true, third_fourth_down: false, short_yardage: false, garbage_time: false, press_release: null, broken_tackle_after_catch: true };
     expect(tagValuesFromPlay(play, "WR")).toEqual({
       red_zone: true, third_fourth_down: false, short_yardage: false, garbage_time: false,
-      double_coverage: false, press_release: null, broken_tackle_after_catch: true,
+      double_coverage: false, press_release: null,
       // The catch difficulty tags (078) weren't on this play: their defaults, ready if it becomes a target.
       ball_high: false, ball_low: false, ball_in_front: false, ball_behind: false, ball_outside_frame: false,
       adjusted_to_ball: false, hit_at_catch: false, sideline_target: false, incompletion_reason: null,

@@ -60,7 +60,8 @@ describe("resolveGameContexts / gameCovariates", () => {
 describe("contextGrading policy", () => {
   it("switches on only what passed (cast never)", () => {
     expect([...OPPONENT_SP].sort()).toEqual(["ch_qb_p2s", "pff_qb_fum", "pff_wr_yprr", "wr_csae", "wr_sae"]);
-    expect([...WEATHER_ON].sort()).toEqual(["ch_wr_cc", "ch_wr_drop", "pff_btt", "pff_rb_yprr", "qb_aae"]);
+    // ch_wr_cc's weather went with it (2026-11-10); PFF's CC% waits for its own test.
+    expect([...WEATHER_ON].sort()).toEqual(["ch_wr_drop", "pff_btt", "pff_rb_yprr", "qb_aae"]);
     expect(CAST_ON.size).toBe(0);
     expect(metricContext("rb_srae")).toEqual({ opponent: "tier", weather: false, cast: false });
   });
@@ -109,7 +110,7 @@ describe("contextGrading policy", () => {
     const { raw, cov } = samples();
     for (const [id, v] of cov) v[COV.wind] = 3 + (Number(id.split("g")[1]) * 5);
     const tier = new Map([...raw].map(([id, s]) => [id, { ...s, ae: s.ae - 1, rawAe: s.ae }]));
-    const out = contextAdjust("ch_wr_cc", "WR", raw, tier, { cov, spRef: 21, fcsSp: 30 }, 100);
+    const out = contextAdjust("ch_wr_drop", "WR", raw, tier, { cov, spRef: 21, fcsSp: 30 }, 100);
     expect(out.info.fit?.specs.every((s) => ["wind", "rain", "cold"].includes(s.key)) ?? true).toBe(true);
     expect(out.samples.get("p3")!.rawAe).toBe(3);
   });
