@@ -91,10 +91,10 @@ describe("scoreDynasty", () => {
   });
 
   it("scales each piece by its weight; zero weights leave the AE Score", () => {
-    const d = scoreDynasty({ ...base, weightLb: 190, draftRound: 3 }, { age: 0, size: 0, draft: 0 });
+    const d = scoreDynasty({ ...base, weightLb: 190, draftRound: 3 }, { age: 0, size: 0, draft: 0, landing: 0 });
     expect(d.dynasty).toBe(0.8);
     expect(d.plus).toBe(0.8);
-    const half = scoreDynasty({ ...base, draftRound: 3 }, { age: 1, size: 1, draft: 0.5 });
+    const half = scoreDynasty({ ...base, draftRound: 3 }, { age: 1, size: 1, draft: 0.5, landing: 1 });
     expect(half.plus! - half.dynasty).toBeCloseTo(0.5 * DRAFT_CAPITAL[3], 9);
   });
 

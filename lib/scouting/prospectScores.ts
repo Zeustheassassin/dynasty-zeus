@@ -22,7 +22,7 @@ import {
   type AESlice,
 } from "./aboveExpected";
 import { buildAEComposite, MIN_POOL, type AEComposite, type CompositePos, type PositionComposite } from "./aeComposite";
-import { scoreDynasty, type DynastyBreakdown, type DynastyWeights } from "./dynastyScore";
+import { scoreDynasty, type DynastyBreakdown, type DynastyWeights, type LandingInputs } from "./dynastyScore";
 import { rookieSeasonAge, parseHeightInches } from "./prospectAge";
 import type { OpponentTier } from "./opponentTier";
 import { applyOpponentStrength, type OpponentAdjusted } from "./opponentAdjust";
@@ -300,12 +300,17 @@ export function scoreViewsFrom(
   return m;
 }
 
-/** Dynasty Score (+ Plus) for every prospect with an AE Score (dynastyScore.ts). */
+/**
+ * Dynasty Score (+ Plus) for every prospect with an AE Score (dynastyScore.ts).
+ * `landing` holds the landing-spot inputs (landingSpot.ts) for drafted
+ * prospects from LANDING_FIRST_CLASS on.
+ */
 export function dynastyScores(
   prospects: readonly ProspectWithStats[],
   scoreViews: ReadonlyMap<string, ScoreView>,
   hsClass: ReadonlyMap<string, number | null>,
   weights: DynastyWeights,
+  landing?: ReadonlyMap<string, LandingInputs>,
 ): Map<string, DynastyBreakdown> {
   const m = new Map<string, DynastyBreakdown>();
   for (const p of prospects) {
@@ -319,6 +324,7 @@ export function dynastyScores(
       weightLb: p.weight,
       draftRound: p.draft_round,
       draftPick: p.draft_pick,
+      landing: landing?.get(p.id) ?? null,
     }, weights));
   }
   return m;

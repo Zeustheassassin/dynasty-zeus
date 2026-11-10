@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import type { ComponentProps } from "react";
+import { nflTeamId, type DraftPickRow } from "@/lib/nflDraft";
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import BigBoard from "@/components/scouting/BigBoard";
 import ProspectOverview, { type OverviewData } from "@/components/scouting/overview/ProspectOverview";
@@ -8,7 +10,7 @@ import ProspectProduction from "@/components/scouting/overview/ProspectProductio
 import { EMPTY_GRADING_DATA } from "@/lib/scouting/aeComponents";
 import type { ProspectWithStats, AEScoreLock, BoardScores } from "@/lib/types";
 import type { RoleFit } from "@/lib/scouting/roleFit";
-import { totalsFor, type PffTotals } from "@/lib/pff/totals";
+import { totalsFor } from "@/lib/pff/totals";
 import { GAME_STAT_KEYS, SEASON_STAT_KEYS, type PffGameRow, type PffSeasonRow } from "@/lib/pff/stats";
 
 // The Big Board's Above Exp group: one column per metric (AAE, SRAE, SAE, cSAE,
@@ -112,10 +114,7 @@ const AE_LABELS = ["AAE", "SRAE", "SAE", "cSAE", "TE-SAER", "TE-SAEB"];
 function renderBoard(
   prospects: ProspectWithStats[] = PROSPECTS,
   onUpdateDraftRound: (id: string, round: number | null) => Promise<boolean> = vi.fn(async () => true),
-  extra: {
-    scoresReady?: boolean; onLockAEScore?: (id: string, lock: AEScoreLock) => Promise<boolean>; pffTotals?: Map<string, PffTotals>;
-    inputsComplete?: boolean; onSaveBoardScores?: (scores: Record<string, BoardScores>) => Promise<boolean>;
-  } = {},
+  extra: Partial<ComponentProps<typeof BigBoard>> = {},
 ) {
   return render(
     <BigBoard
@@ -863,5 +862,37 @@ describe("Prospect report: score pieces, Production and Print / PDF", () => {
     expect(document.getElementById("prospect-print-root")).toBeNull();
     vi.unstubAllGlobals();
     vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  });
+});
+
+describe("BigBoard Post-Draft tab", () => {
+  const POOL = Array.from({ length: 10 }, (_, i) => prospect(`pq${i}`, `Pool QB ${i}`, "QB", 10 + i));
+  const pick = (overall: number, name: string, position: string, team: string): DraftPickRow => ({
+    year: 2027, overall, round: Math.ceil(overall / 32), pick: ((overall - 1) % 32) + 1,
+    nfl_team_id: nflTeamId(team), nfl_team: team, position, name, college: null,
+  });
+
+  it("lists what the stored draft changes and applies it", async () => {
+    const apply = vi.fn(async () => 0);
+    renderBoard([...PROSPECTS, ...POOL], undefined, {
+      draftPicks: [pick(5, "Wide One", "Wide Receiver", "Jets"), pick(40, "Quarter One", "Quarterback", "Jets")],
+      onApplyDraftResults: apply,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Post-Draft" }));
+    expect(screen.getByRole("heading", { name: "Changes from the draft (2)" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Apply all" }));
+    expect(apply).toHaveBeenCalledWith([
+      { id: "wr1", draft_round: 1, draft_pick: 5, draft_team: "Jets" },
+      { id: "qb1", draft_round: 2, draft_pick: 40, draft_team: "Jets" },
+    ]);
+  });
+
+  it("shows rookie competition for a drafted 2027 prospect", () => {
+    renderBoard([...PROSPECTS.map((p) => (p.id === "qb1" ? { ...p, draft_round: 2, draft_pick: 40, draft_team: "Jets" } : p)), ...POOL], undefined, {
+      draftPicks: [pick(5, "Somebody Else", "Quarterback", "Jets"), pick(40, "Quarter One", "Quarterback", "Jets")],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Post-Draft" }));
+    const row = screen.getByRole("cell", { name: "Quarter One" }).closest("tr")!;
+    expect(row.textContent).toMatch(/Rookie competition: Somebody Else \(QB, pick 5, −0\.\d\d\)/);
   });
 });

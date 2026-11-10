@@ -13,6 +13,9 @@ import {
 } from "../../lib/scouting/dynastyScore";
 import { type ProspectAge } from "../../lib/scouting/prospectAge";
 import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftCapitalLabel, draftRoundLabel } from "../../lib/draftRound";
+import type { DraftPickRow, DraftResultUpdate } from "../../lib/nflDraft";
+import { landingLines } from "../../lib/scouting/landingSpot";
+import PostDraftTab from "./PostDraftTab";
 import { classDraftedBy, makeLock } from "../../lib/scouting/scoreLock";
 import type { ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
 import { HEADLINE_LABEL, type HeadlineKey, type MetricContext } from "../../lib/scouting/contextGrading";
@@ -38,7 +41,7 @@ import { boardScoresKey, buildBoardScores, changedBoardScores, type BoardScoresV
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
 
-type BoardTab = "all" | "QB" | "RB" | "WR" | "TE";
+type BoardTab = "all" | "QB" | "RB" | "WR" | "TE" | "post";
 
 // One column per Above-Expected metric (AEKey, prospectScores.ts). The All tab
 // shows every headline column (a row fills only its own position's); a
@@ -90,6 +93,7 @@ const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }
   { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
   { key: "size",  label: "Size",  hint: "How much size counts: RBs and WRs carrying more weight for their height gain, lean and very light ones lose" },
   { key: "draft", label: "Draft", hint: "How much draft capital counts in Dynasty Score Plus: by overall pick, or the round's average when no pick is set" },
+  { key: "landing", label: "Landing", hint: "How much the landing spot counts in Dynasty Score Plus (2027 classes on): rookie competition, the players at his position his team drafted ahead of him (WRs and Move TEs count against each other)" },
 ];
 
 // Derived per-prospect values the sort reads.
@@ -148,6 +152,12 @@ interface Props {
   scoresReady?: boolean;
   /** Save a drafted prospect's frozen AE Score; false if the write failed. */
   onLockAEScore?: (id: string, lock: AEScoreLock) => Promise<boolean>;
+  /** Stored NFL draft results (migration 090), for Dynasty+ rookie competition. */
+  draftPicks?: readonly DraftPickRow[];
+  /** Read the stored draft results again (after the Post-Draft tab loads a year). */
+  onReloadDraftPicks?: () => void;
+  /** Write actual draft results (round, pick, team) to prospects; resolves with how many failed. */
+  onApplyDraftResults?: (updates: readonly DraftResultUpdate[]) => Promise<number>;
   /** None of the hub's loads failed, so the scores are complete enough to save
    *  for the draft board. */
   inputsComplete?: boolean;
@@ -264,6 +274,9 @@ export default function BigBoard({
   onSaveBoardScores,
   pffTotals,
   gradingData = EMPTY_GRADING_DATA,
+  draftPicks,
+  onReloadDraftPicks,
+  onApplyDraftResults,
 }: Props) {
   // Trigger lazy load of all three position plays the first time the
   // board renders. ScoutingHub no-ops if a position is already loaded
@@ -280,8 +293,8 @@ export default function BigBoard({
   // scores built on it) take the opponent-strength and context adjustments.
   const {
     aeMaps, composite, compositeInputs, opponent, contextInfo,
-    gameTiers, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, pffVals,
-  } = useProspectScores({ prospects, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals });
+    gameTiers, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, pffVals, landing,
+  } = useProspectScores({ prospects, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals, draftPicks });
 
   const [scoreMode, setScoreMode] = useState<ScoreViewMode>(() =>
     getLocalStorageItem<ScoreViewMode>(SCORE_VIEW_KEY, "live") === "draft" ? "draft" : "live");
@@ -372,8 +385,8 @@ export default function BigBoard({
 
   // Dynasty Score (+ Plus) for every prospect with an AE Score.
   const dynasty = useMemo(
-    () => dynastyScores(prospects, scoreViews, hsClass, weights),
-    [prospects, scoreViews, hsClass, weights],
+    () => dynastyScores(prospects, scoreViews, hsClass, weights, landing),
+    [prospects, scoreViews, hsClass, weights, landing],
   );
 
   // Each prospect's charted sample against his position's full sample
@@ -389,8 +402,8 @@ export default function BigBoard({
   // still pending, and saves run one after another so an older one can't land
   // last.
   const savedDynasty = useMemo(
-    () => dynastyScores(prospects, scoreViewsFrom(prospects, liveScores, "live", new Date()), hsClass, weights),
-    [prospects, liveScores, hsClass, weights],
+    () => dynastyScores(prospects, scoreViewsFrom(prospects, liveScores, "live", new Date()), hsClass, weights, landing),
+    [prospects, liveScores, hsClass, weights, landing],
   );
   const boardScores = useMemo(
     () => buildBoardScores(prospects, savedDynasty, samples, weights),
@@ -641,6 +654,7 @@ export default function BigBoard({
     lines.push(`= Dynasty ${signed(d.dynasty, 2)}`);
     if (plus && d.draftCapital != null) {
       lines.push(`Drafted: ${draftCapitalLabel(p.draft_round!, p.draft_pick)} → ${signed(weights.draft * d.draftCapital, 2)}`);
+      lines.push(...landingLines(d.landing, weights.landing));
       lines.push(`= Dynasty+ ${signed(d.plus!, 2)}`);
     }
     const v = plus ? d.plus! : d.dynasty;
@@ -1114,8 +1128,25 @@ export default function BigBoard({
             )}
           </button>
         ))}
+        <button
+          onClick={() => setBoardTab("post")}
+          title="Load a class's NFL draft results and see Dynasty+ rookie competition"
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
+            boardTab === "post" ? "border-teal-500 text-teal-400" : "border-transparent text-slate-400 hover:text-white"
+          }`}
+        >Post-Draft</button>
       </div>
 
+      {boardTab === "post" ? (
+        <PostDraftTab
+          prospects={prospects}
+          draftPicks={draftPicks ?? []}
+          dynasty={dynasty}
+          landingWeight={weights.landing}
+          onReloadDraftPicks={onReloadDraftPicks}
+          onApplyDraftResults={onApplyDraftResults}
+        />
+      ) : (<>
       {/* Controls */}
       <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
         <input
@@ -1205,6 +1236,7 @@ export default function BigBoard({
       ) : (
         renderStandardTable()
       )}
+      </>)}
     </div>
   );
 }

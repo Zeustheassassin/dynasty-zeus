@@ -2,6 +2,7 @@
 import { useEffect, useMemo } from "react";
 import type { ProspectWithStats } from "../../../lib/types";
 import type { PffTotals } from "../../../lib/pff/totals";
+import type { DraftPickRow } from "../../../lib/nflDraft";
 import { pffPos } from "../../../lib/pff/stats";
 import type { CompositePos } from "../../../lib/scouting/aeComposite";
 import type { DynastyWeights } from "../../../lib/scouting/dynastyScore";
@@ -13,6 +14,8 @@ import { productionPage } from "./production";
 /** Everything the report pages read, all from ScoutingHub (the Big Board's inputs). */
 export interface OverviewData extends ProspectScoresInput {
   pffTotals?: Map<string, PffTotals>;
+  /** Stored NFL draft results (useDraftPicks), for Dynasty+ rookie competition. */
+  draftPicks?: readonly DraftPickRow[];
   loadPositionPlays: (pos: "RB" | "QB" | "TE") => void;
   /** Every position's plays have loaded, so the scores are final. */
   scoresReady: boolean;

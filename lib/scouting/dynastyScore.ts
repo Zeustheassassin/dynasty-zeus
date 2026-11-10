@@ -147,12 +147,76 @@ export function draftCapitalAt(round: number | null, pick: number | null): numbe
   return DRAFT_CAPITAL[round] ?? null;
 }
 
+// ── Landing spot (Dynasty Score Plus) ──────────────────────────────────────
+// What his NFL team's room does to his early opportunity, on top of draft
+// capital (the user's plan, 2026-11-10). Only classes from LANDING_FIRST_CLASS:
+// the 2026 class was charted differently (mostly imports) and its draft is
+// past, so it's left out (the user's call). It never fades: a class locks at
+// its draft.
+//
+// Rookie competition is its first piece: players at his position his team
+// drafted AHEAD of him; for a WR, Move TEs too ("Move TE's should definitly
+// count against WR's", the user), and for a Move TE, WRs (the user: yes, both
+// ways). A teammate taken after him costs
+// nothing, since the team invested more in him. Each one ahead costs up to
+// COMPETITION_PER_PLAYER, scaled by how much more draft capital he got (the
+// full cost at a gap of COMPETITION_FULL_GAP, about two rounds), and the total
+// is capped at COMPETITION_CAP. A 6th-rounder whose team also took his position
+// in rounds 2 and 3 (picks 50 and 85, him at 190) loses about 0.36.
+export const LANDING_FIRST_CLASS = 2027;
+export const COMPETITION_PER_PLAYER = 0.2;
+export const COMPETITION_FULL_GAP = 1.0;
+export const COMPETITION_CAP = 0.4;
+
+export interface Competitor {
+  name: string;
+  position: CompositePos;
+  overall: number;
+  round: number;
+  /** A TE counted against a WR as a Move TE. (A WR counted against a Move TE is plain "WR".) */
+  moveTe: boolean;
+}
+export interface CompetitionResult {
+  /** ≤ 0. */
+  value: number;
+  competitors: (Competitor & { cost: number })[];
+}
+
+/** The rookie-competition piece for a player with `myCapital`, from the teammates drafted ahead of him. */
+export function rookieCompetition(myCapital: number, competitors: readonly Competitor[]): CompetitionResult {
+  let sum = 0;
+  const out = competitors.map((c) => {
+    const gap = Math.max(0, draftCapitalForPick(c.overall) - myCapital);
+    const cost = COMPETITION_PER_PLAYER * Math.min(1, gap / COMPETITION_FULL_GAP);
+    sum += cost;
+    return { ...c, cost };
+  });
+  return { value: -Math.min(COMPETITION_CAP, sum), competitors: out };
+}
+
+/** Landing-spot inputs for one drafted prospect (lib/scouting/landingSpot.ts). */
+export interface LandingInputs {
+  /** His team's same-position picks (and Move TEs, for a WR) ahead of him; null when they can't be known yet. */
+  competitors: Competitor[] | null;
+  /** Why competitors is null ("load the 2027 draft results…"). */
+  note?: string;
+}
+
+export interface LandingBreakdown {
+  /** Before the landing weight. */
+  total: number;
+  competition: CompetitionResult | null;
+  note?: string;
+}
+
 // ── Weights (the Big Board sliders) ────────────────────────────────────────
-export interface DynastyWeights { age: number; size: number; draft: number }
+export interface DynastyWeights { age: number; size: number; draft: number; landing: number }
 // Draft defaults to 2 (the user's call, 2026-10-01): at 2× a 1st-rounder gets
 // +2.0 and an undrafted rookie −2.0, so draft capital, the strongest single
 // predictor of a fantasy hit, carries more than the AE Score's ±1.5 spread.
-export const DEFAULT_DYNASTY_WEIGHTS: DynastyWeights = { age: 1, size: 1, draft: 2 };
+// Landing defaults to 1: rookie competition reaches −0.4 at most, well under
+// draft capital's swing, since teams make room for players they spent picks on.
+export const DEFAULT_DYNASTY_WEIGHTS: DynastyWeights = { age: 1, size: 1, draft: 2, landing: 1 };
 export const WEIGHT_MIN = 0;
 export const WEIGHT_MAX = 3;
 export const WEIGHT_STEP = 0.25;
@@ -168,6 +232,8 @@ export interface DynastyInputs {
   draftRound: number | null;
   /** Overall pick (1 = first), or null when only the round is known. */
   draftPick: number | null;
+  /** Landing-spot inputs; absent for classes before LANDING_FIRST_CLASS and before the draft. */
+  landing?: LandingInputs | null;
 }
 
 export interface DynastyBreakdown {
@@ -181,6 +247,8 @@ export interface DynastyBreakdown {
   draftCapital: number | null;
   /** Null until a round is set. */
   plus: number | null;
+  /** The landing-spot piece of Plus, before its weight; absent when it doesn't apply. */
+  landing?: LandingBreakdown | null;
 }
 
 export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBreakdown {
@@ -189,6 +257,11 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
   const size = flags.reduce((s, f) => s + f.value, 0);
   const dynasty = inp.aeScore + w.age * (window ?? 0) + w.size * size;
   const draftCapital = draftCapitalAt(inp.draftRound, inp.draftPick);
+  let landing: LandingBreakdown | null = null;
+  if (inp.landing && draftCapital != null) {
+    const competition = inp.landing.competitors ? rookieCompetition(draftCapital, inp.landing.competitors) : null;
+    landing = { total: competition?.value ?? 0, competition, ...(inp.landing.note ? { note: inp.landing.note } : {}) };
+  }
   return {
     aeScore: inp.aeScore,
     rookieAge: inp.rookieAge,
@@ -196,6 +269,7 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
     flags,
     dynasty,
     draftCapital,
-    plus: draftCapital != null ? dynasty + w.draft * draftCapital : null,
+    plus: draftCapital != null ? dynasty + w.draft * draftCapital + w.landing * (landing?.total ?? 0) : null,
+    landing,
   };
 }

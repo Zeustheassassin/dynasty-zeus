@@ -34,6 +34,8 @@ import { fetchPffRows, isMissingPffTables, type PffRows } from "./scouting/pff/p
 import { fetchGameContextData, isMissingContextTables } from "./scouting/context/contextClient";
 import { EMPTY_CONTEXT_DATA, type GameContextData } from "../lib/scouting/gameContext";
 import type { OverviewData } from "./scouting/overview/ProspectOverview";
+import { useDraftPicks } from "./scouting/shared/hooks/useDraftPicks";
+import type { DraftResultUpdate } from "../lib/nflDraft";
 
 const log = logger("ScoutingHub");
 
@@ -220,6 +222,8 @@ export default function ScoutingHub() {
   const [positionTab, setPositionTab] = useState<PositionTab>("WR");
   const [pendingProspect, setPendingProspect] = useState<Prospect | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  // Stored NFL draft results (migration 090) for Dynasty+ rookie competition.
+  const { picks: draftPicks, reload: reloadDraftPicks } = useDraftPicks();
   const [games, setGames] = useState<ScoutingGame[]>([]);
   const [routeStatsRows, setRouteStatsRows] = useState<ProspectRouteStatsRow[]>([]);
   const [gameSnapStatsRows, setGameSnapStatsRows] = useState<GameSnapStatsRow[]>([]);
@@ -521,6 +525,32 @@ export default function ScoutingHub() {
     return true;
   }
 
+  // The NFL draft's actual results for many prospects at once (the Big Board's
+  // Post-Draft tab): round, overall pick and team. Optimistic per prospect; a
+  // failed write rolls that prospect back. Resolves with how many failed.
+  async function handleApplyDraftResults(updates: readonly DraftResultUpdate[]): Promise<number> {
+    const before = new Map(prospects.map((p) => [p.id, { draft_round: p.draft_round, draft_pick: p.draft_pick, draft_team: p.draft_team }]));
+    const byId = new Map(updates.map((u) => [u.id, u]));
+    setProspects((prev) => prev.map((p) => {
+      const u = byId.get(p.id);
+      return u ? { ...p, draft_round: u.draft_round, draft_pick: u.draft_pick, draft_team: u.draft_team } : p;
+    }));
+    const stamp = new Date().toISOString();
+    const results = await Promise.all(updates.map(async (u) => {
+      const { error } = await supabase
+        .from("prospects")
+        .update({ draft_round: u.draft_round, draft_pick: u.draft_pick, draft_team: u.draft_team, updated_at: stamp })
+        .eq("id", u.id);
+      if (error) log.error("apply draft result", { msg: error.message });
+      return error ? u.id : null;
+    }));
+    const failed = new Set(results.filter((id): id is string => id != null));
+    if (failed.size) {
+      setProspects((prev) => prev.map((p) => (failed.has(p.id) ? { ...p, ...before.get(p.id) } : p)));
+    }
+    return failed.size;
+  }
+
   // Freeze a drafted prospect's AE Score (prospects.ae_score_lock, migration
   // 059). Optimistic; a failed write (e.g. the migration not applied yet) rolls
   // back, and the board keeps scoring that prospect live.
@@ -661,8 +691,8 @@ export default function ScoutingHub() {
   // Dynasty and percentiles match the board's (useProspectScores).
   const overviewData = useMemo<OverviewData>(() => ({
     prospects: prospectsWithStats, games, rbPlays, qbPlays, tePlays,
-    gameRouteCells, gradingData, pffTotals, loadPositionPlays, scoresReady,
-  }), [prospectsWithStats, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals, loadPositionPlays, scoresReady]);
+    gameRouteCells, gradingData, pffTotals, draftPicks, loadPositionPlays, scoresReady,
+  }), [prospectsWithStats, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals, draftPicks, loadPositionPlays, scoresReady]);
 
   // Shared props for all position hubs
   const hubProps = {
@@ -797,6 +827,9 @@ export default function ScoutingHub() {
             onSaveBoardScores={handleSaveBoardScores}
             pffTotals={pffTotals}
             gradingData={gradingData}
+            draftPicks={draftPicks}
+            onReloadDraftPicks={reloadDraftPicks}
+            onApplyDraftResults={handleApplyDraftResults}
           />
         )}
 

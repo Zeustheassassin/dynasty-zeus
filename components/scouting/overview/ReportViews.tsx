@@ -4,6 +4,7 @@ import type { ProspectWithStats } from "../../../lib/types";
 import type { CompositePos } from "../../../lib/scouting/aeComposite";
 import { PRIME_END_AGE } from "../../../lib/scouting/dynastyScore";
 import { draftCapitalLabel, draftRoundLabel, UNDRAFTED_ROUND } from "../../../lib/draftRound";
+import { landingLines } from "../../../lib/scouting/landingSpot";
 import { formatGrade } from "../../../lib/scouting/prospectGrade";
 import { roleFitTooltip, roleInfo, roleLabel } from "../../../lib/scouting/roleFit";
 import { aeScoreMissingReason, dynastyScores, scorePieces, type AEKey } from "../../../lib/scouting/prospectScores";
@@ -125,7 +126,7 @@ function ScoreStrip({ p, pos, report }: { p: ProspectWithStats; pos: CompositePo
     tiles.push(<ScoreTile key="ae" primary label="AE SCORE" value="—" tone="dim" lines={["Not scored yet", aeScoreMissingReason(scores.composite, pos)]} />);
   }
 
-  const d = sc ? dynastyScores([p], new Map([[p.id, sc]]), scores.hsClass, weights).get(p.id) : undefined;
+  const d = sc ? dynastyScores([p], new Map([[p.id, sc]]), scores.hsClass, weights, scores.landing).get(p.id) : undefined;
   if (d) {
     const size = d.flags.reduce((s, f) => s + f.value, 0);
     const parts = [
@@ -138,8 +139,8 @@ function ScoreStrip({ p, pos, report }: { p: ProspectWithStats; pos: CompositePo
     tiles.push(<ScoreTile key="dyn" label="DYNASTY" value={signed(d.dynasty, 2)} tone={toneOf(d.dynasty)} lines={[parts.join(" · ")]}
       title={[`AE Score ${signed(d.aeScore, 2)}`, ageTitle, ...d.flags.map((f) => `Size: ${f.label}`), "Weighted by the Big Board's Dynasty sliders."].join("\n")} />);
     tiles.push(d.plus != null && d.draftCapital != null && p.draft_round != null
-      ? <ScoreTile key="plus" label="DYNASTY+" value={signed(d.plus, 2)} tone={toneOf(d.plus)} lines={[`${p.draft_round === UNDRAFTED_ROUND ? "Undrafted" : p.draft_pick ? `pick ${p.draft_pick}` : `${draftRoundLabel(p.draft_round)} rd avg`} capital ${signed(weights.draft * d.draftCapital, 2)}`]}
-          title={`Draft capital from the ${draftCapitalLabel(p.draft_round, p.draft_pick)}, × the Big Board's Draft slider (${weights.draft}).`} />
+      ? <ScoreTile key="plus" label="DYNASTY+" value={signed(d.plus, 2)} tone={toneOf(d.plus)} lines={[`${p.draft_round === UNDRAFTED_ROUND ? "Undrafted" : p.draft_pick ? `pick ${p.draft_pick}` : `${draftRoundLabel(p.draft_round)} rd avg`} capital ${signed(weights.draft * d.draftCapital, 2)}`, ...(d.landing?.competition?.value ? [`competition ${signed(weights.landing * d.landing.competition.value, 2)}`] : [])]}
+          title={[`Draft capital from the ${draftCapitalLabel(p.draft_round, p.draft_pick)}, × the Big Board's Draft slider (${weights.draft}).`, ...landingLines(d.landing, weights.landing)].join("\n")} />
       : <ScoreTile key="plus" label="DYNASTY+" value="—" tone="dim" lines={["shows once a round is set"]} />);
   } else {
     tiles.push(<ScoreTile key="dyn" label="DYNASTY" value="—" tone="dim" lines={["needs an AE Score"]} />);

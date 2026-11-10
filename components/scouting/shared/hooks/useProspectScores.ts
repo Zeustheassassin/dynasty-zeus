@@ -8,8 +8,10 @@ import { computeRoleFits } from "../../../../lib/scouting/roleFits";
 import type { RoleFit } from "../../../../lib/scouting/roleFit";
 import { pffValues, type PffTotals, type PffValues } from "../../../../lib/pff/totals";
 import {
-  DEFAULT_DYNASTY_WEIGHTS, type DynastyWeights,
+  DEFAULT_DYNASTY_WEIGHTS, type DynastyWeights, type LandingInputs,
 } from "../../../../lib/scouting/dynastyScore";
+import { landingInputsFrom } from "../../../../lib/scouting/landingSpot";
+import type { DraftPickRow } from "../../../../lib/nflDraft";
 import {
   computeAEScores, defenseFacedFrom, gamesByTierFrom, liveScoresFrom,
   type AEScores, type ProspectScoresInput, type ScoreView,
@@ -41,6 +43,8 @@ export interface UseProspectScoresReturn extends AEScores {
   roleFits: Map<string, RoleFit>;
   /** PFF numbers over each prospect's charted games (lib/pff/totals.ts). */
   pffVals: Map<string, PffValues>;
+  /** Dynasty+ landing-spot inputs per drafted prospect, from LANDING_FIRST_CLASS on (landingSpot.ts). */
+  landing: Map<string, LandingInputs>;
 }
 
 /**
@@ -50,9 +54,9 @@ export interface UseProspectScoresReturn extends AEScores {
  * weights) stay with the screen.
  */
 export function useProspectScores(
-  input: ProspectScoresInput & { pffTotals?: Map<string, PffTotals> },
+  input: ProspectScoresInput & { pffTotals?: Map<string, PffTotals>; draftPicks?: readonly DraftPickRow[] },
 ): UseProspectScoresReturn {
-  const { prospects, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals } = input;
+  const { prospects, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals, draftPicks } = input;
 
   // Each game's opponent tier (P4 / G5 / FCS), for the opponent adjustment.
   // A name the tables can't read takes the opponent of its PFF link, and that
@@ -104,8 +108,14 @@ export function useProspectScores(
     return m;
   }, [prospects, pffTotals]);
 
+  // Rookie competition: his team's picks ahead of him (2027 classes on).
+  const landing = useMemo(
+    () => landingInputsFrom(prospects, draftPicks ?? [], roleFits),
+    [prospects, draftPicks, roleFits],
+  );
+
   return {
-    ...ae, gameTiers, contexts, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, pffVals,
+    ...ae, gameTiers, contexts, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, pffVals, landing,
   };
 }
 
