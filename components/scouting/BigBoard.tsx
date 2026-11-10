@@ -14,6 +14,7 @@ import {
 import { type ProspectAge } from "../../lib/scouting/prospectAge";
 import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftCapitalLabel, draftRoundLabel } from "../../lib/draftRound";
 import type { DraftPickRow, DraftResultUpdate } from "../../lib/nflDraft";
+import type { LandingSaved } from "../../lib/scouting/teamLanding";
 import { landingLines } from "../../lib/scouting/landingSpot";
 import PostDraftTab from "./PostDraftTab";
 import { classDraftedBy, makeLock } from "../../lib/scouting/scoreLock";
@@ -93,8 +94,9 @@ const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }
   { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
   { key: "size",  label: "Size",  hint: "How much size counts: RBs and WRs carrying more weight for their height gain, lean and very light ones lose" },
   { key: "draft", label: "Draft", hint: "How much draft capital counts in Dynasty Score Plus: by overall pick, or the round's average when no pick is set" },
-  { key: "landing", label: "Landing", hint: "How much rookie competition counts in Dynasty Score Plus (2027 classes on): the players at his position his team drafted ahead of him (WRs and Move TEs count against each other)" },
+  { key: "landing", label: "Landing", hint: "How much his team's room counts in Dynasty Score Plus (2027 classes on): rookie competition (the players at his position his team drafted ahead of him; WRs and Move TEs count against each other), the established veterans ahead of him, and his path by year 2 (Post-Draft tab)" },
   { key: "role", label: "Role", hint: "How much role standing counts in Dynasty Score Plus (2027 classes on): where he ranks among his class's players at the role he'll play (Will Play (Post), else his best role bucket), up to ±0.25 at 1×" },
+  { key: "offense", label: "Offense", hint: "How much his NFL offense counts in Dynasty Score Plus (2027 classes on): his starting QB's passing grade (not for a QB) and pass-heavy / balanced / run-heavy (Post-Draft tab), up to ±0.3 at 1×" },
 ];
 
 // Derived per-prospect values the sort reads.
@@ -161,6 +163,8 @@ interface Props {
   onApplyDraftResults?: (updates: readonly DraftResultUpdate[]) => Promise<number>;
   /** Save a prospect's Will Play (Post) (a role key, or "" for not set); false if the write failed. */
   onUpdateWillPlayPost?: (id: string, value: string) => Promise<boolean>;
+  /** Save prospects' Dynasty+ team inputs (prospects.landing_inputs, migration 091); resolves with how many failed. */
+  onSaveLandingInputs?: (updates: readonly { id: string; next: LandingSaved | null }[]) => Promise<number>;
   /** None of the hub's loads failed, so the scores are complete enough to save
    *  for the draft board. */
   inputsComplete?: boolean;
@@ -281,6 +285,7 @@ export default function BigBoard({
   onReloadDraftPicks,
   onApplyDraftResults,
   onUpdateWillPlayPost,
+  onSaveLandingInputs,
 }: Props) {
   // Trigger lazy load of all three position plays the first time the
   // board renders. ScoutingHub no-ops if a position is already loaded
@@ -1153,6 +1158,7 @@ export default function BigBoard({
           onReloadDraftPicks={onReloadDraftPicks}
           onApplyDraftResults={onApplyDraftResults}
           onUpdateWillPlayPost={onUpdateWillPlayPost}
+          onSaveLandingInputs={onSaveLandingInputs}
         />
       ) : (<>
       {/* Controls */}

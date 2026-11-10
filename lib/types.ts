@@ -8,6 +8,7 @@
 
 import type { RoleFit } from "./scouting/roleFit";
 import type { RouteVariant } from "./scouting/routeVariants";
+import type { LandingSaved } from "./scouting/teamLanding";
 
 // ── Sleeper data shapes ──────────────────────────────────────
 
@@ -1163,6 +1164,11 @@ export interface Prospect {
    *  lib/scouting/boardScores.ts). Optional: absent before the migration, and
    *  never sent on insert. */
   board_scores?: BoardScores | null;
+  /** Dynasty+'s team inputs (migration 091; lib/scouting/teamLanding.ts): his
+   *  NFL team's room saved from PFF on the Post-Draft tab, and the user's
+   *  entries (vets ahead, QB grade, offense, path by year 2). Optional: absent
+   *  before the migration, and never sent on insert. Null = nothing saved. */
+  landing_inputs?: LandingSaved | null;
   /** PFF link (migration 062; lib/pff/match.ts). Optional: absent before the
    *  migration, and never sent on insert. Per user, never in shared views. */
   pff_player_id?: number | null;

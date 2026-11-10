@@ -36,6 +36,7 @@ import { EMPTY_CONTEXT_DATA, type GameContextData } from "../lib/scouting/gameCo
 import type { OverviewData } from "./scouting/overview/ProspectOverview";
 import { useDraftPicks } from "./scouting/shared/hooks/useDraftPicks";
 import type { DraftResultUpdate } from "../lib/nflDraft";
+import type { LandingSaved } from "../lib/scouting/teamLanding";
 
 const log = logger("ScoutingHub");
 
@@ -569,6 +570,31 @@ export default function ScoutingHub() {
     return failed.size;
   }
 
+  // Dynasty+'s team inputs (prospects.landing_inputs, migration 091) for one
+  // or many prospects: a saved PFF room, or the user's vets ahead / QB grade /
+  // offense / path, from the Big Board's Post-Draft tab. Each update is the
+  // whole new value. Optimistic per prospect; a failed write rolls that one
+  // back. Resolves with how many failed.
+  async function handleSaveLandingInputs(updates: readonly { id: string; next: LandingSaved | null }[]): Promise<number> {
+    const before = new Map(prospects.map((p) => [p.id, p.landing_inputs ?? null]));
+    const byId = new Map(updates.map((u) => [u.id, u.next]));
+    setProspects((prev) => prev.map((p) => (byId.has(p.id) ? { ...p, landing_inputs: byId.get(p.id)! } : p)));
+    const stamp = new Date().toISOString();
+    const results = await Promise.all(updates.map(async (u) => {
+      const { error } = await supabase
+        .from("prospects")
+        .update({ landing_inputs: u.next, updated_at: stamp })
+        .eq("id", u.id);
+      if (error) log.error("save landing inputs (is migration 091 applied?)", { msg: error.message, code: error.code });
+      return error ? u.id : null;
+    }));
+    const failed = new Set(results.filter((id): id is string => id != null));
+    if (failed.size) {
+      setProspects((prev) => prev.map((p) => (failed.has(p.id) ? { ...p, landing_inputs: before.get(p.id) ?? null } : p)));
+    }
+    return failed.size;
+  }
+
   // Freeze a drafted prospect's AE Score (prospects.ae_score_lock, migration
   // 059). Optimistic; a failed write (e.g. the migration not applied yet) rolls
   // back, and the board keeps scoring that prospect live.
@@ -849,6 +875,7 @@ export default function ScoutingHub() {
             onReloadDraftPicks={reloadDraftPicks}
             onApplyDraftResults={handleApplyDraftResults}
             onUpdateWillPlayPost={handleUpdateWillPlayPost}
+            onSaveLandingInputs={handleSaveLandingInputs}
           />
         )}
 

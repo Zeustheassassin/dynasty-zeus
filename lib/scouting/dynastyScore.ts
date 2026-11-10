@@ -3,10 +3,12 @@
 //
 //   Dynasty Score      = AE Score + age weight × career window + size weight × size flags
 //   Dynasty Score Plus = Dynasty Score + draft weight × draft capital (once a round is set)
-//                        + landing weight × rookie competition + role weight × role standing
+//                        + landing weight × (rookie competition + vets ahead + path by year 2)
+//                        + role weight × role standing
+//                        + offense weight × (QB + pass/run offense)
 //                          (the landing spot, 2027 classes on)
 //
-// The weights are the Big Board sliders (age 1, size 1, draft 2, landing 1, role 1 by default). The pieces below are
+// The weights are the Big Board sliders (age 1, size 1, draft 2, landing 1, role 1, offense 1 by default). The pieces below are
 // from published research, not fit on the user's charting: there are no NFL
 // outcomes for these prospects to fit against. Each is scaled to sit
 // alongside an AE Score that runs about ±1.5.
@@ -20,6 +22,7 @@
 import { UNDRAFTED_ROUND } from "../draftRound";
 import type { CompositePos } from "./aeComposite";
 import type { RoleStanding } from "./roleStanding";
+import type { TeamLanding } from "./teamLanding";
 
 // ── Career window ──────────────────────────────────────────────────────────
 // The age production starts to fall off, by position:
@@ -200,6 +203,11 @@ export function rookieCompetition(myCapital: number, competitors: readonly Compe
 // Role standing is its second piece (roleStanding.ts): where he ranks at the
 // role he'll play among his class's players at that role, ±ROLE_STANDING_MAX,
 // behind its own Role slider.
+//
+// The team inputs are the rest (teamLanding.ts): the established veterans
+// ahead of him and his path by year 2 go with rookie competition behind the
+// Landing slider; his QB and the pass/run offense behind the Offense slider.
+// Each is the user's entry, else a suggestion from his saved PFF room.
 
 /** Landing-spot inputs for one drafted prospect (lib/scouting/landingSpot.ts). */
 export interface LandingInputs {
@@ -209,6 +217,8 @@ export interface LandingInputs {
   note?: string;
   /** His role standing; null without a role (no role fit yet). */
   standing?: RoleStanding | null;
+  /** His team inputs (vets ahead, path, QB, offense); null off QB/RB/WR/TE. */
+  team?: TeamLanding | null;
 }
 
 export interface LandingBreakdown {
@@ -217,10 +227,12 @@ export interface LandingBreakdown {
   note?: string;
   /** Role standing, before the Role weight; null without a role. */
   standing: RoleStanding | null;
+  /** The team inputs, each value before its slider; null off QB/RB/WR/TE. */
+  team: TeamLanding | null;
 }
 
 // ── Weights (the Big Board sliders) ────────────────────────────────────────
-export interface DynastyWeights { age: number; size: number; draft: number; landing: number; role: number }
+export interface DynastyWeights { age: number; size: number; draft: number; landing: number; role: number; offense: number }
 // Draft defaults to 2 (the user's call, 2026-10-01): at 2× a 1st-rounder gets
 // +2.0 and an undrafted rookie −2.0, so draft capital, the strongest single
 // predictor of a fantasy hit, carries more than the AE Score's ±1.5 spread.
@@ -228,7 +240,8 @@ export interface DynastyWeights { age: number; size: number; draft: number; land
 // draft capital's swing, since teams make room for players they spent picks on.
 // Role defaults to 1: role standing reaches ±0.25 at most, since it partly
 // re-reads the skill the AE Score already counts.
-export const DEFAULT_DYNASTY_WEIGHTS: DynastyWeights = { age: 1, size: 1, draft: 2, landing: 1, role: 1 };
+// Offense defaults to 1: his QB and the pass/run lean reach ±0.3 together.
+export const DEFAULT_DYNASTY_WEIGHTS: DynastyWeights = { age: 1, size: 1, draft: 2, landing: 1, role: 1, offense: 1 };
 export const WEIGHT_MIN = 0;
 export const WEIGHT_MAX = 3;
 export const WEIGHT_STEP = 0.25;
@@ -272,7 +285,10 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
   let landing: LandingBreakdown | null = null;
   if (inp.landing && draftCapital != null) {
     const competition = inp.landing.competitors ? rookieCompetition(draftCapital, inp.landing.competitors) : null;
-    landing = { competition, standing: inp.landing.standing ?? null, ...(inp.landing.note ? { note: inp.landing.note } : {}) };
+    landing = {
+      competition, standing: inp.landing.standing ?? null, team: inp.landing.team ?? null,
+      ...(inp.landing.note ? { note: inp.landing.note } : {}),
+    };
   }
   return {
     aeScore: inp.aeScore,
@@ -286,8 +302,11 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
   };
 }
 
-/** The landing spot's share of Dynasty+ at the slider weights: rookie competition and role standing. */
-export function landingTotal(landing: LandingBreakdown | null | undefined, w: Pick<DynastyWeights, "landing" | "role">): number {
+/** The landing spot's share of Dynasty+ at the slider weights: rookie competition, role standing and the team inputs. */
+export function landingTotal(landing: LandingBreakdown | null | undefined, w: Pick<DynastyWeights, "landing" | "role" | "offense">): number {
   if (!landing) return 0;
-  return w.landing * (landing.competition?.value ?? 0) + w.role * (landing.standing?.value ?? 0);
+  const t = landing.team?.values;
+  return w.landing * ((landing.competition?.value ?? 0) + (t?.pecking ?? 0) + (t?.path ?? 0))
+    + w.role * (landing.standing?.value ?? 0)
+    + w.offense * ((t?.qb ?? 0) + (t?.offense ?? 0));
 }

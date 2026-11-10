@@ -1,6 +1,7 @@
 // Landing-spot inputs for Dynasty Score Plus (dynastyScore.ts): who his NFL
 // team drafted ahead of him, from the stored draft results (cfd_draft_picks,
-// migration 090), and his role standing (roleStanding.ts). Classes from
+// migration 090), his role standing (roleStanding.ts), and his team inputs
+// (teamLanding.ts: vets ahead, path by year 2, QB, offense). Classes from
 // LANDING_FIRST_CLASS only.
 
 import { UNDRAFTED_ROUND } from "../draftRound";
@@ -10,10 +11,12 @@ import { COMPETITION_CAP, LANDING_FIRST_CLASS, type Competitor, type LandingBrea
 import { isCompositePos } from "./prospectScores";
 import { roleInfo, type RoleFit } from "./roleFit";
 import { ROLE_STANDING_MAX, roleStandingText, willPlayRole, type RoleStanding } from "./roleStanding";
+import { resolveTeamLanding, teamLandingLines } from "./teamLanding";
 
 export type LandingProspect = Pick<
   Prospect,
   "id" | "name" | "school" | "position" | "draft_class_year" | "draft_round" | "draft_pick" | "draft_team" | "will_play_post"
+  | "landing_inputs"
 >;
 
 /**
@@ -45,7 +48,8 @@ export function picksByYear(picks: readonly DraftPickRow[]): Map<number, DraftPi
  * for a WR and WRs for a Move TE, taken ahead of him: an earlier overall pick, or an earlier round
  * when his pick isn't set, or any pick when he went undrafted. Null with a
  * note when his class's draft isn't loaded or his team isn't known. His role
- * standing comes from `standings` (roleStandings), whatever the draft results.
+ * standing comes from `standings` (roleStandings), and his team inputs from
+ * his saved room and entries (resolveTeamLanding), whatever the draft results.
  */
 export function landingInputsFrom(
   prospects: readonly LandingProspect[],
@@ -67,14 +71,15 @@ export function landingInputsFrom(
     if (p.draft_class_year == null || p.draft_class_year < LANDING_FIRST_CLASS) continue;
     if (!isCompositePos(p.position) || p.draft_round == null) continue;
     const standing = standings.get(p.id) ?? null;
+    const teamInputs = resolveTeamLanding(p);
     const list = byYear.get(p.draft_class_year);
     if (!list?.length) {
-      out.set(p.id, { competitors: null, note: `the ${p.draft_class_year} draft results aren't loaded (Post-Draft tab)`, standing });
+      out.set(p.id, { competitors: null, note: `the ${p.draft_class_year} draft results aren't loaded (Post-Draft tab)`, standing, team: teamInputs });
       continue;
     }
     const team = nflTeamId(p.draft_team);
     if (team == null) {
-      out.set(p.id, { competitors: null, note: p.draft_team ? `"${p.draft_team}" isn't a team the board knows` : "no NFL team set", standing });
+      out.set(p.id, { competitors: null, note: p.draft_team ? `"${p.draft_team}" isn't a team the board knows` : "no NFL team set", standing, team: teamInputs });
       continue;
     }
     const undrafted = p.draft_round === UNDRAFTED_ROUND;
@@ -97,7 +102,7 @@ export function landingInputsFrom(
         competitors.push({ name: pk.name, position: "WR", overall: pk.overall, round: pk.round, moveTe: false });
       }
     }
-    out.set(p.id, { competitors, standing });
+    out.set(p.id, { competitors, standing, team: teamInputs });
   }
   return out;
 }
@@ -122,14 +127,14 @@ export function standingLine(standing: RoleStanding | null, classYear: number, w
   return `Role standing: ${roleStandingText(standing, classYear)} → ${sgn2(weight * standing.value)}`;
 }
 
-/** The Dynasty+ tooltip lines for the landing spot: rookie competition, then role standing. */
+/** The Dynasty+ tooltip lines for the landing spot: rookie competition, role standing, then the team inputs. */
 export function landingLines(
   landing: LandingBreakdown | null | undefined,
   classYear: number,
-  w: { landing: number; role: number },
+  w: { landing: number; role: number; offense: number },
 ): string[] {
   if (!landing) return [];
-  return [competitionLine(landing, w.landing), standingLine(landing.standing, classYear, w.role)];
+  return [competitionLine(landing, w.landing), standingLine(landing.standing, classYear, w.role), ...teamLandingLines(landing.team, w)];
 }
 
 /** The role-standing pool in words, for a tooltip: "X in the 2027 class: Smith 86%, Jones 78% (him), …". */

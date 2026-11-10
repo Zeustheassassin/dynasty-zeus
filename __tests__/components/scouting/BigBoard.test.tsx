@@ -893,6 +893,29 @@ describe("BigBoard Post-Draft tab", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Post-Draft" }));
     const row = screen.getByRole("cell", { name: "Quarter One" }).closest("tr")!;
-    expect(row.textContent).toMatch(/Rookie competition: Somebody Else \(QB, pick 5, −0\.\d\d\)/);
+    const cell = [...row.querySelectorAll("td")].find((td) => td.title.startsWith("Rookie competition"))!;
+    expect(cell.title).toMatch(/Rookie competition: Somebody Else \(QB, pick 5, −0\.\d\d\)/);
+    expect(cell.textContent).toMatch(/^1 · −0\.\d\d$/);
+  });
+
+  it("suggests the team inputs from a saved room and saves an entry over them", async () => {
+    const save = vi.fn(async () => 0);
+    const pff = {
+      asOf: "2027-05-01T00:00:00.000Z", season: 2026, team: "New York Jets", teamId: 20,
+      room: [{ name: "Vet Wide", depth: 1, grade: 82, share: 0.8, birthDate: "2000-01-01" }],
+      qb: { name: "Jet QB", grade: 82, rookie: false }, bar: { regular: 60, star: 75 },
+      passOe: -0.05, passPct: 0.55, targetShare: 0.6,
+    };
+    renderBoard([...PROSPECTS.map((p) => (p.id === "wr1" ? { ...p, draft_round: 1, draft_pick: 5, draft_team: "Jets", landing_inputs: { pff } } : p)), ...POOL], undefined, {
+      onSaveLandingInputs: save,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Post-Draft" }));
+    const vets = screen.getByRole("combobox", { name: "Vets ahead for Wide One" }) as HTMLSelectElement;
+    expect(vets.value).toBe("");
+    expect(vets.options[0].textContent).toBe("Auto: 1");
+    expect((screen.getByRole("combobox", { name: "Offense for Wide One" }) as HTMLSelectElement).options[0].textContent).toBe("Auto: Run-heavy");
+    expect((screen.getByRole("textbox", { name: "QB grade for Wide One" }) as HTMLInputElement).placeholder).toBe("82.0");
+    fireEvent.change(vets, { target: { value: "3" } });
+    await vi.waitFor(() => expect(save).toHaveBeenCalledWith([{ id: "wr1", next: { pff, vetsAhead: 3 } }]));
   });
 });
