@@ -27,6 +27,7 @@ export function makeLock(live: Omit<AEScoreLock, "locked_at">, now: Date): AESco
     score: live.score,
     components: live.components,
     ...(live.alignment ? { alignment: live.alignment } : {}),
+    ...(live.middle ? { middle: live.middle } : {}),
     ...(live.baseline ? { baseline: live.baseline } : {}),
     locked_at: now.toISOString(),
   };

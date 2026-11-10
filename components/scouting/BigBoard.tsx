@@ -337,7 +337,7 @@ export default function BigBoard({
     void (async () => {
       for (const p of toLock) {
         const live = liveScores.get(p.id)!;
-        await onLockAEScore(p.id, makeLock({ score: live.score, components: live.components, alignment: live.alignment, baseline: live.baseline }, now));
+        await onLockAEScore(p.id, makeLock({ score: live.score, components: live.components, alignment: live.alignment, middle: live.middle, baseline: live.baseline }, now));
       }
     })();
   }, [scoresReady, prospects, liveScores, onLockAEScore]);
@@ -619,12 +619,13 @@ export default function BigBoard({
       lines.push(`At draft: ${signed(sc.atDraft.score, 2)} (locked ${new Date(sc.atDraft.lockedAt).toLocaleDateString()})`);
     }
     if (sc.alignment) lines.push(`Alignment: ${sc.alignment.label} → ${signed(sc.alignment.value, 2)}`);
+    if (sc.middle) lines.push(`Middle of the field: ${sc.middle.label} → ${signed(sc.middle.value, 2)}`);
     if (sc.baseline) lines.push(`${p.position} baseline: every ${p.position} sits ${Math.abs(sc.baseline).toFixed(1)} ${sc.baseline < 0 ? "lower" : "higher"} → ${signed(sc.baseline, 2)}`);
     const mix = gamesByTier.get(p.id);
     if (mix && p.position !== "QB") lines.push(`Charted opponents: ${mix.P4} P4 · ${mix.G5} G5 · ${mix.FCS} FCS`);
     const sos = defenseFaced.get(p.id);
     if (sos) lines.push(`Opponent defenses: SP+ ${sos.avg.toFixed(1)} allowed per game on average (charted pool ${contextCov.spRef.toFixed(1)}; lower is tougher), ${sos.games} game${sos.games === 1 ? "" : "s"}`);
-    const after = [sc.alignment && "the alignment penalty", sc.baseline && `the ${p.position} baseline`].filter(Boolean).join(" and ");
+    const after = [sc.alignment && "the alignment penalty", sc.middle && "the middle-of-the-field adjustment", sc.baseline && `the ${p.position} baseline`].filter(Boolean).join(" and ");
     const head = `${signed(sc.score, 2)} true-talent SDs vs the average charted ${p.position}${after ? `, after ${after}` : ""}`;
     const title = [head, ...lines].join("\n");
     const color = sc.score >= 0 ? "text-emerald-400" : "text-red-400";

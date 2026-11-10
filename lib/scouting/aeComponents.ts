@@ -18,6 +18,7 @@ import { TAG_COMPONENTS, TAG_COMPONENT_WEIGHTS, tagGameCounts, type tagStatReps 
 import type { OpponentTier } from "./opponentTier";
 import type { ProspectGameRouteTagCellsRow } from "./aggregateMerge";
 import { EMPTY_CONTEXT_DATA, type ContextCovariates, type GameContextData } from "./gameContext";
+import type { PffSeasonDepthRow } from "./middleUsage";
 
 /** What the screens need beyond plays and games to build the components and
  *  tag stats: ScoutingHub's PFF game rows, the two migration-064 views and the
@@ -30,6 +31,8 @@ export interface GradingData {
   routeTagCells: readonly ProspectGameRouteTagCellsRow[];
   /** Each charted game's CFD game, weather, SP+ and supporting cast (gameContext.ts). */
   context: GameContextData;
+  /** QBs' PFF full-season passing depth (migration 092; middleUsage.ts). Absent = none loaded. */
+  pffSeasonDepth?: readonly PffSeasonDepthRow[];
 }
 export const EMPTY_GRADING_DATA: GradingData = { pffGameRows: [], routeCounts: [], routeTagCells: [], context: EMPTY_CONTEXT_DATA };
 

@@ -467,7 +467,7 @@ export default function ScoutingHub() {
   // The AE Score's per-player components and the tag stats read these
   // (lib/scouting/aeComponents.ts).
   const gradingData = useMemo<GradingData>(
-    () => ({ pffGameRows: pffRows.games, routeCounts, routeTagCells, context: contextData }),
+    () => ({ pffGameRows: pffRows.games, routeCounts, routeTagCells, context: contextData, pffSeasonDepth: pffRows.depth ?? [] }),
     [pffRows, routeCounts, routeTagCells, contextData],
   );
 

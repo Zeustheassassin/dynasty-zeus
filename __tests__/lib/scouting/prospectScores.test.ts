@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import type { AEScoreLock, ProspectWithStats, RBPlay, ScoutingGame } from "../../../lib/types";
 import {
-  scoreViewsFrom, dynastyScores, gamesByTierFrom, defenseFacedFrom, scorePieces, computeAEScores, type ScoreView,
+  scoreViewsFrom, dynastyScores, gamesByTierFrom, defenseFacedFrom, scorePieces, computeAEScores, liveScoresFrom, type ScoreView,
 } from "../../../lib/scouting/prospectScores";
+import type { AEComposite } from "../../../lib/scouting/aeComposite";
 import { computeRBAboveExpectedSamples } from "../../../lib/scouting/aboveExpected";
 import { EMPTY_GRADING_DATA } from "../../../lib/scouting/aeComponents";
 import { gameCovariates } from "../../../lib/scouting/gameContext";
@@ -134,6 +135,25 @@ describe("scorePieces", () => {
       // p11 has no YPRR sample: no per-player piece, and his score is still the sum.
       expect(pieces.some((x) => x.key === "yprr")).toBe(id !== "p11");
     }
+  });
+
+  it("adds a QB's middle-of-the-field adjustment to his live score, only a QB's, and the pieces still sum", () => {
+    const pc = buildPositionComposite("QB", [{ ...primary, key: "aae", label: "AAE", weight: 1 }]);
+    const composite = { positions: { QB: pc, WR: pc }, scores: pc.scores } as unknown as AEComposite;
+    const usage = (share: number) => ({ share, rawShare: share, middle: 30, attempts: 300, seasons: [2025] });
+    const middle = new Map([["p0", usage(12)], ["p1", usage(22)], ["p2", usage(31)], ["p3", usage(12)]]);
+    const m = liveScoresFrom([...ids.slice(0, 3).map((id) => prospect(id, "QB")), prospect("p3", "WR")], composite, middle);
+    expect(m.get("p0")!.middle!.value).toBeCloseTo(-0.3, 12);
+    expect(m.get("p0")!.score).toBeCloseTo(pc.scores.get("p0")!.score - 0.3, 12);
+    expect(m.get("p1")!.middle).toBeUndefined();
+    expect(m.get("p1")!.score).toBe(pc.scores.get("p1")!.score);
+    expect(m.get("p2")!.score).toBeCloseTo(pc.scores.get("p2")!.score + 0.3, 12);
+    expect(m.get("p3")!.middle).toBeUndefined();
+    const pieces = scorePieces(m.get("p0")!, pc);
+    expect(pieces.reduce((s, x) => s + x.add, 0)).toBeCloseTo(m.get("p0")!.score, 10);
+    expect(pieces.at(-1)).toMatchObject({ key: "middle", add: -0.3 });
+    // Without the PFF rows nothing changes.
+    expect(liveScoresFrom([prospect("p0", "QB")], composite).get("p0")!.score).toBe(pc.scores.get("p0")!.score);
   });
 
   it("describes each piece: AE sample, per-player weight after trust", () => {

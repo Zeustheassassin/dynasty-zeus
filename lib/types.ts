@@ -1484,6 +1484,8 @@ export interface AEScoreLock {
   components: (ScoreComponent & { tau: number })[];
   /** A WR's alignment penalty, already in `score` (lib/scouting/alignmentPenalty.ts). */
   alignment?: { label: string; value: number };
+  /** A QB's middle-of-the-field adjustment, already in `score` (lib/scouting/middleUsage.ts). */
+  middle?: { label: string; value: number };
   /** The position's baseline shift, already in `score` (aeComposite POSITION_BASELINE). */
   baseline?: number;
   locked_at: string;

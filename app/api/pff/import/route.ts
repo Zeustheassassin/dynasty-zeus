@@ -3,7 +3,10 @@
 // Imports PFF's stats for a few of the caller's prospects: one row per
 // matched charted game (prospect_game_pff) and PFF's aggregate over exactly
 // the charted weeks of each season (prospect_season_pff), both migration 063,
-// written as the caller under their own RLS. Only games linked auto /
+// written as the caller under their own RLS. QBs also get PFF's full-season
+// passing depth for each college season (prospect_season_pff_depth,
+// migration 092; the middle-of-the-field adjustment, middleUsage.ts), the
+// one place a whole season is read. Only games linked auto /
 // confirmed in Stage 1 are read; PFF season totals never are. The Scouting →
 // PFF Links panel and each charting board's Games tab call it in small
 // batches; PFF's per-minute read budget (100) is paced inside the client, so
@@ -14,8 +17,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiError } from "../../../../lib/apiHelpers";
 import { logger } from "../../../../lib/logger";
 import { PFF_IMPORT_BATCH, type PffImportResponse, type PffImportResult } from "../../../../lib/pff/api";
-import { getPffClient, PffError } from "../../../../lib/pff/client";
+import { getPffClient, PffError, type PffClient } from "../../../../lib/pff/client";
+import { playerSeasonDepth } from "../../../../lib/pff/ncaa";
 import { importProspect, type GameToImport, type ProspectImport } from "../../../../lib/pff/runImport";
+import { depthSeasonsFor, zoneAttemptsFrom } from "../../../../lib/scouting/middleUsage";
 import { GAME_AVERAGE_KEYS, GAME_STAT_KEYS, SEASON_AVERAGE_KEYS, SEASON_STAT_KEYS, pffPos } from "../../../../lib/pff/stats";
 import { checkRateLimit } from "../../../../lib/rateLimit";
 import { requireUser } from "../../../../lib/server/requireUser";
@@ -30,8 +35,9 @@ const TIME_BUDGET_MS = 230_000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LINKED = new Set(["auto", "confirmed"]);
 const MIGRATION_HINT = "Apply migration 063 (supabase/migrations/063_pff_game_stats.sql) first.";
+const DEPTH_MIGRATION_HINT = "Full-season depth needs migration 092 (supabase/migrations/092_prospect_season_pff_depth.sql)";
 
-interface ProspectRow { id: string; position: string; pff_player_id: number | null; pff_match_status: string | null }
+interface ProspectRow { id: string; position: string; pff_player_id: number | null; pff_match_status: string | null; draft_class_year: number | null }
 interface GameRow extends GameToImport { prospect_id: string; pff_match_status: string | null }
 
 export async function POST(req: NextRequest) {
@@ -52,7 +58,7 @@ export async function POST(req: NextRequest) {
   }
 
   const [prospectsRes, gamesRes] = await Promise.all([
-    supabase.from("prospects").select("id,position,pff_player_id,pff_match_status").in("id", ids),
+    supabase.from("prospects").select("id,position,pff_player_id,pff_match_status,draft_class_year").in("id", ids),
     supabase.from("scouting_games").select("id,prospect_id,season_year,pff_game_id,pff_match_status").in("prospect_id", ids),
   ]);
   const loadErr = prospectsRes.error ?? gamesRes.error;
@@ -79,16 +85,28 @@ export async function POST(req: NextRequest) {
       continue;
     }
     const linked = games.filter((g) => g.prospect_id === p.id && g.pff_game_id != null && LINKED.has(g.pff_match_status ?? ""));
-    if (linked.length === 0) { results.push({ prospectId: p.id, imported: 0, note: "No charted games linked to PFF" }); continue; }
+    // QBs also get PFF's full-season passing depth (migration 092), linked
+    // games or not: the middle-of-the-field adjustment reads whole seasons.
+    if (linked.length === 0 && pos !== "QB") { results.push({ prospectId: p.id, imported: 0, note: "No charted games linked to PFF" }); continue; }
     try {
-      const imp = await importProspect(client, pos, p.pff_player_id, linked);
-      const saveErr = await save(supabase, user.id, p.id, p.pff_player_id, imp);
+      let imp: ProspectImport | null = null;
+      let saveErr: string | null = null;
+      if (linked.length > 0) {
+        imp = await importProspect(client, pos, p.pff_player_id, linked);
+        saveErr = await save(supabase, user.id, p.id, p.pff_player_id, imp);
+      }
+      const depth = pos === "QB"
+        ? await importSeasonDepth(supabase, client, user.id, p.id, p.pff_player_id,
+          depthSeasonsFor(p.draft_class_year, games.filter((g) => g.prospect_id === p.id).map((g) => g.season_year), new Date()))
+        : null;
+      const notes = [linked.length === 0 && "No charted games linked to PFF", depth?.note].filter(Boolean).join("; ");
       results.push({
         prospectId: p.id,
-        imported: imp.games.length,
-        seasons: imp.seasons.length,
-        missing: imp.missing,
-        ...(saveErr ? { error: saveErr } : {}),
+        imported: imp?.games.length ?? 0,
+        ...(imp ? { seasons: imp.seasons.length, missing: imp.missing } : {}),
+        ...(depth ? { depthSeasons: depth.saved } : {}),
+        ...(notes ? { note: notes } : {}),
+        ...(saveErr ?? depth?.error ? { error: (saveErr ?? depth?.error)! } : {}),
       });
     } catch (err) {
       if (err instanceof PffError && err.status === 429) retryAfterMs = err.retryAfterMs ?? 60_000;
@@ -148,4 +166,31 @@ async function save(
   }
   if (errors.length) log.error("save failed", { prospectId, errors });
   return errors.length ? `Couldn't save: ${errors[0]}` : null;
+}
+
+/**
+ * A QB's full-season passing depth for each season he threw (migration 092),
+ * one PFF read per season. Before 092 is applied it says so in a note and
+ * leaves the rest of the import alone.
+ */
+async function importSeasonDepth(
+  supabase: SupabaseClient, client: PffClient, userId: string, prospectId: string, playerId: number, seasons: readonly number[],
+): Promise<{ saved: number; note?: string; error?: string }> {
+  const fetchedAt = new Date().toISOString();
+  const rows: Record<string, unknown>[] = [];
+  for (const season of seasons) {
+    const row = await playerSeasonDepth(client, playerId, season);
+    if (!row) continue;
+    rows.push({
+      user_id: userId, prospect_id: prospectId, season, pff_player_id: playerId,
+      team_name: typeof row.team_name === "string" ? row.team_name : null,
+      zone_attempts: zoneAttemptsFrom(row), raw: row, fetched_at: fetchedAt,
+    });
+  }
+  if (!rows.length) return { saved: 0 };
+  const { error } = await supabase.from("prospect_season_pff_depth").upsert(rows, { onConflict: "prospect_id,season" });
+  if (!error) return { saved: rows.length };
+  if (missingTable(error)) return { saved: 0, note: DEPTH_MIGRATION_HINT };
+  log.error("season depth save failed", { prospectId, err: error.message });
+  return { saved: 0, error: `Couldn't save full-season depth: ${error.message}` };
 }

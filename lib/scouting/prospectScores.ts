@@ -28,6 +28,7 @@ import type { OpponentTier } from "./opponentTier";
 import { applyOpponentStrength, type OpponentAdjusted } from "./opponentAdjust";
 import { activeLock } from "./scoreLock";
 import { alignmentPenalty } from "./alignmentPenalty";
+import { middleAdjustment, type MiddleUsage } from "./middleUsage";
 import { buildWRGameSplits, buildWRTierSplits, type ProspectGameRouteCellsRow } from "./aggregateMerge";
 import type { ContextCovariates, GameContext } from "./gameContext";
 import { contextAdjust, type HeadlineKey, type MetricContext } from "./contextGrading";
@@ -177,6 +178,8 @@ export interface ScoreView {
   components: (ScoreComponent & { tau: number })[];
   /** A WR's alignment penalty, already in `score`. */
   alignment?: { label: string; value: number };
+  /** A QB's middle-of-the-field adjustment (middleUsage.ts), already in `score`. */
+  middle?: { label: string; value: number };
   /** The position's baseline shift (aeComposite POSITION_BASELINE), already in `score`. */
   baseline?: number;
   /** Set when the value shown IS the draft-day snapshot. */
@@ -236,6 +239,7 @@ export function scorePieces(view: ScoreView, pc: PositionComposite): ScorePiece[
     return { key: c.key, label: c.label, value, trust: c.reliability, weight, add };
   });
   if (view.alignment) pieces.push({ key: "alignment", label: "One-side alignment", value: view.alignment.label, trust: null, weight: null, add: view.alignment.value });
+  if (view.middle) pieces.push({ key: "middle", label: "Middle of the field (10+ yds)", value: view.middle.label, trust: null, weight: null, add: view.middle.value });
   if (view.baseline) pieces.push({ key: "baseline", label: "Position baseline", value: `every ${pc.pos} sits ${Math.abs(view.baseline).toFixed(1)} ${view.baseline < 0 ? "lower" : "higher"}`, trust: null, weight: null, add: view.baseline });
   return pieces;
 }
@@ -258,18 +262,22 @@ export function aeScoreMissingReason(composite: AEComposite, pos: CompositePos):
 /** Live scores, or a drafted class's scores as they stood at the draft (scoreLock.ts). */
 export type ScoreViewMode = "live" | "draft";
 
-/** Live AE Scores from a composite: its score plus a WR's alignment penalty. */
-export function liveScoresFrom(prospects: readonly ProspectWithStats[], composite: AEComposite): Map<string, ScoreView> {
+/** Live AE Scores from a composite: its score plus a WR's alignment penalty or a QB's middle of the field. */
+export function liveScoresFrom(
+  prospects: readonly ProspectWithStats[], composite: AEComposite, middle?: ReadonlyMap<string, MiddleUsage>,
+): Map<string, ScoreView> {
   const m = new Map<string, ScoreView>();
   for (const p of prospects) {
     const sc = composite.scores.get(p.id);
     if (!sc || !isCompositePos(p.position)) continue;
     const pc = composite.positions[p.position];
     const alignment = p.position === "WR" ? alignmentPenalty(p) : null;
+    const mid = p.position === "QB" ? middleAdjustment(middle?.get(p.id)) : null;
     m.set(p.id, {
-      score: sc.score + (alignment?.value ?? 0),
+      score: sc.score + (alignment?.value ?? 0) + (mid?.value ?? 0),
       components: sc.components.map((c) => ({ ...c, tau: pc.metrics.find((x) => x.key === c.key)?.tau ?? 0 })),
       ...(alignment ? { alignment } : {}),
+      ...(mid ? { middle: mid } : {}),
       ...(sc.baseline ? { baseline: sc.baseline } : {}),
     });
   }
@@ -290,7 +298,7 @@ export function scoreViewsFrom(
   for (const p of prospects) {
     const lock = activeLock(p, now);
     const snapshot: ScoreView | null = lock
-      ? { score: lock.score, components: lock.components, alignment: lock.alignment, baseline: lock.baseline, lockedAt: lock.locked_at }
+      ? { score: lock.score, components: lock.components, alignment: lock.alignment, middle: lock.middle, baseline: lock.baseline, lockedAt: lock.locked_at }
       : null;
     const sc = live.get(p.id);
     if (snapshot && (mode === "draft" || !sc)) { m.set(p.id, snapshot); continue; }

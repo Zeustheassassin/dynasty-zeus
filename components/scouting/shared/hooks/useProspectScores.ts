@@ -13,6 +13,7 @@ import {
 import { landingInputsFrom } from "../../../../lib/scouting/landingSpot";
 import { roleStandings, type RoleStanding } from "../../../../lib/scouting/roleStanding";
 import type { DraftPickRow } from "../../../../lib/nflDraft";
+import { middleUsageByProspect, type MiddleUsage } from "../../../../lib/scouting/middleUsage";
 import {
   computeAEScores, defenseFacedFrom, gamesByTierFrom, liveScoresFrom,
   type AEScores, type ProspectScoresInput, type ScoreView,
@@ -27,8 +28,10 @@ export interface UseProspectScoresReturn extends AEScores {
   contexts: Map<string, GameContext>;
   /** The covariates the context effects read. */
   contextCov: ContextCovariates;
-  /** The live AE Score: the composite plus a WR's alignment penalty. */
+  /** The live AE Score: the composite plus a WR's alignment penalty and a QB's middle of the field. */
   liveScores: Map<string, ScoreView>;
+  /** Each QB's middle-of-the-field share over his PFF full seasons (middleUsage.ts). */
+  middleUsage: Map<string, MiddleUsage>;
   /** Each prospect's charted games by opponent tier, for the AE Score tooltip. */
   gamesByTier: Map<string, Record<OpponentTier, number>>;
   /** Each prospect's charted opponents' average defensive SP+, for the tooltip. */
@@ -77,7 +80,10 @@ export function useProspectScores(
     () => computeAEScores({ prospects, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData }, gameTiers.byGame, contextCov),
     [prospects, games, rbPlays, qbPlays, tePlays, gameTiers, gameRouteCells, gradingData, contextCov],
   );
-  const liveScores = useMemo(() => liveScoresFrom(prospects, ae.composite), [prospects, ae.composite]);
+  // A QB's middle of the field (10+ yds between the numbers) over PFF's full
+  // seasons adds to his live AE Score (middleUsage.ts).
+  const middleUsage = useMemo(() => middleUsageByProspect(gradingData.pffSeasonDepth ?? []), [gradingData.pffSeasonDepth]);
+  const liveScores = useMemo(() => liveScoresFrom(prospects, ae.composite, middleUsage), [prospects, ae.composite, middleUsage]);
 
   const gamesByTier = useMemo(() => gamesByTierFrom(games, gameTiers.byGame), [games, gameTiers]);
   const defenseFaced = useMemo(() => defenseFacedFrom(games, contexts), [games, contexts]);
@@ -120,7 +126,7 @@ export function useProspectScores(
   );
 
   return {
-    ...ae, gameTiers, contexts, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, standings, pffVals, landing,
+    ...ae, gameTiers, contexts, contextCov, liveScores, middleUsage, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, standings, pffVals, landing,
   };
 }
 

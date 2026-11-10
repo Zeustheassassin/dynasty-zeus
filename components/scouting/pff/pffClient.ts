@@ -11,6 +11,7 @@ import {
 } from "../../../lib/pff/api";
 import { GAME_ROW_SELECT, SEASON_ROW_SELECT, type PffGameRow, type PffSeasonRow } from "../../../lib/pff/stats";
 import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
+import { SEASON_DEPTH_SELECT, type PffSeasonDepthRow } from "../../../lib/scouting/middleUsage";
 import { supabase } from "../../../lib/supabaseclient";
 
 const log = logger("scouting/pff/pffClient");
@@ -32,11 +33,27 @@ export async function pffAuthHeader(): Promise<Record<string, string>> {
 export interface PffRows {
   games: PffGameRow[];
   seasons: PffSeasonRow[];
+  /** QBs' full-season passing depth (migration 092); empty before it's applied. */
+  depth?: PffSeasonDepthRow[];
+}
+
+/** QBs' full-season passing depth rows. A failure (092 not applied) only empties them. */
+async function fetchSeasonDepth(prospectId?: string): Promise<PffSeasonDepthRow[]> {
+  try {
+    return await fetchAllRows<PffSeasonDepthRow>((from, to) => {
+      let q = supabase.from("prospect_season_pff_depth").select(SEASON_DEPTH_SELECT);
+      if (prospectId) q = q.eq("prospect_id", prospectId);
+      return q.order("prospect_id").order("season").range(from, to) as unknown as PromiseLike<{ data: PffSeasonDepthRow[] | null; error: { message: string } | null }>;
+    });
+  } catch (err) {
+    log.warn("season depth load failed (migration 092 applied?)", { err: String(err) });
+    return [];
+  }
 }
 
 /** The user's stored PFF rows, all of them or one prospect's. Throws on error. */
 export async function fetchPffRows(prospectId?: string): Promise<PffRows> {
-  const [games, seasons] = await Promise.all([
+  const [games, seasons, depth] = await Promise.all([
     fetchAllRows<PffGameRow>((from, to) => {
       let q = supabase.from("prospect_game_pff").select(GAME_ROW_SELECT);
       if (prospectId) q = q.eq("prospect_id", prospectId);
@@ -47,8 +64,9 @@ export async function fetchPffRows(prospectId?: string): Promise<PffRows> {
       if (prospectId) q = q.eq("prospect_id", prospectId);
       return q.order("prospect_id").order("season").range(from, to) as unknown as PromiseLike<{ data: PffSeasonRow[] | null; error: { message: string } | null }>;
     }),
+    fetchSeasonDepth(prospectId),
   ]);
-  return { games, seasons };
+  return { games, seasons, depth };
 }
 
 export interface PffBatchProgress {

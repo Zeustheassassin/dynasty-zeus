@@ -177,6 +177,19 @@ export async function playerAggregate(
   }, null);
 }
 
+/**
+ * His passing/depth report over a WHOLE season (no week list), or null when he
+ * didn't throw for PFF that season (PFF answers an empty list). For the QB
+ * middle-of-the-field adjustment (lib/scouting/middleUsage.ts, migration 092).
+ */
+export async function playerSeasonDepth(client: PffClient, playerId: number, season: number): Promise<PffStatRow | null> {
+  return getOrEmpty(async () => {
+    const body = await client.get("/v1/player/passing/depth", { league: "ncaa", player_id: playerId, season });
+    const r = reportBody(body, "passing_depth");
+    return Array.isArray(r) ? ((r[0] as PffStatRow | undefined) ?? null) : null;
+  }, null);
+}
+
 /** Every player of one team, aggregated over the given weeks of one season. */
 export async function teamFacet(
   client: PffClient, path: string, key: string, season: number, weeks: readonly number[], franchiseId: number,

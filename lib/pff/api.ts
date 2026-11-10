@@ -31,6 +31,8 @@ export interface PffImportResult {
   seasons?: number;
   /** Linked games PFF had nothing for, with why. */
   missing?: { gameId: string; reason: string }[];
+  /** QBs: college seasons whose full-season passing depth was saved (migration 092). */
+  depthSeasons?: number;
   /** Why nothing was imported (not linked, no linked games, …). */
   note?: string;
   error?: string;
