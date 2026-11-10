@@ -9,11 +9,14 @@ import ProspectOverview, { type OverviewData } from "../overview/ProspectOvervie
 import ProspectScorePieces from "../overview/ProspectScorePieces";
 import ProspectProduction from "../overview/ProspectProduction";
 import { getLocalStorageItem, setLocalStorageItem } from "../../../lib/hooks/useLocalStorage";
+import type { RolePos } from "../../../lib/scouting/roleFit";
+import { ShouldPlayField, WillPlayPostSelect } from "./RoleFields";
 
 export interface ChartingBoardConfig {
   positionLabel: string;
   accentColor: "blue" | "green";
-  nflRoles: string[];
+  /** The role buckets Should Play and Will Play (Post) read (roleFit.ts ROLES). */
+  rolePos: RolePos;
 }
 
 // Every board has the same tabs. Overview, the head of Breakdown and Production
@@ -234,17 +237,20 @@ export default function ChartingBoard({
                 {classYearOptionsWith(bio.draft_class_year).map((y) => <option key={y}>{y}</option>)}
               </select>
             </div>
-            {(["should_play", "will_play_pre", "will_play_post"] as const).map((k) => (
-              <div key={k}>
-                <label className="block text-xs text-slate-500 mb-1">
-                  {k === "should_play" ? "Should Play" : k === "will_play_pre" ? "Will Play (Pre)" : "Will Play (Post)"}
-                </label>
-                <select className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none ${a.focusBorder}`}
-                  value={bio[k] ?? ""} onChange={(e) => onBioChange({ [k]: e.target.value })}>
-                  {config.nflRoles.map((r) => <option key={r} value={r}>{r || "—"}</option>)}
-                </select>
-              </div>
-            ))}
+            {/* Should Play is the computed role bucket, read only. Will Play (Pre)
+                is retired: hidden, its saved answers kept. Will Play (Post) picks a
+                role bucket; Dynasty+ ranks his role standing there. */}
+            <div>
+              <span className="block text-xs text-slate-500 mb-1">Should Play</span>
+              <ShouldPlayField prospect={prospect} pos={config.rolePos} data={overviewData}
+                className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 rounded text-sm" />
+            </div>
+            <div>
+              <label htmlFor="bio-will-play-post" className="block text-xs text-slate-500 mb-1">Will Play (Post)</label>
+              <WillPlayPostSelect id="bio-will-play-post" pos={config.rolePos} value={bio.will_play_post ?? ""}
+                onChange={(v) => onBioChange({ will_play_post: v })}
+                className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none ${a.focusBorder}`} />
+            </div>
             <div>
               <label className="block text-xs text-slate-500 mb-1">Charting Status</label>
               <select className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none ${a.focusBorder}`}

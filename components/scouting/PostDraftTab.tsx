@@ -1,9 +1,11 @@
 "use client";
-// The Big Board's Post-Draft tab: load a class's NFL draft results (every
-// pick, CollegeFootballData via POST /api/scouting/nfl-draft, cached in
-// cfd_draft_picks by migration 090), review what changes for the prospects on
-// the board, and apply it (round, overall pick, team). Dynasty+ then counts
-// rookie competition (lib/scouting/landingSpot.ts). Classes from
+// The Big Board's Post-Draft tab, the one place for post-draft inputs: load a
+// class's NFL draft results (every pick, CollegeFootballData via POST
+// /api/scouting/nfl-draft, cached in cfd_draft_picks by migration 090), review
+// what changes for the prospects on the board, and apply it (round, overall
+// pick, team); then set each drafted player's Will Play (Post), the role
+// bucket he'll play. Dynasty+ counts rookie competition and role standing
+// (lib/scouting/landingSpot.ts, roleStanding.ts). Classes from
 // LANDING_FIRST_CLASS only: the 2026 class is left out (the user's call).
 
 import { useMemo, useState } from "react";
@@ -13,9 +15,12 @@ import {
   draftChanges, draftSkillPosition, isCompleteDraft, matchDraftPicks,
   type DraftPickRow, type DraftResultUpdate, type NflDraftResponse,
 } from "../../lib/nflDraft";
-import { LANDING_FIRST_CLASS, type DynastyBreakdown } from "../../lib/scouting/dynastyScore";
-import { landingLines } from "../../lib/scouting/landingSpot";
+import { LANDING_FIRST_CLASS, type DynastyBreakdown, type DynastyWeights } from "../../lib/scouting/dynastyScore";
+import { competitionLine, standingPoolText } from "../../lib/scouting/landingSpot";
+import { roleInfo, type RoleFit, type RolePos } from "../../lib/scouting/roleFit";
+import { poolRankText, roleStandingText, type RoleStanding } from "../../lib/scouting/roleStanding";
 import type { Prospect } from "../../lib/types";
+import { WillPlayPostSelect } from "./shared/RoleFields";
 
 const log = logger("PostDraftTab");
 const SKILL = new Set(["QB", "RB", "WR", "TE"]);
@@ -25,15 +30,23 @@ interface Props {
   /** Stored picks from LANDING_FIRST_CLASS's draft on. */
   draftPicks: readonly DraftPickRow[];
   dynasty: ReadonlyMap<string, DynastyBreakdown>;
-  landingWeight: number;
+  weights: DynastyWeights;
+  roleFits: ReadonlyMap<string, RoleFit>;
+  /** Role standing per 2027+ prospect with a role (roleStandings). */
+  standings: ReadonlyMap<string, RoleStanding>;
   onReloadDraftPicks?: () => void;
   onApplyDraftResults?: (updates: readonly DraftResultUpdate[]) => Promise<number>;
+  onUpdateWillPlayPost?: (id: string, value: string) => Promise<boolean>;
 }
 
 const slot = (round: number | null, pick: number | null, team: string | null) =>
   nflDraftSlotLabel({ team, round, pick }) ?? "—";
 
-export default function PostDraftTab({ prospects, draftPicks, dynasty, landingWeight, onReloadDraftPicks, onApplyDraftResults }: Props) {
+const sgn2 = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}`;
+
+export default function PostDraftTab({
+  prospects, draftPicks, dynasty, weights, roleFits, standings, onReloadDraftPicks, onApplyDraftResults, onUpdateWillPlayPost,
+}: Props) {
   const thisYear = new Date().getFullYear();
   const years = useMemo(
     () => [...new Set(prospects.map((p) => p.draft_class_year).filter((y): y is number => y != null && y >= LANDING_FIRST_CLASS))].sort((a, b) => a - b),
@@ -92,6 +105,13 @@ export default function PostDraftTab({ prospects, draftPicks, dynasty, landingWe
     }
   }
 
+  async function saveWillPlay(p: Prospect, value: string) {
+    if (!onUpdateWillPlayPost) return;
+    setError(null);
+    const ok = await onUpdateWillPlayPost(p.id, value);
+    if (!ok) setError(`${p.name}'s Will Play (Post) didn't save; try again.`);
+  }
+
   async function apply(updates: readonly DraftResultUpdate[], what: string) {
     if (!onApplyDraftResults || updates.length === 0) return;
     setBusy(true); setError(null);
@@ -108,9 +128,10 @@ export default function PostDraftTab({ prospects, draftPicks, dynasty, landingWe
   return (
     <div className="max-w-4xl mx-auto space-y-4 text-sm">
       <p className="text-xs text-slate-400 text-center">
-        After a draft: load its results, apply them to your prospects (round, pick, team), and Dynasty+ counts rookie
-        competition (the players at his position his team drafted ahead of him; WRs and Move TEs count against each other). The {LANDING_FIRST_CLASS - 1} class
-        is left out.
+        After a draft: load its results, apply them to your prospects (round, pick, team), then set each drafted
+        player&apos;s Will Play (Post), the role he&apos;ll play. Dynasty+ counts rookie competition (the players at his position his
+        team drafted ahead of him; WRs and Move TEs count against each other) and role standing (his rank among his class&apos;s
+        players at that role; blank = his best role bucket). The {LANDING_FIRST_CLASS - 1} class is left out.
       </p>
 
       <div className="flex flex-wrap items-center justify-center gap-2">
@@ -182,6 +203,8 @@ export default function PostDraftTab({ prospects, draftPicks, dynasty, landingWe
                   <th scope="col" className="text-left px-2 py-1">Player</th>
                   <th scope="col" className="text-left px-2 py-1">Pos</th>
                   <th scope="col" className="text-left px-2 py-1">Drafted</th>
+                  <th scope="col" className="text-left px-2 py-1" title="The role bucket he'll play on his NFL team. Blank = his best role bucket (Should Play).">Will Play (Post)</th>
+                  <th scope="col" className="text-left px-2 py-1" title="His rank at that role among his class's players who play it (this counts), and across every 2027+ class (shown only). Weighted by the Role slider.">Role standing</th>
                   <th scope="col" className="text-left px-2 py-1">Rookie competition</th>
                   <th scope="col" className="text-right px-2 py-1">Dynasty+</th>
                 </tr>
@@ -189,7 +212,9 @@ export default function PostDraftTab({ prospects, draftPicks, dynasty, landingWe
               <tbody>
                 {drafted.map((p) => {
                   const d = dynasty.get(p.id);
-                  const comp = d?.landing ? landingLines(d.landing, landingWeight).join(" ") : d ? "—" : "needs an AE Score";
+                  const comp = d?.landing ? competitionLine(d.landing, weights.landing) : d ? "—" : "needs an AE Score";
+                  const st = standings.get(p.id);
+                  const fit = roleFits.get(p.id);
                   return (
                     <tr key={p.id} className="border-t border-slate-800">
                       <td className="px-2 py-1 text-slate-200 whitespace-nowrap">{p.name}</td>
@@ -197,6 +222,27 @@ export default function PostDraftTab({ prospects, draftPicks, dynasty, landingWe
                       <td className="px-2 py-1 text-slate-300 whitespace-nowrap">
                         {p.draft_round === UNDRAFTED_ROUND ? "Undrafted" : `${draftRoundLabel(p.draft_round!)}${p.draft_pick ? ` #${p.draft_pick}` : ""}`}
                         {p.draft_team ? ` · ${p.draft_team}` : ""}
+                      </td>
+                      <td className="px-2 py-1">
+                        <WillPlayPostSelect pos={p.position as RolePos} value={p.will_play_post ?? ""}
+                          onChange={(v) => { void saveWillPlay(p, v); }} disabled={!onUpdateWillPlayPost}
+                          ariaLabel={`Will Play (Post) for ${p.name}`}
+                          className="bg-slate-900 border border-slate-700 rounded text-slate-200 text-xs px-1 py-0.5 focus:outline-none focus:border-teal-500 disabled:opacity-50" />
+                        {!p.will_play_post?.trim() && fit && (
+                          <span className="block text-[10px] text-slate-500">best: {roleInfo(fit.best).label}</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1 text-slate-300 whitespace-nowrap"
+                        title={st ? `${roleStandingText(st, p.draft_class_year)}\n${standingPoolText(st, p.draft_class_year, p.id)}` : "No role fit yet (not enough tape)"}>
+                        {st ? (
+                          <>
+                            {roleInfo(st.role).label} {st.pct}% · {poolRankText(st.inClass)}
+                            <span className="text-slate-500"> ({poolRankText(st.allClasses)} all)</span>
+                            <span className={`ml-1 font-semibold ${st.value > 0 ? "text-emerald-400" : st.value < 0 ? "text-red-400" : "text-slate-500"}`}>
+                              {sgn2(weights.role * st.value)}
+                            </span>
+                          </>
+                        ) : "—"}
                       </td>
                       <td className="px-2 py-1 text-slate-400">{comp}</td>
                       <td className={`px-2 py-1 text-right font-semibold ${d?.plus == null ? "text-slate-600" : d.plus >= 0 ? "text-emerald-400" : "text-red-400"}`}>

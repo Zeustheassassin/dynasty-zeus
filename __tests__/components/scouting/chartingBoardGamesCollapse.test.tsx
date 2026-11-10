@@ -22,7 +22,7 @@ const game = { id: "g1", prospect_id: "p", season_year: 2026, opponent: "Eastern
 function props(): ChartingBoardProps {
   return {
     prospect: { id: "p", name: "Darius Taylor", position: "RB", school: "Minnesota", draft_class_year: 2027 } as Prospect,
-    config: { positionLabel: "RB", accentColor: "green", nflRoles: [] },
+    config: { positionLabel: "RB", accentColor: "green", rolePos: "RB" },
     overviewData: {} as OverviewData,
     tab: "chart", games: [game], selectedGameId: "g1", loading: false, gamePlayCounts: { g1: 0 },
     showAddGame: false, newGame: { year: 2026, opponent: "", type: "regular" }, savingGame: false, gameError: null,

@@ -6,6 +6,7 @@ import {
 import { isMoveTe, landingInputsFrom, landingLines, type LandingProspect } from "@/lib/scouting/landingSpot";
 import { nflTeamId, type DraftPickRow } from "@/lib/nflDraft";
 import type { RoleFit } from "@/lib/scouting/roleFit";
+import type { RoleStanding } from "@/lib/scouting/roleStanding";
 
 const pick = (overall: number, name: string, position: string, team: string, year = 2027): DraftPickRow => ({
   year, overall, round: Math.min(7, Math.ceil(overall / 32)), pick: ((overall - 1) % 32) + 1,
@@ -49,21 +50,36 @@ describe("scoreDynasty with a landing spot", () => {
     const none = scoreDynasty(base, DEFAULT_DYNASTY_WEIGHTS);
     const crowded = scoreDynasty({ ...base, landing: { competitors: [comp(50), comp(85)] } }, { ...DEFAULT_DYNASTY_WEIGHTS, landing: 2 });
     expect(none.landing).toBeNull();
-    expect(crowded.landing!.total).toBeCloseTo(-0.357, 3);
-    expect(crowded.plus! - none.plus!).toBeCloseTo(2 * crowded.landing!.total, 12);
+    expect(crowded.landing!.competition!.value).toBeCloseTo(-0.357, 3);
+    expect(crowded.landing!.standing).toBeNull();
+    expect(crowded.plus! - none.plus!).toBeCloseTo(2 * crowded.landing!.competition!.value, 12);
+  });
+
+  it("adds role weight × role standing to Plus, beside rookie competition", () => {
+    const none = scoreDynasty(base, DEFAULT_DYNASTY_WEIGHTS);
+    const standing = { value: 0.2 } as RoleStanding;
+    const d = scoreDynasty({ ...base, landing: { competitors: [comp(50)], standing } }, { ...DEFAULT_DYNASTY_WEIGHTS, landing: 1, role: 2 });
+    expect(d.landing!.standing).toBe(standing);
+    expect(d.plus! - none.plus!).toBeCloseTo(d.landing!.competition!.value + 2 * 0.2, 12);
+    // Role standing counts even while the competition can't be known.
+    const noDraft = scoreDynasty({ ...base, landing: { competitors: null, note: "x", standing } }, DEFAULT_DYNASTY_WEIGHTS);
+    expect(noDraft.plus! - none.plus!).toBeCloseTo(0.2, 12);
   });
 
   it("adds nothing while the competition can't be known, and says why", () => {
     const d = scoreDynasty({ ...base, landing: { competitors: null, note: "no NFL team set" } }, DEFAULT_DYNASTY_WEIGHTS);
-    expect(d.landing).toEqual({ total: 0, competition: null, note: "no NFL team set" });
+    expect(d.landing).toEqual({ competition: null, standing: null, note: "no NFL team set" });
     expect(d.plus).toBeCloseTo(scoreDynasty(base, DEFAULT_DYNASTY_WEIGHTS).plus!, 12);
   });
 });
 
 describe("isMoveTe", () => {
-  it("goes by Will Play (Post) when set, else his best role bucket", () => {
-    expect(isMoveTe({ will_play_post: "Move TE" }, undefined)).toBe(true);
-    expect(isMoveTe({ will_play_post: "Inline TE" }, { best: "move" } as unknown as RoleFit)).toBe(false);
+  it("goes by Will Play (Post) when it names a TE role, else his best role bucket", () => {
+    expect(isMoveTe({ will_play_post: "move" }, undefined)).toBe(true);
+    expect(isMoveTe({ will_play_post: "Move/Big slot" }, undefined)).toBe(true);
+    expect(isMoveTe({ will_play_post: "inline_y" }, { best: "move" } as unknown as RoleFit)).toBe(false);
+    // An older free-text answer isn't a role: his best bucket decides.
+    expect(isMoveTe({ will_play_post: "Move TE" }, { best: "inline_y" } as unknown as RoleFit)).toBe(false);
     expect(isMoveTe({ will_play_post: "" }, { best: "move" } as unknown as RoleFit)).toBe(true);
     expect(isMoveTe({ will_play_post: "" }, { best: "inline_y" } as unknown as RoleFit)).toBe(false);
     expect(isMoveTe(undefined, undefined)).toBe(false);
@@ -82,7 +98,7 @@ describe("landingInputsFrom", () => {
   ];
   const board = [
     prospect("me", "Lemon Guy", "WR", { draft_round: 3, draft_pick: 70, draft_team: "Eagles" }),
-    prospect("mt", "Move Tight", "TE", { draft_round: 2, draft_pick: 54, draft_team: "Eagles", will_play_post: "Move TE" }),
+    prospect("mt", "Move Tight", "TE", { draft_round: 2, draft_pick: 54, draft_team: "Eagles", will_play_post: "move" }),
     prospect("bt", "Block Tight", "TE", { draft_round: 2, draft_pick: 60, draft_team: "PHI" }),
   ];
   const fits = new Map<string, RoleFit>([["bt", { best: "inline_y" } as unknown as RoleFit]]);
@@ -124,7 +140,7 @@ describe("landingInputsFrom", () => {
     ], draft, fits);
     expect(m.has("old")).toBe(false);
     expect(m.has("pre")).toBe(false);
-    expect(m.get("noteam")).toEqual({ competitors: null, note: "no NFL team set" });
+    expect(m.get("noteam")).toEqual({ competitors: null, note: "no NFL team set", standing: null });
     expect(m.get("y28")!.note).toBe("the 2028 draft results aren't loaded (Post-Draft tab)");
   });
 });
@@ -135,11 +151,13 @@ describe("landingLines", () => {
       pos: "WR", aeScore: 0, rookieAge: null, heightIn: null, weightLb: null, draftRound: 6, draftPick: 190,
       landing: { competitors: [comp(50, { name: "Alpha" }), comp(85, { name: "Tight", position: "TE", moveTe: true })] },
     }, DEFAULT_DYNASTY_WEIGHTS);
-    expect(landingLines(d.landing, 1)).toEqual([
+    const w = { landing: 1, role: 1 };
+    expect(landingLines(d.landing, 2027, w)).toEqual([
       "Rookie competition: Alpha (WR, pick 50, −0.20); Tight (Move TE, pick 85, −0.16) → −0.36",
+      "Role standing: no role yet (not enough tape for a role fit) → +0.00",
     ]);
-    expect(landingLines(null, 1)).toEqual([]);
-    expect(landingLines({ total: 0, competition: null, note: "no NFL team set" }, 1)).toEqual(["Landing spot: no NFL team set → +0.00"]);
-    expect(landingLines({ total: 0, competition: { value: 0, competitors: [] } }, 1)[0]).toMatch(/nobody his team drafted ahead of him/);
+    expect(landingLines(null, 2027, w)).toEqual([]);
+    expect(landingLines({ competition: null, standing: null, note: "no NFL team set" }, 2027, w)[0]).toBe("Rookie competition: no NFL team set → +0.00");
+    expect(landingLines({ competition: { value: 0, competitors: [] }, standing: null }, 2027, w)[0]).toMatch(/nobody his team drafted ahead of him/);
   });
 });

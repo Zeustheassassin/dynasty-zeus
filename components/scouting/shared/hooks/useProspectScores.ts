@@ -11,6 +11,7 @@ import {
   DEFAULT_DYNASTY_WEIGHTS, type DynastyWeights, type LandingInputs,
 } from "../../../../lib/scouting/dynastyScore";
 import { landingInputsFrom } from "../../../../lib/scouting/landingSpot";
+import { roleStandings, type RoleStanding } from "../../../../lib/scouting/roleStanding";
 import type { DraftPickRow } from "../../../../lib/nflDraft";
 import {
   computeAEScores, defenseFacedFrom, gamesByTierFrom, liveScoresFrom,
@@ -39,8 +40,10 @@ export interface UseProspectScoresReturn extends AEScores {
   recruitsReady: boolean;
   /** Age today: the birthday if set, else estimated from the HS class. */
   ages: Map<string, ProspectAge>;
-  /** Each prospect's role buckets (roleFit.ts). They feed none of the scores. */
+  /** Each prospect's role buckets (roleFit.ts). They feed Dynasty+ only, through role standing. */
   roleFits: Map<string, RoleFit>;
+  /** Role standing at the role he'll play, 2027 classes on (roleStanding.ts): Dynasty+ for the drafted ones. */
+  standings: Map<string, RoleStanding>;
   /** PFF numbers over each prospect's charted games (lib/pff/totals.ts). */
   pffVals: Map<string, PffValues>;
   /** Dynasty+ landing-spot inputs per drafted prospect, from LANDING_FIRST_CLASS on (landingSpot.ts). */
@@ -108,14 +111,16 @@ export function useProspectScores(
     return m;
   }, [prospects, pffTotals]);
 
-  // Rookie competition: his team's picks ahead of him (2027 classes on).
+  // The landing spot (2027 classes on): role standing at the role he'll play,
+  // and rookie competition, his team's picks ahead of him.
+  const standings = useMemo(() => roleStandings(prospects, roleFits), [prospects, roleFits]);
   const landing = useMemo(
-    () => landingInputsFrom(prospects, draftPicks ?? [], roleFits),
-    [prospects, draftPicks, roleFits],
+    () => landingInputsFrom(prospects, draftPicks ?? [], roleFits, standings),
+    [prospects, draftPicks, roleFits, standings],
   );
 
   return {
-    ...ae, gameTiers, contexts, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, pffVals, landing,
+    ...ae, gameTiers, contexts, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, standings, pffVals, landing,
   };
 }
 

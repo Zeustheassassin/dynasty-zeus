@@ -22,8 +22,6 @@ import { watchSortValue } from "../../../lib/scouting/watchRank";
 const QBChartingBoard  = dynamic(() => import("./QBChartingBoard"),   { ssr: false });
 const ProspectRosterSheet = dynamic(() => import("../ProspectRosterSheet"), { ssr: false });
 
-const QB_NFL_ROLES = ["Franchise QB", "Starter", "Bridge", "Backup", ""];
-
 const DECISION_DOT: Record<ChartingDecision, string> = {
   fully_charted: "bg-emerald-500",
   partial_chart: "bg-blue-400",
@@ -344,7 +342,8 @@ export default function QBHub({
       {hubView === "roster" && (
         <ProspectRosterSheet
           prospects={qbProspects}
-          nflRoles={QB_NFL_ROLES}
+          rolePos="QB"
+          overviewData={overviewData}
           onDataChanged={onDataChanged}
         />
       )}

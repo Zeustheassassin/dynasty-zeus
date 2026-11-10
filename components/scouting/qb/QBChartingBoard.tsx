@@ -56,12 +56,10 @@ import {
   onTargetColor,
 } from "./qbConstants";
 
-const QB_NFL_ROLES = ["Franchise QB", "Starter", "Bridge", "Backup", ""];
-
 const QB_CONFIG: ChartingBoardConfig = {
   positionLabel: "QB",
   accentColor: "blue",
-  nflRoles: QB_NFL_ROLES,
+  rolePos: "QB",
 };
 
 interface Props {

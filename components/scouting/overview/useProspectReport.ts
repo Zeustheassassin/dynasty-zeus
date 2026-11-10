@@ -19,6 +19,8 @@ export interface OverviewData extends ProspectScoresInput {
   loadPositionPlays: (pos: "RB" | "QB" | "TE") => void;
   /** Every position's plays have loaded, so the scores are final. */
   scoresReady: boolean;
+  /** Which positions' plays have loaded (a position hub waits on its own). */
+  playsLoaded?: { RB: boolean; QB: boolean; TE: boolean };
 }
 
 export interface UseProspectReportReturn {

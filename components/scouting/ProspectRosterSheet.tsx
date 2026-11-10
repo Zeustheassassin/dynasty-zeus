@@ -10,6 +10,10 @@ import { FOCUS_TAGS, focusSortValue, parseFocusTag } from "../../lib/scouting/fo
 import { formatWatchScore, watchSortValue } from "../../lib/scouting/watchRank";
 import PffBioFillPanel from "./pff/PffBioFillPanel";
 import { usePffBioFill } from "./pff/usePffBioFill";
+import type { RoleFit, RolePos } from "../../lib/scouting/roleFit";
+import type { OverviewData } from "./overview/useProspectReport";
+import { usePositionRoleFits } from "./shared/hooks/usePositionRoleFits";
+import { ShouldPlayText } from "./shared/RoleFields";
 
 const log = logger("ProspectRosterSheet");
 
@@ -29,7 +33,6 @@ interface RowState {
   birthday: string | null;
   draft_class_year: number;
   eligible_thru_year: number | null;
-  should_play: string;
   charting_decision: ChartingDecision;
   focus_tag: FocusTag | null;
   charting_notes: string;
@@ -44,7 +47,6 @@ function rowState(p: ProspectWithStats): RowState {
     birthday: p.birthday,
     draft_class_year: p.draft_class_year,
     eligible_thru_year: p.eligible_thru_year ?? null,
-    should_play: p.should_play,
     charting_decision: p.charting_decision,
     focus_tag: p.focus_tag ?? null,
     charting_notes: p.charting_notes,
@@ -62,7 +64,6 @@ function syncChanged(local: RowState, before: RowState, after: RowState): RowSta
     birthday: pick("birthday"),
     draft_class_year: pick("draft_class_year"),
     eligible_thru_year: pick("eligible_thru_year"),
-    should_play: pick("should_play"),
     charting_decision: pick("charting_decision"),
     focus_tag: pick("focus_tag"),
     charting_notes: pick("charting_notes"),
@@ -77,7 +78,10 @@ interface ColumnSizes {
 
 interface RosterRowProps {
   p: ProspectWithStats;
-  nflRoles: string[];
+  /** His role buckets (Should Play, read only); undefined without enough tape. */
+  fit: RoleFit | undefined;
+  /** The position's plays have loaded, so a missing fit means not enough tape. */
+  fitsReady: boolean;
   sizes: ColumnSizes;
   /** Effective rank for this prospect (parent-owned, reflects pending reorders). */
   rank: number | null;
@@ -85,7 +89,7 @@ interface RosterRowProps {
   onRankCommit: (raw: string) => void;
 }
 
-function RosterRow({ p, nflRoles, sizes, rank, onRankCommit }: RosterRowProps) {
+function RosterRow({ p, fit, fitsReady, sizes, rank, onRankCommit }: RosterRowProps) {
   const [local, setLocal] = useState<RowState>(() => rowState(p));
   // A hub reload (after Fill from PFF or Auto-fill Conferences) brings new
   // props: take the fields it changed, keep the rest as typed. Render-phase
@@ -230,14 +234,9 @@ function RosterRow({ p, nflRoles, sizes, rank, onRankCommit }: RosterRowProps) {
           onBlur={() => { const v = rankEdit ?? ""; setRankEdit(null); onRankCommit(v); }} />
       </td>
 
-      <td className={tdShrink}>
-        <select className={sel} value={local.should_play}
-          onChange={(e) => {
-            setLocal((l) => ({ ...l, should_play: e.target.value }));
-            saveFields({ should_play: e.target.value });
-          }}>
-          {nflRoles.map((r) => <option key={r} value={r}>{r || "—"}</option>)}
-        </select>
+      {/* Should Play: his best role bucket, read only (2026-11-10). */}
+      <td className={`${tdShrink} text-xs px-2`}>
+        <ShouldPlayText fit={fit} ready={fitsReady} earlier={p.should_play} />
       </td>
 
       {/* Notes — elastic, fills remaining width */}
@@ -254,7 +253,10 @@ type SortKey = "name" | "draft_class_year" | "eligible_thru_year" | "personal_ra
 
 interface Props {
   prospects: ProspectWithStats[];
-  nflRoles: string[];
+  /** The position, for Should Play's role buckets. */
+  rolePos: RolePos;
+  /** ScoutingHub's data, for the role buckets (RB / QB / TE load their plays here). */
+  overviewData: OverviewData;
   onDataChanged?: () => void;
 }
 
@@ -262,7 +264,8 @@ interface Props {
 const thShrink = "text-left py-2 px-2 font-medium whitespace-nowrap";
 const shrinkStyle = { width: "1px" } as const;
 
-export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged }: Props) {
+export default function ProspectRosterSheet({ prospects, rolePos, overviewData, onDataChanged }: Props) {
+  const { fits, ready: fitsReady } = usePositionRoleFits(rolePos, overviewData);
   const [sortKey, setSortKey] = useState<SortKey>("personal_rank");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [yearFilter, setYearFilter] = useState<number | null>(null);
@@ -538,7 +541,7 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
                   Rank{sortIndicator("personal_rank")}
                 </button>
               </th>
-              <th className={thShrink} style={shrinkStyle}>Should Play</th>
+              <th className={thShrink} style={shrinkStyle} title="His best role bucket from the charting (read only; the Big Board's Role column)">Should Play</th>
               {/* Notes — width 100% claims all remaining space, forcing other columns to shrink to content */}
               <th
                 className="text-left py-2 px-2 font-medium whitespace-nowrap"
@@ -553,7 +556,8 @@ export default function ProspectRosterSheet({ prospects, nflRoles, onDataChanged
               <RosterRow
                 key={p.id}
                 p={p}
-                nflRoles={nflRoles}
+                fit={fits.get(p.id)}
+                fitsReady={fitsReady}
                 sizes={sizes}
                 rank={effectiveRank(p)}
                 onRankCommit={(raw) => commitRank(p.id, raw)}

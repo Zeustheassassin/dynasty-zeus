@@ -63,12 +63,10 @@ const ROUTE_TYPES: { key: RBRouteType; label: string; short: string }[] = [
   { key: "big_boy_route", label: "Other",        short: "Other" },
 ];
 
-const NFL_ROLES = ["Bellcow", "1A/1B", "Lead Back", "Receiving Back", "Change-of-Pace", "Committee", ""];
-
 const RB_CONFIG: ChartingBoardConfig = {
   positionLabel: "RB",
   accentColor: "green",
-  nflRoles: NFL_ROLES,
+  rolePos: "RB",
 };
 
 interface RunTypeStat {

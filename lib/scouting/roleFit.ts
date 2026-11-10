@@ -35,8 +35,11 @@
 // still come from all tape, like every Above-Expected metric.) The constants
 // were calibrated once against the 2026-10-02 charting; see each position file.
 //
-// Buckets describe a player. They don't feed the AE Score or the Dynasty
-// Scores (the user's call, 2026-10-02).
+// Buckets describe a player. They don't feed the AE Score or the Dynasty Score
+// (the user's call, 2026-10-02). Since 2026-11-10 they feed Dynasty Score Plus
+// through role standing only (roleStanding.ts: his rank at the role he'll play
+// among his class's players at it, 2027 classes on), and Should Play shows his
+// best bucket.
 //
 // Beside the roles a player can carry a tag: a style note, not a role, so it
 // never competes with the buckets or their levels. RB Inside / Outside

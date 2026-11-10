@@ -11,10 +11,6 @@ const TEProspectList    = dynamic(() => import("./TEProspectList"), { ssr: false
 const TEChartingBoard   = dynamic(() => import("./TEChartingBoard"), { ssr: false });
 const ProspectRosterSheet = dynamic(() => import("../ProspectRosterSheet"), { ssr: false });
 
-const TE_NFL_ROLES = [
-  "Inline TE", "Move TE", "Receiving TE", "Blocking TE", "F-Back/Flex", "",
-];
-
 export interface TEHubProps {
   prospectsWithStats: ProspectWithStats[];
   loading: boolean;
@@ -117,7 +113,8 @@ export default function TEHub({
       {hubView === "roster" && (
         <ProspectRosterSheet
           prospects={teProspects}
-          nflRoles={TE_NFL_ROLES}
+          rolePos="TE"
+          overviewData={overviewData}
           onDataChanged={onDataChanged}
         />
       )}

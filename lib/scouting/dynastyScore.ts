@@ -3,8 +3,10 @@
 //
 //   Dynasty Score      = AE Score + age weight × career window + size weight × size flags
 //   Dynasty Score Plus = Dynasty Score + draft weight × draft capital (once a round is set)
+//                        + landing weight × rookie competition + role weight × role standing
+//                          (the landing spot, 2027 classes on)
 //
-// The weights are the Big Board sliders (age 1, size 1, draft 2 by default). The pieces below are
+// The weights are the Big Board sliders (age 1, size 1, draft 2, landing 1, role 1 by default). The pieces below are
 // from published research, not fit on the user's charting: there are no NFL
 // outcomes for these prospects to fit against. Each is scaled to sit
 // alongside an AE Score that runs about ±1.5.
@@ -17,6 +19,7 @@
 
 import { UNDRAFTED_ROUND } from "../draftRound";
 import type { CompositePos } from "./aeComposite";
+import type { RoleStanding } from "./roleStanding";
 
 // ── Career window ──────────────────────────────────────────────────────────
 // The age production starts to fall off, by position:
@@ -194,29 +197,38 @@ export function rookieCompetition(myCapital: number, competitors: readonly Compe
   return { value: -Math.min(COMPETITION_CAP, sum), competitors: out };
 }
 
+// Role standing is its second piece (roleStanding.ts): where he ranks at the
+// role he'll play among his class's players at that role, ±ROLE_STANDING_MAX,
+// behind its own Role slider.
+
 /** Landing-spot inputs for one drafted prospect (lib/scouting/landingSpot.ts). */
 export interface LandingInputs {
   /** His team's same-position picks (and Move TEs, for a WR) ahead of him; null when they can't be known yet. */
   competitors: Competitor[] | null;
   /** Why competitors is null ("load the 2027 draft results…"). */
   note?: string;
+  /** His role standing; null without a role (no role fit yet). */
+  standing?: RoleStanding | null;
 }
 
 export interface LandingBreakdown {
-  /** Before the landing weight. */
-  total: number;
+  /** Rookie competition, before the Landing weight; null when it can't be known yet. */
   competition: CompetitionResult | null;
   note?: string;
+  /** Role standing, before the Role weight; null without a role. */
+  standing: RoleStanding | null;
 }
 
 // ── Weights (the Big Board sliders) ────────────────────────────────────────
-export interface DynastyWeights { age: number; size: number; draft: number; landing: number }
+export interface DynastyWeights { age: number; size: number; draft: number; landing: number; role: number }
 // Draft defaults to 2 (the user's call, 2026-10-01): at 2× a 1st-rounder gets
 // +2.0 and an undrafted rookie −2.0, so draft capital, the strongest single
 // predictor of a fantasy hit, carries more than the AE Score's ±1.5 spread.
 // Landing defaults to 1: rookie competition reaches −0.4 at most, well under
 // draft capital's swing, since teams make room for players they spent picks on.
-export const DEFAULT_DYNASTY_WEIGHTS: DynastyWeights = { age: 1, size: 1, draft: 2, landing: 1 };
+// Role defaults to 1: role standing reaches ±0.25 at most, since it partly
+// re-reads the skill the AE Score already counts.
+export const DEFAULT_DYNASTY_WEIGHTS: DynastyWeights = { age: 1, size: 1, draft: 2, landing: 1, role: 1 };
 export const WEIGHT_MIN = 0;
 export const WEIGHT_MAX = 3;
 export const WEIGHT_STEP = 0.25;
@@ -260,7 +272,7 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
   let landing: LandingBreakdown | null = null;
   if (inp.landing && draftCapital != null) {
     const competition = inp.landing.competitors ? rookieCompetition(draftCapital, inp.landing.competitors) : null;
-    landing = { total: competition?.value ?? 0, competition, ...(inp.landing.note ? { note: inp.landing.note } : {}) };
+    landing = { competition, standing: inp.landing.standing ?? null, ...(inp.landing.note ? { note: inp.landing.note } : {}) };
   }
   return {
     aeScore: inp.aeScore,
@@ -269,7 +281,13 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
     flags,
     dynasty,
     draftCapital,
-    plus: draftCapital != null ? dynasty + w.draft * draftCapital + w.landing * (landing?.total ?? 0) : null,
+    plus: draftCapital != null ? dynasty + w.draft * draftCapital + landingTotal(landing, w) : null,
     landing,
   };
+}
+
+/** The landing spot's share of Dynasty+ at the slider weights: rookie competition and role standing. */
+export function landingTotal(landing: LandingBreakdown | null | undefined, w: Pick<DynastyWeights, "landing" | "role">): number {
+  if (!landing) return 0;
+  return w.landing * (landing.competition?.value ?? 0) + w.role * (landing.standing?.value ?? 0);
 }

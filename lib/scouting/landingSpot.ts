@@ -1,13 +1,15 @@
 // Landing-spot inputs for Dynasty Score Plus (dynastyScore.ts): who his NFL
 // team drafted ahead of him, from the stored draft results (cfd_draft_picks,
-// migration 090). Classes from LANDING_FIRST_CLASS only.
+// migration 090), and his role standing (roleStanding.ts). Classes from
+// LANDING_FIRST_CLASS only.
 
 import { UNDRAFTED_ROUND } from "../draftRound";
 import { draftSkillPosition, matchDraftPicks, nflTeamId, type DraftPickRow } from "../nflDraft";
 import type { Prospect } from "../types";
 import { COMPETITION_CAP, LANDING_FIRST_CLASS, type Competitor, type LandingBreakdown, type LandingInputs } from "./dynastyScore";
 import { isCompositePos } from "./prospectScores";
-import type { RoleFit } from "./roleFit";
+import { roleInfo, type RoleFit } from "./roleFit";
+import { ROLE_STANDING_MAX, roleStandingText, willPlayRole, type RoleStanding } from "./roleStanding";
 
 export type LandingProspect = Pick<
   Prospect,
@@ -17,13 +19,13 @@ export type LandingProspect = Pick<
 /**
  * Is a TE a Move TE? Move TEs and WRs count against each other (a TE drafted
  * ahead of a WR, and a WR drafted ahead of a Move TE prospect). By the user's
- * Will Play (Post) when it's set, else by his best role bucket. A drafted TE
- * who isn't on the board can't be told apart, so he doesn't count.
+ * Will Play (Post) when it names a TE role, else by his best role bucket. A
+ * drafted TE who isn't on the board can't be told apart, so he doesn't count.
  */
 export function isMoveTe(te: Pick<LandingProspect, "will_play_post"> | undefined, fit: RoleFit | undefined): boolean {
   if (!te) return false;
-  const wp = te.will_play_post?.trim();
-  if (wp) return /move/i.test(wp);
+  const post = willPlayRole("TE", te.will_play_post);
+  if (post) return post === "move";
   return fit?.best === "move";
 }
 
@@ -42,12 +44,14 @@ export function picksByYear(picks: readonly DraftPickRow[]): Map<number, DraftPi
  * round set). Competitors are his team's picks at his position, plus Move TEs
  * for a WR and WRs for a Move TE, taken ahead of him: an earlier overall pick, or an earlier round
  * when his pick isn't set, or any pick when he went undrafted. Null with a
- * note when his class's draft isn't loaded or his team isn't known.
+ * note when his class's draft isn't loaded or his team isn't known. His role
+ * standing comes from `standings` (roleStandings), whatever the draft results.
  */
 export function landingInputsFrom(
   prospects: readonly LandingProspect[],
   picks: readonly DraftPickRow[],
   roleFits: ReadonlyMap<string, RoleFit>,
+  standings: ReadonlyMap<string, RoleStanding> = new Map(),
 ): Map<string, LandingInputs> {
   const out = new Map<string, LandingInputs>();
   const byYear = picksByYear(picks);
@@ -62,14 +66,15 @@ export function landingInputsFrom(
   for (const p of prospects) {
     if (p.draft_class_year == null || p.draft_class_year < LANDING_FIRST_CLASS) continue;
     if (!isCompositePos(p.position) || p.draft_round == null) continue;
+    const standing = standings.get(p.id) ?? null;
     const list = byYear.get(p.draft_class_year);
     if (!list?.length) {
-      out.set(p.id, { competitors: null, note: `the ${p.draft_class_year} draft results aren't loaded (Post-Draft tab)` });
+      out.set(p.id, { competitors: null, note: `the ${p.draft_class_year} draft results aren't loaded (Post-Draft tab)`, standing });
       continue;
     }
     const team = nflTeamId(p.draft_team);
     if (team == null) {
-      out.set(p.id, { competitors: null, note: p.draft_team ? `"${p.draft_team}" isn't a team the board knows` : "no NFL team set" });
+      out.set(p.id, { competitors: null, note: p.draft_team ? `"${p.draft_team}" isn't a team the board knows` : "no NFL team set", standing });
       continue;
     }
     const undrafted = p.draft_round === UNDRAFTED_ROUND;
@@ -92,22 +97,44 @@ export function landingInputsFrom(
         competitors.push({ name: pk.name, position: "WR", overall: pk.overall, round: pk.round, moveTe: false });
       }
     }
-    out.set(p.id, { competitors });
+    out.set(p.id, { competitors, standing });
   }
   return out;
 }
 
 const sgn2 = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}`;
 
-/** The Dynasty+ tooltip lines for the landing-spot piece, at the Landing slider's weight. */
-export function landingLines(landing: LandingBreakdown | null | undefined, weight: number): string[] {
-  if (!landing) return [];
+/** The Dynasty+ tooltip line for rookie competition, at the Landing slider's weight. */
+export function competitionLine(landing: LandingBreakdown, weight: number): string {
   const c = landing.competition;
-  if (!c) return [`Landing spot: ${landing.note ?? "not known yet"} → +0.00`];
-  if (c.competitors.length === 0) return ["Rookie competition: nobody his team drafted ahead of him plays his spot → +0.00"];
+  if (!c) return `Rookie competition: ${landing.note ?? "not known yet"} → +0.00`;
+  if (c.competitors.length === 0) return "Rookie competition: nobody his team drafted ahead of him plays his spot → +0.00";
   const who = c.competitors
     .map((x) => `${x.name} (${x.moveTe ? "Move TE" : x.position}, pick ${x.overall}, ${sgn2(-x.cost)})`)
     .join("; ");
   const capped = c.competitors.reduce((s, x) => s + x.cost, 0) > COMPETITION_CAP + 1e-9 ? `, capped at ${sgn2(-COMPETITION_CAP)}` : "";
-  return [`Rookie competition: ${who}${capped} → ${sgn2(weight * c.value)}`];
+  return `Rookie competition: ${who}${capped} → ${sgn2(weight * c.value)}`;
+}
+
+/** The Dynasty+ tooltip line for role standing, at the Role slider's weight. */
+export function standingLine(standing: RoleStanding | null, classYear: number, weight: number): string {
+  if (!standing) return "Role standing: no role yet (not enough tape for a role fit) → +0.00";
+  return `Role standing: ${roleStandingText(standing, classYear)} → ${sgn2(weight * standing.value)}`;
+}
+
+/** The Dynasty+ tooltip lines for the landing spot: rookie competition, then role standing. */
+export function landingLines(
+  landing: LandingBreakdown | null | undefined,
+  classYear: number,
+  w: { landing: number; role: number },
+): string[] {
+  if (!landing) return [];
+  return [competitionLine(landing, w.landing), standingLine(landing.standing, classYear, w.role)];
+}
+
+/** The role-standing pool in words, for a tooltip: "X in the 2027 class: Smith 86%, Jones 78% (him), …". */
+export function standingPoolText(standing: RoleStanding, classYear: number, meId: string): string {
+  const label = roleInfo(standing.role).label;
+  const who = standing.classPool.map((x) => `${x.name} ${x.pct}%${x.id === meId ? " (him)" : ""}`).join(", ");
+  return `${label} in the ${classYear} class: ${who}. The alpha gets +${ROLE_STANDING_MAX.toFixed(2)} at most and the bottom −${ROLE_STANDING_MAX.toFixed(2)} (less in a small pool; alone, 0), × the Role slider.`;
 }

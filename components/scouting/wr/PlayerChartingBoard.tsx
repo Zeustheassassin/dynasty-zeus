@@ -47,7 +47,6 @@ const ALIGNMENTS: { key: Alignment; label: string }[] = [
   { key: "slot",      label: "Slot" },
   { key: "backfield", label: "Backfield" },
 ];
-const NFL_ROLES = ["X", "Z", "Slot", "X or Z", "Z or Slot", "Slot/Gadget", "Anything", "Sacrificial X", "Target Hog Z or Slot", ""];
 
 interface Props {
   prospect: Prospect;
@@ -96,7 +95,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
   const wrConfig: ChartingBoardConfig = {
     positionLabel: prospect.position ?? "WR",
     accentColor: "blue",
-    nflRoles: NFL_ROLES,
+    rolePos: "WR",
   };
 
   const cs = useChartingState(prospect, {

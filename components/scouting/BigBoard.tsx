@@ -93,7 +93,8 @@ const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }
   { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
   { key: "size",  label: "Size",  hint: "How much size counts: RBs and WRs carrying more weight for their height gain, lean and very light ones lose" },
   { key: "draft", label: "Draft", hint: "How much draft capital counts in Dynasty Score Plus: by overall pick, or the round's average when no pick is set" },
-  { key: "landing", label: "Landing", hint: "How much the landing spot counts in Dynasty Score Plus (2027 classes on): rookie competition, the players at his position his team drafted ahead of him (WRs and Move TEs count against each other)" },
+  { key: "landing", label: "Landing", hint: "How much rookie competition counts in Dynasty Score Plus (2027 classes on): the players at his position his team drafted ahead of him (WRs and Move TEs count against each other)" },
+  { key: "role", label: "Role", hint: "How much role standing counts in Dynasty Score Plus (2027 classes on): where he ranks among his class's players at the role he'll play (Will Play (Post), else his best role bucket), up to ±0.25 at 1×" },
 ];
 
 // Derived per-prospect values the sort reads.
@@ -158,6 +159,8 @@ interface Props {
   onReloadDraftPicks?: () => void;
   /** Write actual draft results (round, pick, team) to prospects; resolves with how many failed. */
   onApplyDraftResults?: (updates: readonly DraftResultUpdate[]) => Promise<number>;
+  /** Save a prospect's Will Play (Post) (a role key, or "" for not set); false if the write failed. */
+  onUpdateWillPlayPost?: (id: string, value: string) => Promise<boolean>;
   /** None of the hub's loads failed, so the scores are complete enough to save
    *  for the draft board. */
   inputsComplete?: boolean;
@@ -277,6 +280,7 @@ export default function BigBoard({
   draftPicks,
   onReloadDraftPicks,
   onApplyDraftResults,
+  onUpdateWillPlayPost,
 }: Props) {
   // Trigger lazy load of all three position plays the first time the
   // board renders. ScoutingHub no-ops if a position is already loaded
@@ -293,7 +297,7 @@ export default function BigBoard({
   // scores built on it) take the opponent-strength and context adjustments.
   const {
     aeMaps, composite, compositeInputs, opponent, contextInfo,
-    gameTiers, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, pffVals, landing,
+    gameTiers, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, standings, pffVals, landing,
   } = useProspectScores({ prospects, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals, draftPicks });
 
   const [scoreMode, setScoreMode] = useState<ScoreViewMode>(() =>
@@ -654,7 +658,7 @@ export default function BigBoard({
     lines.push(`= Dynasty ${signed(d.dynasty, 2)}`);
     if (plus && d.draftCapital != null) {
       lines.push(`Drafted: ${draftCapitalLabel(p.draft_round!, p.draft_pick)} → ${signed(weights.draft * d.draftCapital, 2)}`);
-      lines.push(...landingLines(d.landing, weights.landing));
+      lines.push(...landingLines(d.landing, p.draft_class_year, weights));
       lines.push(`= Dynasty+ ${signed(d.plus!, 2)}`);
     }
     const v = plus ? d.plus! : d.dynasty;
@@ -708,7 +712,7 @@ export default function BigBoard({
     `WR: ${versatileLeadText("WR")} ` +
     `TE: ${standAloneRuleText("TE")} ` +
     `RB: ${levelRuleText("RB")} ${roleTagRuleText("RB")} ` +
-    `V = Versatile: a WR ${versatileRuleText("WR")}, a TE ${versatileRuleText("TE")} (none for RB or QB: Three-down, Creator and Dual-threat already mean all-round). Greyed = little tape, or not proven yet. Feeds none of the scores.`;
+    `V = Versatile: a WR ${versatileRuleText("WR")}, a TE ${versatileRuleText("TE")} (none for RB or QB: Three-down, Creator and Dual-threat already mean all-round). Greyed = little tape, or not proven yet. Feeds only Dynasty+ (role standing, 2027 classes on).`;
 
   const dynastyTooltip =
     "Dynasty Score: the AE Score plus a career-window adjustment for age (prime seasons left at rookie " +
@@ -716,7 +720,8 @@ export default function BigBoard({
     `TE ${PRIME_END_AGE.TE}, QB ${PRIME_END_AGE.QB}) and size (RB and WR pounds per inch of height vs the position's typical, plus WRs under 175 lb). Weighted by the sliders.`;
   const dynastyPlusTooltip =
     "Dynasty Score Plus: the Dynasty Score plus draft capital (initial opportunity), from 1st round +2.0 " +
-    "to Undrafted −2.0 at the default 2× weight. Shows once the NFL draft round is set.";
+    "to Undrafted −2.0 at the default 2× weight. Shows once the NFL draft round is set. " +
+    "2027 classes on, plus the landing spot: rookie competition (Landing slider) and role standing, his rank among his class's players at the role he'll play (Role slider; set Will Play (Post) on the Post-Draft tab).";
 
   // Where a metric's sample counts in full (aeComposite.ts trustAt), for the tooltip.
   function fullAt(pos: string, key: string): string {
@@ -1130,7 +1135,7 @@ export default function BigBoard({
         ))}
         <button
           onClick={() => setBoardTab("post")}
-          title="Load a class's NFL draft results and see Dynasty+ rookie competition"
+          title="Load a class's NFL draft results, set each drafted player's Will Play (Post), and see Dynasty+ rookie competition and role standing"
           className={`px-4 py-2 text-sm font-medium border-b-2 transition whitespace-nowrap ${
             boardTab === "post" ? "border-teal-500 text-teal-400" : "border-transparent text-slate-400 hover:text-white"
           }`}
@@ -1142,9 +1147,12 @@ export default function BigBoard({
           prospects={prospects}
           draftPicks={draftPicks ?? []}
           dynasty={dynasty}
-          landingWeight={weights.landing}
+          weights={weights}
+          roleFits={roleFits}
+          standings={standings}
           onReloadDraftPicks={onReloadDraftPicks}
           onApplyDraftResults={onApplyDraftResults}
+          onUpdateWillPlayPost={onUpdateWillPlayPost}
         />
       ) : (<>
       {/* Controls */}

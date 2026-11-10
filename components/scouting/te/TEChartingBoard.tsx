@@ -43,8 +43,6 @@ import {
   buildTEBlockBaselines, computeTEBlockAboveExpectedForPlays,
 } from "../../../lib/scouting/aboveExpected";
 
-const NFL_ROLES = ["Inline TE", "Move TE", "Receiving TE", "Blocking TE", "F-Back/Flex", ""];
-
 const LOCATIONS: { key: TELocation; label: string }[] = [
   { key: "left",      label: "Left" },
   { key: "right",     label: "Right" },
@@ -65,7 +63,7 @@ type TargetOutcome = "caught" | "dropped" | "incomplete" | null;
 const TE_CONFIG: ChartingBoardConfig = {
   positionLabel: "TE",
   accentColor: "green",
-  nflRoles: NFL_ROLES,
+  rolePos: "TE",
 };
 
 interface Props {

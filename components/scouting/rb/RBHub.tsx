@@ -10,10 +10,6 @@ const RBProspectList      = dynamic(() => import("./RBProspectList"), { ssr: fal
 const RBChartingBoard     = dynamic(() => import("./RBChartingBoard"), { ssr: false });
 const ProspectRosterSheet = dynamic(() => import("../ProspectRosterSheet"), { ssr: false });
 
-const RB_NFL_ROLES = [
-  "Bellcow", "1A/1B", "Lead Back", "Receiving Back", "Change-of-Pace", "Committee", "",
-];
-
 export interface RBHubProps {
   prospectsWithStats: ProspectWithStats[];
   loading: boolean;
@@ -111,7 +107,8 @@ export default function RBHub({
       {hubView === "roster" && (
         <ProspectRosterSheet
           prospects={rbProspects}
-          nflRoles={RB_NFL_ROLES}
+          rolePos="RB"
+          overviewData={overviewData}
           onDataChanged={onDataChanged}
         />
       )}

@@ -9,11 +9,6 @@ const ProspectList     = dynamic(() => import("./ProspectList"), { ssr: false })
 const PlayerChartingBoard = dynamic(() => import("./PlayerChartingBoard"), { ssr: false });
 const ProspectRosterSheet = dynamic(() => import("../ProspectRosterSheet"), { ssr: false });
 
-const WR_NFL_ROLES = [
-  "X", "Z", "Slot", "X or Z", "Z or Slot",
-  "Slot/Gadget", "Anything", "Sacrificial X", "Target Hog Z or Slot", "",
-];
-
 export interface WRHubProps {
   prospectsWithStats: ProspectWithStats[];
   loading: boolean;
@@ -102,7 +97,8 @@ export default function WRHub({
       {hubView === "roster" && (
         <ProspectRosterSheet
           prospects={wrProspects}
-          nflRoles={WR_NFL_ROLES}
+          rolePos="WR"
+          overviewData={overviewData}
           onDataChanged={onDataChanged}
         />
       )}

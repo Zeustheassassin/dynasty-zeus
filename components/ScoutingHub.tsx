@@ -525,6 +525,24 @@ export default function ScoutingHub() {
     return true;
   }
 
+  // Will Play (Post): the role bucket he'll play on his NFL team (its key, or
+  // "" for not set), from the Big Board's Post-Draft tab. Dynasty+ ranks his
+  // role standing there. Optimistic; rolls back and resolves false on error.
+  async function handleUpdateWillPlayPost(id: string, value: string): Promise<boolean> {
+    const previous = prospects.find((p) => p.id === id)?.will_play_post ?? "";
+    setProspects((prev) => prev.map((p) => p.id === id ? { ...p, will_play_post: value } : p));
+    const { error } = await supabase
+      .from("prospects")
+      .update({ will_play_post: value, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) {
+      log.error("update Will Play (Post)", { msg: error.message, code: error.code });
+      setProspects((prev) => prev.map((p) => p.id === id ? { ...p, will_play_post: previous } : p));
+      return false;
+    }
+    return true;
+  }
+
   // The NFL draft's actual results for many prospects at once (the Big Board's
   // Post-Draft tab): round, overall pick and team. Optimistic per prospect; a
   // failed write rolls that prospect back. Resolves with how many failed.
@@ -691,8 +709,8 @@ export default function ScoutingHub() {
   // Dynasty and percentiles match the board's (useProspectScores).
   const overviewData = useMemo<OverviewData>(() => ({
     prospects: prospectsWithStats, games, rbPlays, qbPlays, tePlays,
-    gameRouteCells, gradingData, pffTotals, draftPicks, loadPositionPlays, scoresReady,
-  }), [prospectsWithStats, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals, draftPicks, loadPositionPlays, scoresReady]);
+    gameRouteCells, gradingData, pffTotals, draftPicks, loadPositionPlays, scoresReady, playsLoaded,
+  }), [prospectsWithStats, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals, draftPicks, loadPositionPlays, scoresReady, playsLoaded]);
 
   // Shared props for all position hubs
   const hubProps = {
@@ -830,6 +848,7 @@ export default function ScoutingHub() {
             draftPicks={draftPicks}
             onReloadDraftPicks={reloadDraftPicks}
             onApplyDraftResults={handleApplyDraftResults}
+            onUpdateWillPlayPost={handleUpdateWillPlayPost}
           />
         )}
 
