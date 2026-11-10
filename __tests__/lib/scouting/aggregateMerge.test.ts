@@ -597,8 +597,35 @@ describe("tagged WR routes", () => {
     // 10- and 11-part keys (before 088): the tag stands in.
     expect(parseTagCells({ "curl|man|left|off|0|0|0|0|-|1|1": [1, 1] })[0].caught).toBe(true);
     expect(parseTagCells({ "curl|man|left|off|0|0|0|0|-|-": [1, 1] })[0].caught).toBe(false);
-    // 13 parts isn't a key this app knows.
-    expect(parseTagCells({ "curl|man|left|off|0|0|0|0|-|-|1|1|1": [1, 1] })).toEqual([]);
+    // 14 parts isn't a key this app knows.
+    expect(parseTagCells({ "curl|man|left|off|0|0|0|0|-|-|1|1|short|x": [1, 1] })).toEqual([]);
+  });
+
+  it("reads the sub-route from 089's 13th key part ('-' = unsplit; null before 089)", () => {
+    expect(parseTagCells({ "nine|man|left|on|0|0|0|0|-|-|0|0|love_of_the_game": [3, 0] })[0]).toMatchObject({ route_type: "nine", n: 3, open: 0, route_variant: "love_of_the_game", caught: false });
+    expect(parseTagCells({ "nine|man|left|on|0|0|0|0|-|-|0|0|-": [3, 1] })[0].route_variant).toBeNull();
+    expect(parseTagCells({ "nine|man|left|on|0|0|0|0|-|-|0|0": [3, 1] })[0].route_variant).toBeNull();
+  });
+
+  it("judges a Love of the Game nine against its own rate once 089's sub-route arrives", () => {
+    // Every game's nines: older unsplit ones open half the time; tagged split
+    // ones are Love of the Game (never open) or real nines (open 70%).
+    const plays = { A: repeat(400, (i) => routePlay(`a${i % 8}`, "nine", "zone", i % 2 === 0)) };
+    const rows = gameRowsFrom(plays);
+    const tagRows = ["a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7"].map((game_id) => ({
+      prospect_id: "A", game_id,
+      cells: { "nine|zone|left|on|0|0|0|0|-|-|0|0|love_of_the_game": [6, 0], "nine|zone|left|on|0|0|0|0|-|-|0|0|nine": [10, 7] } as Record<string, [number, number]>,
+    }));
+    const model = buildWRModel(rows, [], tagRows);
+    const tagged = (route_variant: string | null) => ({
+      ...routePlay("g1", "nine", "zone", false), red_zone: false, third_fourth_down: false, short_yardage: false, garbage_time: false, double_coverage: false, route_variant,
+    }) as RoutePlay;
+    const closed = (v: string | null) => computeSAEForPlays([tagged(v)], model)!;
+    // A closed Love of the Game rep costs much less than a closed real nine.
+    expect(closed("love_of_the_game") - closed("nine")).toBeGreaterThan(15);
+    // An unsplit tagged nine is outside the family: judged as before sub-routes (12-part keys).
+    const twelve = tagRows.map((r) => ({ ...r, cells: Object.fromEntries(Object.entries(r.cells).map(([k, v]) => [k.split("|").slice(0, 12).join("|"), v])) }));
+    expect(closed(null)).toBeCloseTo(computeSAEForPlays([tagged(null)], buildWRModel(rows, [], twelve))!, 6);
   });
 
   it("counts a doubled catch charted without the broken-tackle tag (088)", () => {

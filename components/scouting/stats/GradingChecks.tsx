@@ -11,7 +11,10 @@ import { buildGradingReport, type ComponentCheck, type ModelCheck } from "../../
 import type { GradingData } from "../../../lib/scouting/aeComponents";
 import { COMPONENT_SPREAD_FLOOR, componentWeight } from "../../../lib/scouting/aeComponents";
 import { formatRate } from "../../../lib/scouting/countComponents";
-import { GT_MIN_PROSPECTS, GT_MIN_GARBAGE_PLAYS, ERA_CHECK_MIN_TAGGED } from "../../../lib/scouting/tagCorrection";
+import {
+  GT_MIN_PROSPECTS, GT_MIN_GARBAGE_PLAYS, ERA_CHECK_MIN_TAGGED,
+  SUB_ROUTE_FULL_REPS, SUB_ROUTE_FULL_PROSPECTS, SUB_ROUTE_TEST_MIN_REPS, SUB_ROUTE_TEST_MIN_PROSPECTS,
+} from "../../../lib/scouting/tagCorrection";
 import { MIN_POOL, type CompositePos } from "../../../lib/scouting/aeComposite";
 import type { ProspectGameRouteCellsRow } from "../../../lib/scouting/aggregateMerge";
 import GameContextChecks from "./GameContextChecks";
@@ -60,6 +63,40 @@ function TagRows({ m }: { m: ModelCheck }) {
             <td className={`${td} text-right`}>{r.prospects}</td>
             <td className={`${td} text-right`}>{t ? `${t.baseLoss.toFixed(4)} → ${t.withLoss.toFixed(4)}` : "—"}</td>
             <td className={`${td} text-right`}>{t ? Object.entries(t.effects).map(([b, v]) => `${b === "on" ? "" : `${b} `}${signed(v)}`).join(" · ") : "—"}</td>
+            <td className={`${td} ${r.enabled ? "text-emerald-400" : t?.improves ? "text-amber-300" : "text-slate-500"}`}>{status}</td>
+          </tr>
+        );
+      })}
+    </>
+  );
+}
+
+// One row per sub-route charted on a route model, most-charted first.
+function SubRouteRows({ m }: { m: ModelCheck }) {
+  const tests = new Map(m.subRouteTests.map((t) => [t.column, t]));
+  const rate = (wins: number, n: number) => (n > 0 ? `${Math.round((100 * wins) / n)}%` : "—");
+  return (
+    <>
+      {m.subRoutes.map((r) => {
+        const t = tests.get(r.id);
+        const status = r.enabled ? "On"
+          : t ? (t.improves ? "Test passes: can be switched on" : "Test: no gain, stays off")
+          : `Off: needs ${r.short}`;
+        const toFull = `${Math.min(100, Math.round((100 * r.reps) / SUB_ROUTE_FULL_REPS))}%`;
+        return (
+          <tr key={`${m.key}-${r.id}`} className="border-t border-slate-800/60">
+            <td className={td}>{m.label}</td>
+            <td className={td}>{r.label}</td>
+            <td className={`${td} text-right`}>{Math.round(r.reps)}</td>
+            <td className={`${td} text-right`}>{r.prospects}</td>
+            <td className={`${td} text-right`}>{rate(r.wins, r.reps)} vs {rate(r.restWins, r.restReps)} ({Math.round(r.restReps)})</td>
+            <td className={`${td} text-right`}>
+              <span className="inline-block w-16 h-1.5 bg-slate-800 rounded align-middle mr-1.5" aria-hidden>
+                <span className="block h-1.5 bg-sky-500 rounded" style={{ width: toFull }} />
+              </span>
+              {toFull}
+            </td>
+            <td className={`${td} text-right`}>{t ? `${t.baseLoss.toFixed(4)} → ${t.withLoss.toFixed(4)} (${t.foldsBetter}/${t.foldsRun} folds)` : "—"}</td>
             <td className={`${td} ${r.enabled ? "text-emerald-400" : t?.improves ? "text-amber-300" : "text-slate-500"}`}>{status}</td>
           </tr>
         );
@@ -120,6 +157,26 @@ export default function GradingChecks({ prospects, games, qbPlays, rbPlays, tePl
             <th className={`${th} text-right`}>Held-out loss (today → with tag)</th><th className={`${th} text-right`}>Effect (log-odds)</th><th className={th}>Status</th>
           </tr></thead>
           <tbody>{report.models.map((m) => <TagRows key={m.key} m={m} />)}</tbody>
+        </table>
+      </Section>
+
+      <Section
+        title="Sub-routes"
+        note={`Each sub-route is graded as its route until it's switched on; then it's judged against its own expected rate, and the rest of its route family's split routes are re-balanced so the family's total doesn't move (older, unsplit routes never do). One at a time, each only after its held-out test improves. The test can run from ${SUB_ROUTE_TEST_MIN_REPS} routes by ${SUB_ROUTE_TEST_MIN_PROSPECTS} prospects (with ${SUB_ROUTE_TEST_MIN_REPS} of the family's other split routes to compare): a big gap passes early, a small one (~8 pts) needs about ${SUB_ROUTE_FULL_REPS} routes from ${SUB_ROUTE_FULL_PROSPECTS} prospects, the bar shown. WR routes need migration 089.`}
+      >
+        <table className="min-w-full">
+          <thead><tr>
+            <th className={th}>Model</th><th className={th}>Sub-route</th><th className={`${th} text-right`}>Routes</th>
+            <th className={`${th} text-right`}>Prospects</th><th className={`${th} text-right`}>Won vs rest of family</th>
+            <th className={`${th} text-right`}>To {SUB_ROUTE_FULL_REPS}</th>
+            <th className={`${th} text-right`}>Held-out loss (today → with it)</th><th className={th}>Status</th>
+          </tr></thead>
+          <tbody>
+            {report.models.map((m) => <SubRouteRows key={m.key} m={m} />)}
+            {report.models.every((m) => m.subRoutes.length === 0) && (
+              <tr><td className={`${td} text-slate-500`} colSpan={8}>No sub-routes on tagged routes yet.</td></tr>
+            )}
+          </tbody>
         </table>
       </Section>
 

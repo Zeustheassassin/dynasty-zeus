@@ -150,6 +150,8 @@ interface WRSituation {
   garbage_time?: boolean;
   /** Doubled, on top of its coverage (migration 072). */
   double_coverage?: boolean;
+  /** Its sub-route (routeVariants.ts; migration 089 on a tagged cell), null when unsplit. */
+  route_variant?: string | null;
 }
 // `w` is the weight of each of the cell's routes in a prospect's sample: its
 // season weight (1 = counts in full), times the garbage-time weight on a
@@ -250,8 +252,9 @@ export function parseTagCells(raw: Record<string, [number, number]> | null | und
   const out: RouteTagCell[] = [];
   for (const [key, counts] of Object.entries(raw ?? {})) {
     const p = key.split("|");
-    // 10 parts before migration 072, 11 after (|dbl), 12 after 088 (|caught).
-    if ((p.length < 10 || p.length > 12) || !Array.isArray(counts)) continue;
+    // 10 parts before migration 072, 11 after (|dbl), 12 after 088 (|caught),
+    // 13 after 089 (|sub-route, '-' when unsplit).
+    if ((p.length < 10 || p.length > 13) || !Array.isArray(counts)) continue;
     const [n, open] = counts;
     if (!(n > 0)) continue;
     out.push({
@@ -261,7 +264,8 @@ export function parseTagCells(raw: Record<string, [number, number]> | null | und
       press_release: p[8] === "won" || p[8] === "lost" ? p[8] : null,
       bt_after_catch: p[9] === "-" ? null : p[9] === "1",
       double_coverage: p[10] === "1",
-      caught: p.length === 12 ? p[11] === "1" : p[9] !== "-",
+      caught: p.length >= 12 ? p[11] === "1" : p[9] !== "-",
+      route_variant: p.length === 13 && p[12] !== "-" ? p[12] : null,
     });
   }
   return out;
@@ -493,7 +497,7 @@ const playCell = (era: CoverageEra) => (p: RoutePlay): RouteCell => ({
   route_type: p.route_type, coverage: p.coverage, alignment: p.alignment, on_line: p.on_line, era,
   n: 1, open: p.was_open ? 1 : 0, w: 1,
   ...(isTaggedPlay(p, "WR")
-    ? { tagged: true, red_zone: p.red_zone === true, third_fourth_down: p.third_fourth_down === true, short_yardage: p.short_yardage === true, garbage_time: p.garbage_time === true, double_coverage: p.double_coverage === true }
+    ? { tagged: true, red_zone: p.red_zone === true, third_fourth_down: p.third_fourth_down === true, short_yardage: p.short_yardage === true, garbage_time: p.garbage_time === true, double_coverage: p.double_coverage === true, route_variant: p.route_variant ?? null }
     : {}),
 });
 

@@ -1214,8 +1214,10 @@ export interface RoutePlay extends CatchDifficultyTags {
   user_id: string;
   game_id: string;
   route_type: RouteType;
-  /** Sub-route (migration 073; lib/scouting/routeVariants.ts), data collection
-   *  only. NULL = charted before sub-routes, a paste import, or no route run. */
+  /** Sub-route (migration 073; lib/scouting/routeVariants.ts). WR SAE reads
+   *  only the switched-on ones (tagCorrection.ts ENABLED_SUB_ROUTES, through
+   *  migration 089's tag cells). NULL = charted before sub-routes, a paste
+   *  import, or no route run. */
   route_variant?: RouteVariant | null;
   alignment: Alignment;
   on_line: boolean;
@@ -1410,8 +1412,9 @@ export interface TEPlay extends CatchDifficultyTags {
   block_success: boolean | null;
   coverage: TECoverage | null;
   route_type: RouteType | null;
-  /** Sub-route (migration 073; lib/scouting/routeVariants.ts), data collection
-   *  only. NULL = not a route, or charted before sub-routes. */
+  /** Sub-route (migration 073; lib/scouting/routeVariants.ts). TE-SAER reads
+   *  only the switched-on ones (tagCorrection.ts ENABLED_SUB_ROUTES). NULL =
+   *  not a route, or charted before sub-routes. */
   route_variant?: RouteVariant | null;
   was_open: boolean | null;
   targeted: boolean | null;

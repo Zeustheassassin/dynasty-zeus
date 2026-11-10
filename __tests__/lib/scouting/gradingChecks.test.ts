@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildGradingReport } from "@/lib/scouting/gradingChecks";
 import { EMPTY_GRADING_DATA } from "@/lib/scouting/aeComponents";
 import { CORRECTION_KEYS, DIFFICULTY_TAGS } from "@/lib/scouting/tagCorrection";
-import type { Prospect, QBPlay, RBPlay, ScoutingGame } from "@/lib/types";
+import type { Prospect, QBPlay, RBPlay, ScoutingGame, TEPlay } from "@/lib/types";
 
 const game = (id: string, prospect_id: string, created_at = "2026-06-01T00:00:00Z"): ScoutingGame =>
   ({ id, prospect_id, season_year: 2025, created_at, opponent: "Ohio State" }) as ScoutingGame;
@@ -31,6 +31,27 @@ describe("buildGradingReport", () => {
     const rz = rbCheck.readiness.find((r) => r.column === "red_zone")!;
     expect(rz).toMatchObject({ taggedPlays: 30, onPlays: { on: 5 }, prospects: 1, testable: false, enabled: false });
     expect(rbCheck.tests).toEqual([]);
+  });
+
+  it("checks sub-routes on the route models only", () => {
+    // RB and QB have no sub-route checks; TE-SAER has them, empty without TE routes.
+    for (const m of report.models) {
+      if (m.key !== "te_saer") expect(m.subRoutes).toEqual([]);
+      expect(m.subRouteTests).toEqual([]);
+    }
+    const te = buildGradingReport({
+      prospects: [{ id: "t1", position: "TE" }] as Prospect[], games: [game("gt", "t1")], qbPlays: [], rbPlays: [],
+      tePlays: Array.from({ length: 8 }, (_, i) => ({
+        game_id: "gt", play_type: "route_run", route_type: "nine", route_variant: i < 3 ? "love_of_the_game" : "seam",
+        coverage: "zone", positioning: "inline", was_open: i >= 3, targeted: false,
+        red_zone: false, third_fourth_down: false, short_yardage: false, garbage_time: false,
+      })) as unknown as TEPlay[],
+      gameRouteCells: null, gradingData: EMPTY_GRADING_DATA,
+    }).models.find((m) => m.key === "te_saer")!;
+    expect(te.subRoutes.map((r) => [r.id, r.reps, r.wins, r.restReps, r.enabled, r.testable])).toEqual([
+      ["nine:seam", 5, 5, 3, false, false],
+      ["nine:love_of_the_game", 3, 0, 5, true, false],
+    ]);
   });
 
   it("splits each model's residuals by era (imported / in-app / tagged)", () => {

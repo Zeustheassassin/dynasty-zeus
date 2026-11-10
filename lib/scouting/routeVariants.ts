@@ -2,9 +2,11 @@
 // Sub-routes (the user, 2026-10-21): each of the 11 route buckets breaks down
 // into the kind of route it was, so a WR who runs 12-yard curls all day can
 // be told apart from one who runs 3-yard hitches. The bucket (route_type)
-// stays the data driver; the sub-route (route_variant, migration 073) is
-// DATA COLLECTION ONLY for now: no grade, model or aggregate view reads it
-// until there are enough of each to use.
+// stays the data driver; the sub-route (route_variant, migration 073) starts
+// counting in the WR / TE route grading one sub-route at a time, each once
+// its held-out test passes (the user's plan, 2026-11-10; tagCorrection.ts
+// ENABLED_SUB_ROUTES, Love of the Game first). Every other sub-route is data
+// collection only, tracked in Analysis → Grading checks → Sub-routes.
 //
 // WR, TE and QB boards (QB from 2026-10-22, the receiver's route on a throw),
 // and RB from 2026-10-23 (lib/scouting/rbRouteTree.ts, migration 077).

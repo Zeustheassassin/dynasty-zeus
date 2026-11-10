@@ -57,6 +57,10 @@ export interface DifficultyTagSpec {
   /** A bucket read from more than the column (TE-SAEB's 3rd/4th down, split
    *  by pass or run block). Absent: the column's own value. */
   bucketOf?: (row: object) => string | null;
+  /** A sub-route spec (subRouteSpecs below): the route family it splits. Its
+   *  effects are re-centered within the family's split routes, so they only
+   *  move credit between that family's routes. */
+  family?: string;
 }
 
 const ON = ["on"] as const;
@@ -127,6 +131,85 @@ export const ENABLED_TAG_CORRECTIONS: Record<CorrectionKey, readonly string[]> =
   te_saeb: ["blocked_defender", "red_zone", "third_fourth_down", "short_yardage"],
 };
 
+// ── Sub-routes (routeVariants.ts) ────────────────────────────────────────
+// A sub-route switched on judges its routes against their own expected rate
+// instead of their route family's (the user, 2026-11-10: a WR who runs a lot
+// of Love of the Game nines, clear-outs nobody wins, shouldn't pile up missed
+// nines). It's a correction like a tag's, on top of today's model, with one
+// more anchor: within each family, the split routes' expected total stays
+// what today's model says. So switching Love of the Game on lowers its own
+// expected open rate and raises the family's other split nines' to match:
+// credit moves only between that family's routes. Unsplit routes (charted
+// before sub-routes, 2026-10-23) and every other route are judged as before,
+// and the user's raw win rates don't change.
+//
+// One sub-route at a time (the user's plan, 2026-11-10): the family's other
+// sub-routes stay pooled as "rest" until each is switched on. Each is switched
+// on only after its own held-out test (heldOutSubRouteTests) improves, the bar
+// every tag clears.
+//
+// Love of the Game, WR SAE / cSAE and TE-SAER (the user's go, 2026-11-10):
+// 0 open on 16 WR routes (6 WRs) and 6 TE routes (3 TEs), against 48% for
+// the nines charted since the press redefinition. Held out by prospect on
+// the real data that day, through this code: WR log loss per tagged route
+// .56460 → .55880, better in 5 of 5 folds, and none of 200 shuffles of the
+// label across the 88 split nines did as well (p .005). TE is under the test
+// floor (6 routes, 3 TEs); run anyway it improves .60019 → .59711 in 4 of 5
+// folds, and it's on with WR's, as the user asked. The ridge keeps a thin
+// sub-route modest: WR Love of the Game's expected open rate went 38.5% →
+// 20.7% and the other 72 split nines' 40.2% → 44.1% (TE 57.7% → 46.2% and
+// 55.8% → 59.1%); both move toward the real rates as routes come in. cSAE
+// leaves nines out, so for WRs it reaches SAE and the role buckets' route
+// reads.
+export type SubRouteId = `${string}:${string}`;
+export const SUB_ROUTE_REST = "rest";
+
+export const ENABLED_SUB_ROUTES: Record<CorrectionKey, readonly SubRouteId[]> = {
+  qb_aae: [], rb_srae: [], te_saeb: [],
+  wr_sae: ["nine:love_of_the_game"],
+  te_saer: ["nine:love_of_the_game"],
+};
+
+/** A route or sub-route key as a label ("love_of_the_game" → "Love of the game"). */
+const keyLabel = (k: string) => (k.charAt(0).toUpperCase() + k.slice(1)).replace(/_/g, " ");
+export const subRouteLabel = (id: SubRouteId) => {
+  const [route, variant] = id.split(":");
+  return `${keyLabel(route)}: ${keyLabel(variant)}`;
+};
+
+/** The sub-route a row carries (route type + route_variant), or null when unsplit. */
+export function subRouteOf(row: object): SubRouteId | null {
+  const r = row as { route_type?: unknown; route_variant?: unknown };
+  return typeof r.route_type === "string" && typeof r.route_variant === "string" && r.route_variant
+    ? `${r.route_type}:${r.route_variant}` : null;
+}
+
+/**
+ * One spec per route family with a sub-route switched on: a bucket per
+ * switched-on sub-route, and "rest" for the family's other split routes.
+ * Unsplit routes and other families carry no bucket.
+ */
+export function subRouteSpecs(ids: readonly SubRouteId[]): DifficultyTagSpec[] {
+  const byFamily = new Map<string, string[]>();
+  for (const id of ids) {
+    const [route, variant] = id.split(":");
+    const list = byFamily.get(route) ?? [];
+    if (!list.includes(variant)) list.push(variant);
+    byFamily.set(route, list);
+  }
+  return [...byFamily].map(([route, variants]) => ({
+    column: `sub_route:${route}`,
+    label: `${keyLabel(route)} sub-routes (${variants.map(keyLabel).join(", ")})`,
+    buckets: [...variants, SUB_ROUTE_REST],
+    family: route,
+    bucketOf: (row: object) => {
+      const r = row as { route_type?: unknown; route_variant?: unknown };
+      if (r.route_type !== route || typeof r.route_variant !== "string" || !r.route_variant) return null;
+      return variants.includes(r.route_variant) ? r.route_variant : SUB_ROUTE_REST;
+    },
+  }));
+}
+
 // Re-center a model's tagged era on its older eras (the era scale check's fix):
 // the tagged plays' mean residual is set to the older plays' instead of being
 // left where today's model puts it. Off until the check shows a drift.
@@ -171,9 +254,14 @@ export function correctionDesign<T extends Row>(specs: readonly DifficultyTagSpe
   return makeDesign<T>(specs.map((s) => [s.buckets, (row: T) => tagBucket(s, row)] as const));
 }
 
-/** The enabled specs for a model (by column, in DIFFICULTY_TAGS order). */
-export function enabledSpecs(key: CorrectionKey, enabled: readonly string[] = ENABLED_TAG_CORRECTIONS[key]): DifficultyTagSpec[] {
-  return DIFFICULTY_TAGS[key].filter((s) => enabled.includes(s.column));
+/** The enabled specs for a model: its tags (by column, in DIFFICULTY_TAGS
+ *  order), then its switched-on sub-routes (one spec per route family). */
+export function enabledSpecs(
+  key: CorrectionKey,
+  enabled: readonly string[] = ENABLED_TAG_CORRECTIONS[key],
+  subRoutes: readonly SubRouteId[] = ENABLED_SUB_ROUTES[key],
+): DifficultyTagSpec[] {
+  return [...DIFFICULTY_TAGS[key].filter((s) => enabled.includes(s.column)), ...subRouteSpecs(subRoutes)];
 }
 
 type WithModel<T> = FittedDifficulty<T> & { model: Float64Array };
@@ -213,6 +301,19 @@ export function fitTagCorrection<T extends Row>(
     lambda,
   );
   if (!fitted) return null;
+  // Sub-route specs' columns (each family's buckets), kept out of the level:
+  // their own anchor below holds each family's total where the rest of the
+  // correction puts it.
+  const families: { from: number; to: number }[] = [];
+  let col = 1;
+  for (const s of specs) {
+    if (s.family) families.push({ from: col, to: col + s.buckets.length });
+    col += s.buckets.length;
+  }
+  const isFamilyCol = (c: number) => families.some((f) => c >= f.from && c < f.to);
+  const colsOf = tagged.map((r) => design.cols(r));
+  // Each row's logit without the level and without any sub-route column.
+  const zTags = tagged.map((_, i) => colsOf[i].reduce((z, c) => (isFamilyCol(c) ? z : z + fitted[c]), zBase[i]));
   // The anchor: the level that makes the tagged rows' expected total what
   // today's model says (or, re-centered, what the older eras' level says).
   let target = 0;
@@ -221,9 +322,24 @@ export function fitTagCorrection<T extends Row>(
   } else {
     tagged.forEach((r, i) => { target += count(r) / (1 + Math.exp(-zBase[i])); });
   }
-  const effects = tagged.map((r, i) => ({ n: count(r), z: logitFromModel(fitted, design.cols(r), zBase[i]) - fitted[0] }));
   const model = Float64Array.from(fitted);
-  model[0] = levelOffset(effects, target);
+  model[0] = levelOffset(tagged.map((r, i) => ({ n: count(r), z: zTags[i] })), target);
+  // Each family's anchor: one shift on all its buckets, so its split routes'
+  // expected total is what it'd be without them. The level above is then
+  // still exact, since no family's total moved.
+  for (const f of families) {
+    const rows: { n: number; z: number }[] = [];
+    let familyTarget = 0;
+    tagged.forEach((r, i) => {
+      const c = colsOf[i].find((x) => x >= f.from && x < f.to);
+      if (c == null) return;
+      const n = count(r), z = zTags[i] + model[0];
+      familyTarget += n / (1 + Math.exp(-z));
+      rows.push({ n, z: z + fitted[c] });
+    });
+    const shift = rows.length ? levelOffset(rows, familyTarget) : 0;
+    for (let c = f.from; c < f.to; c++) model[c] = fitted[c] + shift;
+  }
   return { design, model, applies: inp.tagged };
 }
 
@@ -316,6 +432,9 @@ export interface TagTestResult {
   /** The tag's fitted effect on all the data (log-odds per bucket). */
   effects: Record<string, number>;
   improves: boolean;
+  /** Folds where it lowered the held-out loss, of the folds with test plays it touches. */
+  foldsBetter: number;
+  foldsRun: number;
 }
 
 const logLoss = (y: number, p: number) => {
@@ -325,52 +444,145 @@ const logLoss = (y: number, p: number) => {
 
 /**
  * K-fold held out by prospect: for each fold, today's model is refit without
- * the fold's prospects (`buildBase`), the correction with just this tag is fit
- * on the other prospects' tagged plays, and both are scored on the fold's
- * tagged plays. A tag improves when its held-out log loss is lower. Only the
- * testable tags (tagReadiness) are run.
+ * the fold's prospects (`buildBase`, once per fold for every spec), the
+ * correction with just this spec is fit on the other prospects' tagged plays,
+ * and both are scored on the fold's tagged plays. A spec improves when its
+ * held-out log loss is lower.
  */
+function heldOutSpecTests<T extends Row>(
+  specs: readonly DifficultyTagSpec[],
+  inp: CorrectionInputs<T>,
+  prospectOf: (row: T) => string | undefined,
+  buildBase: (rows: readonly T[]) => FittedDifficulty<T>,
+): TagTestResult[] {
+  if (!specs.length) return [];
+  const count = inp.countOf ?? (() => 1);
+  const ids = [...new Set(inp.rows.filter(inp.tagged).map(prospectOf).filter((x): x is string => !!x))].sort();
+  const foldOf = new Map(ids.map((id, i) => [id, i % TEST_FOLDS]));
+  const folds: { test: T[]; train: T[]; base: WithModel<T> }[] = [];
+  for (let fold = 0; fold < TEST_FOLDS; fold++) {
+    const inFold = (row: T) => foldOf.get(prospectOf(row) ?? "") === fold;
+    const test = inp.rows.filter((row) => inp.tagged(row) && inFold(row));
+    if (!test.length) continue;
+    const train = inp.rows.filter((row) => !inFold(row));
+    const base = buildBase(train);
+    if (base.model) folds.push({ test, train, base: { ...base, model: base.model } });
+  }
+  const full = buildBase(inp.rows);
+  const out: TagTestResult[] = [];
+  for (const spec of specs) {
+    let baseLoss = 0, withLoss = 0, n = 0, foldsBetter = 0, foldsRun = 0;
+    for (const { test, train, base } of folds) {
+      const corr = fitTagCorrection(base, { ...inp, rows: train }, [spec]);
+      let b = 0, w = 0, touched = false;
+      for (const row of test) {
+        const y = inp.outcome(row), c = count(row);
+        const z = baseLogitFor(base, row);
+        const zc = corr ? logitFromModel(corr.model, corr.design.cols(row), z) : z;
+        b += c * logLoss(y, 1 / (1 + Math.exp(-z)));
+        w += c * logLoss(y, 1 / (1 + Math.exp(-zc)));
+        n += c;
+        if (tagBucket(spec, row) != null) touched = true;
+      }
+      baseLoss += b; withLoss += w;
+      if (touched) { foldsRun++; if (w < b) foldsBetter++; }
+    }
+    if (n === 0) continue;
+    const corr = full.model ? fitTagCorrection({ ...full, model: full.model }, inp, [spec]) : null;
+    const effects: Record<string, number> = {};
+    spec.buckets.forEach((b, i) => { effects[b] = corr ? corr.model[i + 1] : 0; });
+    out.push({ column: spec.column, label: spec.label, baseLoss: baseLoss / n, withLoss: withLoss / n, effects, improves: withLoss < baseLoss, foldsBetter, foldsRun });
+  }
+  return out;
+}
+
+/** The held-out test for a model's testable tags (tagReadiness). */
 export function heldOutTagTest<T extends Row>(
   key: CorrectionKey,
   inp: CorrectionInputs<T>,
   prospectOf: (row: T) => string | undefined,
   buildBase: (rows: readonly T[]) => FittedDifficulty<T>,
 ): TagTestResult[] {
+  const ready = new Set(tagReadiness(key, inp, prospectOf).filter((r) => r.testable).map((r) => r.column));
+  return heldOutSpecTests(DIFFICULTY_TAGS[key].filter((s) => ready.has(s.column)), inp, prospectOf, buildBase);
+}
+
+// ── Sub-route readiness and test ─────────────────────────────────────────
+// Every sub-route charted on a model's tagged routes, how far it is from a
+// test, and the test once it's there. The test can run early (15 routes from
+// 5 prospects, with 15 of the family's other split routes to compare): a big
+// gap like Love of the Game's passes on that; a gap of ~8 pts needs ~100
+// routes from ~15 prospects (SUB_ROUTE_FULL_REPS, the 2026-11-10 estimate),
+// shown as the progress bar to watch.
+export const SUB_ROUTE_TEST_MIN_REPS = 15;
+export const SUB_ROUTE_TEST_MIN_PROSPECTS = 5;
+export const SUB_ROUTE_FULL_REPS = 100;
+export const SUB_ROUTE_FULL_PROSPECTS = 15;
+
+export interface SubRouteReadiness {
+  id: SubRouteId;
+  label: string;
+  /** Its tagged routes, and how many were won (open / block success). */
+  reps: number;
+  wins: number;
+  prospects: number;
+  /** The family's other split routes. */
+  restReps: number;
+  restWins: number;
+  testable: boolean;
+  short: string | null;
+  enabled: boolean;
+}
+
+export function subRouteReadiness<T extends Row>(
+  key: CorrectionKey,
+  inp: CorrectionInputs<T>,
+  prospectOf: (row: T) => string | undefined,
+): SubRouteReadiness[] {
   const count = inp.countOf ?? (() => 1);
-  const ready = tagReadiness(key, inp, prospectOf).filter((r) => r.testable);
-  if (!ready.length) return [];
-  const ids = [...new Set(inp.rows.filter(inp.tagged).map(prospectOf).filter((x): x is string => !!x))].sort();
-  const foldOf = new Map(ids.map((id, i) => [id, i % TEST_FOLDS]));
-  const out: TagTestResult[] = [];
-  for (const r of ready) {
-    const spec = DIFFICULTY_TAGS[key].find((s) => s.column === r.column)!;
-    let baseLoss = 0, withLoss = 0, n = 0;
-    for (let fold = 0; fold < TEST_FOLDS; fold++) {
-      const inFold = (row: T) => foldOf.get(prospectOf(row) ?? "") === fold;
-      const test = inp.rows.filter((row) => inp.tagged(row) && inFold(row));
-      if (!test.length) continue;
-      const train = inp.rows.filter((row) => !inFold(row));
-      const base = buildBase(train);
-      if (!base.model) continue;
-      const withModel = { ...base, model: base.model };
-      const corr = fitTagCorrection(withModel, { ...inp, rows: train }, [spec]);
-      for (const row of test) {
-        const y = inp.outcome(row), c = count(row);
-        const z = baseLogitFor(withModel, row);
-        const zc = corr ? logitFromModel(corr.model, corr.design.cols(row), z) : z;
-        baseLoss += c * logLoss(y, 1 / (1 + Math.exp(-z)));
-        withLoss += c * logLoss(y, 1 / (1 + Math.exp(-zc)));
-        n += c;
-      }
-    }
-    if (n === 0) continue;
-    const full = buildBase(inp.rows);
-    const corr = full.model ? fitTagCorrection({ ...full, model: full.model }, inp, [spec]) : null;
-    const effects: Record<string, number> = {};
-    spec.buckets.forEach((b, i) => { effects[b] = corr ? corr.model[i + 1] : 0; });
-    out.push({ column: r.column, label: r.label, baseLoss: baseLoss / n, withLoss: withLoss / n, effects, improves: withLoss < baseLoss });
+  const own = new Map<SubRouteId, { reps: number; wins: number; prospects: Set<string> }>();
+  const family = new Map<string, { reps: number; wins: number }>();
+  for (const row of inp.rows) {
+    if (!inp.tagged(row)) continue;
+    const id = subRouteOf(row);
+    if (!id) continue;
+    const c = count(row), won = c * inp.outcome(row);
+    const a = own.get(id) ?? { reps: 0, wins: 0, prospects: new Set<string>() };
+    a.reps += c; a.wins += won;
+    const pid = prospectOf(row);
+    if (pid) a.prospects.add(pid);
+    own.set(id, a);
+    const route = id.split(":")[0];
+    const f = family.get(route) ?? { reps: 0, wins: 0 };
+    f.reps += c; f.wins += won;
+    family.set(route, f);
   }
-  return out;
+  return [...own].map(([id, a]) => {
+    const f = family.get(id.split(":")[0])!;
+    const restReps = f.reps - a.reps, restWins = f.wins - a.wins;
+    const gaps = [
+      a.reps < SUB_ROUTE_TEST_MIN_REPS ? `${Math.round(a.reps)}/${SUB_ROUTE_TEST_MIN_REPS} routes` : null,
+      a.prospects.size < SUB_ROUTE_TEST_MIN_PROSPECTS ? `${a.prospects.size}/${SUB_ROUTE_TEST_MIN_PROSPECTS} prospects` : null,
+      restReps < SUB_ROUTE_TEST_MIN_REPS ? `${Math.round(restReps)}/${SUB_ROUTE_TEST_MIN_REPS} other split routes to compare` : null,
+    ].filter((g): g is string => g != null);
+    return {
+      id, label: subRouteLabel(id), reps: a.reps, wins: a.wins, prospects: a.prospects.size, restReps, restWins,
+      testable: gaps.length === 0, short: gaps.length ? gaps.join(" · ") : null,
+      enabled: ENABLED_SUB_ROUTES[key].includes(id),
+    };
+  }).sort((x, y) => y.reps - x.reps || x.id.localeCompare(y.id));
+}
+
+/** Each testable sub-route's held-out test, alone against the rest of its family. `column` is its id. */
+export function heldOutSubRouteTests<T extends Row>(
+  key: CorrectionKey,
+  inp: CorrectionInputs<T>,
+  prospectOf: (row: T) => string | undefined,
+  buildBase: (rows: readonly T[]) => FittedDifficulty<T>,
+  ready: readonly SubRouteReadiness[] = subRouteReadiness(key, inp, prospectOf),
+): TagTestResult[] {
+  const specs = ready.filter((r) => r.testable).map((r) => ({ ...subRouteSpecs([r.id])[0], column: r.id, label: r.label }));
+  return heldOutSpecTests(specs, inp, prospectOf, buildBase);
 }
 
 // ── Garbage time ─────────────────────────────────────────────────────────

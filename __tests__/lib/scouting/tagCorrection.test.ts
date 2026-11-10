@@ -7,6 +7,7 @@ import {
   fitTagCorrection, correctionFor, enabledSpecs, tagBucket, tagReadiness, heldOutTagTest, garbageTimeTest,
   eraResiduals, eraDrift, withGarbageWeight, DIFFICULTY_TAGS, ENABLED_TAG_CORRECTIONS,
   TEST_MIN_ON_PLAYS, TEST_MIN_PROSPECTS, ERA_CHECK_MIN_TAGGED, GT_MIN_PROSPECTS,
+  ENABLED_SUB_ROUTES, SUB_ROUTE_TEST_MIN_REPS, subRouteSpecs, subRouteOf, subRouteLabel, subRouteReadiness, heldOutSubRouteTests,
 } from "@/lib/scouting/tagCorrection";
 
 // A tiny play: a situation bucket, the outcome, an optional tag set and owner.
@@ -167,6 +168,122 @@ describe("readiness and the held-out test", () => {
     const plays = league({ taggedProspects: 10, perProspect: 120, rzEffect: 0, seed: 11 });
     const rz = heldOutTagTest("rb_srae", { rows: plays, outcome, tagged: isTagged }, (p) => p.pid, fitted).find((t) => t.column === "red_zone")!;
     expect(rz.withLoss).toBeGreaterThanOrEqual(rz.baseLoss - 5e-4);
+  });
+});
+
+// ── Sub-routes ───────────────────────────────────────────────────────────
+// Routes in two families. Unsplit routes (charted before sub-routes) carry no
+// variant and aren't tagged; split ones are tagged. Nines: Love of the Game
+// is a clear-out (5%), a real nine 60%; curls 80%.
+interface R { game_id: string; pid: string; route_type: "nine" | "curl"; route_variant?: string | null; y: number; red_zone?: boolean | null }
+const RDESIGN = makeDesign<R>([[["nine", "curl"], (r) => r.route_type]]);
+const rOutcome = (r: R) => r.y;
+const rTagged = (r: R) => r.red_zone != null;
+function routes({ prospects = 12, perProspect = 60, lotgRate = 0.05, seed = 3 } = {}): R[] {
+  const r = rng(seed);
+  const out: R[] = [];
+  for (let k = 0; k < prospects; k++) {
+    const split = k >= prospects / 2;
+    for (let i = 0; i < perProspect; i++) {
+      const route_type = i % 3 === 0 ? "curl" : "nine";
+      const lotg = route_type === "nine" && i % 5 === 1;
+      const p = route_type === "curl" ? 0.8 : lotg ? lotgRate : 0.6;
+      out.push({
+        game_id: `g${k}`, pid: `p${k}`, route_type, y: r() < p ? 1 : 0,
+        ...(split ? { red_zone: i % 7 === 0, route_variant: route_type === "nine" ? (lotg ? "love_of_the_game" : "nine") : "short" } : {}),
+      });
+    }
+  }
+  return out;
+}
+const rFitted = (rows: readonly R[]) => fitFromPlays([...rows], RDESIGN, rOutcome, 3);
+const LOTG = "nine:love_of_the_game" as const;
+
+describe("sub-routes", () => {
+  it("are switched on one at a time: Love of the Game for WR SAE and TE-SAER (2026-11-10)", () => {
+    expect(ENABLED_SUB_ROUTES).toEqual({ qb_aae: [], rb_srae: [], te_saeb: [], wr_sae: [LOTG], te_saer: [LOTG] });
+    expect(enabledSpecs("wr_sae").map((s) => s.column)).toEqual(["double_coverage", "sub_route:nine"]);
+    expect(enabledSpecs("wr_sae", undefined, []).map((s) => s.column)).toEqual(["double_coverage"]);
+    expect(subRouteLabel(LOTG)).toBe("Nine: Love of the game");
+    expect(subRouteOf({ route_type: "nine", route_variant: "seam" })).toBe("nine:seam");
+    expect(subRouteOf({ route_type: "nine", route_variant: null })).toBeNull();
+  });
+
+  it("give each family one spec: its switched-on sub-routes, and the rest of its split routes pooled", () => {
+    const specs = subRouteSpecs([LOTG, "curl:short", "nine:seam"]);
+    expect(specs.map((s) => [s.column, s.family, s.buckets])).toEqual([
+      ["sub_route:nine", "nine", ["love_of_the_game", "seam", "rest"]],
+      ["sub_route:curl", "curl", ["short", "rest"]],
+    ]);
+    const nine = specs[0];
+    expect(tagBucket(nine, { route_type: "nine", route_variant: "love_of_the_game" })).toBe("love_of_the_game");
+    expect(tagBucket(nine, { route_type: "nine", route_variant: "sluggo" })).toBe("rest");
+    // Unsplit, or another family: no bucket, so not touched.
+    expect(tagBucket(nine, { route_type: "nine", route_variant: null })).toBeNull();
+    expect(tagBucket(nine, { route_type: "curl", route_variant: "love_of_the_game" })).toBeNull();
+  });
+
+  const rows = routes();
+  const base = { ...rFitted(rows), model: rFitted(rows).model! };
+  const specs = [...DIFFICULTY_TAGS.rb_srae.filter((s) => s.column === "red_zone"), ...subRouteSpecs([LOTG])];
+  const corr = fitTagCorrection(base, { rows, outcome: rOutcome, tagged: rTagged }, specs)!;
+  const on = { ...base, correction: corr };
+  const sum = (xs: R[], f: FittedDifficulty<R> & { model: Float64Array }) => xs.reduce((s, x) => s + expectedFor(f, x), 0);
+  const tagged = rows.filter(rTagged);
+  const splitNines = tagged.filter((x) => x.route_type === "nine");
+
+  it("judge Love of the Game against its own rate and raise the family's other split nines to match", () => {
+    const lotg = splitNines.find((x) => x.route_variant === "love_of_the_game" && !x.red_zone)!;
+    const nine = splitNines.find((x) => x.route_variant === "nine" && !x.red_zone)!;
+    expect(expectedFor(on, lotg)).toBeLessThan(expectedFor(base, lotg) - 0.2);
+    expect(expectedFor(on, nine)).toBeGreaterThan(expectedFor(base, nine) + 0.03);
+  });
+
+  it("keep the family's split routes, and every tagged route, at today's expected total", () => {
+    // The same correction with the family's columns zeroed: the red-zone tag and level alone.
+    const noFamily = { ...on, correction: { ...corr, model: Float64Array.from(corr.model).map((v, j) => (j >= 2 ? 0 : v)) } };
+    expect(sum(splitNines, on)).toBeCloseTo(sum(splitNines, noFamily), 6);
+    expect(sum(tagged, on)).toBeCloseTo(sum(tagged, base), 6);
+    // Split curls aren't in the family: only the red-zone tag and level move them.
+    const curls = tagged.filter((x) => x.route_type === "curl");
+    expect(sum(curls, on)).toBeCloseTo(sum(curls, noFamily), 9);
+  });
+
+  it("never touch an unsplit route", () => {
+    const old = rows.find((x) => !rTagged(x) && x.route_type === "nine")!;
+    expect(expectedFor(on, old)).toBe(expectedFor(base, old));
+  });
+
+  it("move nothing when the family has no split routes", () => {
+    const unsplit = rows.filter((x) => !rTagged(x));
+    const c = fitTagCorrection(base, { rows: [...unsplit, ...tagged.filter((x) => x.route_type === "curl")], outcome: rOutcome, tagged: rTagged }, subRouteSpecs([LOTG]))!;
+    const curl = tagged.find((x) => x.route_type === "curl")!;
+    expect(expectedFor({ ...base, correction: c }, curl)).toBeCloseTo(expectedFor(base, curl), 9);
+  });
+
+  it("report every sub-route charted, its rest of family, and what's missing before a test", () => {
+    const thin = routes({ prospects: 4, perProspect: 30 });
+    const ready = subRouteReadiness("wr_sae", { rows: thin, outcome: rOutcome, tagged: rTagged }, (x) => x.pid);
+    const lotg = ready.find((r) => r.id === LOTG)!;
+    const splitLotg = thin.filter((x) => rTagged(x) && x.route_variant === "love_of_the_game");
+    expect(lotg.reps).toBe(splitLotg.length);
+    expect(lotg.wins).toBe(splitLotg.filter((x) => x.y === 1).length);
+    expect(lotg.restReps).toBe(thin.filter((x) => rTagged(x) && x.route_variant === "nine").length);
+    expect(lotg.enabled).toBe(true);
+    expect(lotg.testable).toBe(false);
+    expect(lotg.short).toContain(`/${SUB_ROUTE_TEST_MIN_REPS} routes`);
+    expect(ready.find((r) => r.id === "curl:short")!.short).toContain("other split routes to compare");
+  });
+
+  it("pass a sub-route that really plays differently, held out by prospect, and not one that doesn't", () => {
+    const big = routes({ prospects: 20, perProspect: 90 });
+    const t = heldOutSubRouteTests("wr_sae", { rows: big, outcome: rOutcome, tagged: rTagged }, (x) => x.pid, rFitted).find((x) => x.column === LOTG)!;
+    expect(t.improves).toBe(true);
+    expect(t.foldsBetter).toBeGreaterThanOrEqual(4);
+    expect(t.effects.love_of_the_game).toBeLessThan(t.effects.rest);
+    const same = routes({ prospects: 20, perProspect: 90, lotgRate: 0.6, seed: 9 });
+    const u = heldOutSubRouteTests("wr_sae", { rows: same, outcome: rOutcome, tagged: rTagged }, (x) => x.pid, rFitted).find((x) => x.column === LOTG)!;
+    expect(u.withLoss).toBeGreaterThanOrEqual(u.baseLoss - 5e-4);
   });
 });
 

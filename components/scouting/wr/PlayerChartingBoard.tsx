@@ -72,7 +72,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
   // opens on Curl.
   const [noRouteRun, setNoRouteRun]   = useState(true);
   const [routeType, setRouteType]     = useState<RouteType>("curl");
-  // Sub-route (migration 073), data collection only: starts on the route's default.
+  // Sub-route (migration 073; the grading reads only the switched-on ones, tagCorrection.ts ENABLED_SUB_ROUTES): starts on the route's default.
   const variant = useRouteVariant("curl");
   // Where he lines up most (`usual`, below) once his plays load; Right on the line until
   // then, or with none charted.
@@ -190,7 +190,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
         successRate: ((rtOpen / rtPlays.length) * 100).toFixed(0) + "%",
       };
     };
-    // Each route with its sub-routes under it (data collection only), and the
+    // Each route with its sub-routes under it (the grading reads only the switched-on ones, tagCorrection.ts ENABLED_SUB_ROUTES), and the
     // routes charted before sub-routes as "Not split" once any are split.
     const routeStats: Partial<Record<RouteType, RouteRow & {
       variants: (RouteRow & { key: string; label: string; yards?: string })[];
@@ -548,7 +548,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
                         .sort((a, b) => (stats.routeStats[b]?.count ?? 0) - (stats.routeStats[a]?.count ?? 0))
                         .map((rt) => {
                           const rs = stats.routeStats[rt]!;
-                          // Sub-routes under their route (data collection only), then "Not split".
+                          // Sub-routes under their route, then "Not split".
                           const subRows = [
                             ...rs.variants.map((v) => ({ key: v.key, label: v.label, yards: v.yards, row: v })),
                             ...(rs.unsplit ? [{ key: "unsplit", label: "Not split", yards: undefined, row: rs.unsplit }] : []),

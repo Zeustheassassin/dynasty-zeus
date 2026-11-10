@@ -6,6 +6,10 @@
 //     tagged and "on" plays, whether it's switched on, and — once there's
 //     enough to test — the held-out result (switch a tag on in
 //     ENABLED_TAG_CORRECTIONS only when it improves).
+//   - Sub-routes (WR SAE / cSAE and TE-SAER): every sub-route charted, its
+//     win rate against the rest of its route family's split routes, how far
+//     it is from a test and from the ~100-route mark, and its held-out test
+//     (switched on in ENABLED_SUB_ROUTES only when it improves).
 //   - Garbage time: the held-out-by-game weight test, per model.
 //   - Era scale: the mean residual of imported, in-app and tagged plays under
 //     each model, and whether the tagged era has drifted from the in-app one
@@ -20,9 +24,9 @@ import {
 import { expectedFor, fitFromPlays, type FittedDifficulty } from "./difficultyModel";
 import {
   CORRECTION_LABEL, GARBAGE_TIME_WEIGHT, RECENTER_TAGGED,
-  eraDrift, eraResiduals, garbageTimeTest, heldOutTagTest, tagReadiness,
+  eraDrift, eraResiduals, garbageTimeTest, heldOutSubRouteTests, heldOutTagTest, subRouteReadiness, tagReadiness,
   type CorrectionKey, type CorrectionInputs, type EraDrift, type EraResiduals, type GarbageTimeTest,
-  type TagReadiness, type TagTestResult,
+  type SubRouteReadiness, type TagReadiness, type TagTestResult,
 } from "./tagCorrection";
 import { isTaggedPlay, playEra, gameSource } from "./playEra";
 import {
@@ -42,6 +46,10 @@ export interface ModelCheck {
   readiness: TagReadiness[];
   /** Held-out results for the testable tags (empty until any is). */
   tests: TagTestResult[];
+  /** Route models only (WR SAE, TE-SAER): every sub-route charted, and the
+   *  testable ones' held-out results (`column` = the sub-route's id). */
+  subRoutes: SubRouteReadiness[];
+  subRouteTests: TagTestResult[];
   garbage: GarbageTimeTest;
   garbageWeight: number;
   eras: EraResiduals;
@@ -95,11 +103,15 @@ function modelCheck<T extends object>(
     return 1e4 * (n === 1 ? (y - p) ** 2 : y * n * (1 - p) ** 2 + (n - y * n) * p * p);
   };
   const eras = model ? eraResiduals(rows, eraOf, resid, count, sq) : {};
+  const routeModel = key === "wr_sae" || key === "te_saer";
+  const subRoutes = routeModel ? subRouteReadiness(key, { ...inp, rows }, prospectOf) : [];
   return {
     key,
     label: CORRECTION_LABEL[key],
     readiness: tagReadiness(key, { ...inp, rows }, prospectOf),
     tests: heldOutTagTest(key, { ...inp, rows }, prospectOf, buildBase),
+    subRoutes,
+    subRouteTests: routeModel ? heldOutSubRouteTests(key, { ...inp, rows }, prospectOf, buildBase, subRoutes) : [],
     garbage: garbageTimeTest(rows, inp.tagged, prospectOf, gameOf, resid, count),
     garbageWeight: GARBAGE_TIME_WEIGHT[key],
     eras,

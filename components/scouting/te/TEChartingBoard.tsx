@@ -91,7 +91,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
   const [blockSuccess, setBlockSuccess]       = useState<boolean | null>(null);
   const [coverage, setCoverage]               = useState<TECoverage | null>(TE_ROUTE_DEFAULTS.coverage);
   const [routeType, setRouteType]             = useState<RouteType | null>(null);
-  // Sub-route (migration 073), data collection only: a picked route starts on its default.
+  // Sub-route (migration 073; the grading reads only the switched-on ones, tagCorrection.ts ENABLED_SUB_ROUTES): a picked route starts on its default.
   const variant = useRouteVariant(null);
   const [wasOpen, setWasOpen]                 = useState<boolean | null>(null);
   const [targeted, setTargeted]               = useState<boolean | null>(TE_ROUTE_DEFAULTS.targeted);
@@ -174,7 +174,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
       const open = rp.filter((p) => p.was_open === true);
       return { attempts: rp.length, openPct: pct(open.length, rp.length), targetPct: pct(tgt.length, rp.length), catchPct: pct(ctch.length, tgt.length) };
     };
-    // Each route with its sub-routes under it (data collection only), and the
+    // Each route with its sub-routes under it (the grading reads only the switched-on ones, tagCorrection.ts ENABLED_SUB_ROUTES), and the
     // routes charted before sub-routes as "Not split" once any are split.
     const routeBreakdown = ROUTE_TYPES.map((rt) => {
       const rp = routePlays.filter((p) => p.route_type === rt);
