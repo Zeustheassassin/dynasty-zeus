@@ -79,6 +79,9 @@ export default function PffLinksTab({ onStatsChanged }: { onStatsChanged?: () =>
   // PFF stats: prospects missing some, and every prospect with a linked game.
   const toImport = s.prospects.filter((p) => needsImport(p, s.totals.get(p.id))).map((p) => p.id);
   const withLinkedGames = s.prospects.filter((p) => (s.totals.get(p.id)?.linked ?? 0) > 0).map((p) => p.id);
+  // QBs alone: their charted games plus each one's full college seasons, the
+  // middle-of-the-field adjustment's data (migration 092).
+  const qbsWithLinkedGames = s.prospects.filter((p) => p.position === "QB" && (s.totals.get(p.id)?.linked ?? 0) > 0).map((p) => p.id);
   const statTotals = [...s.totals.values()].reduce(
     (acc, t) => ({ linked: acc.linked + t.linked, imported: acc.imported + t.games, stale: acc.stale + (t.seasonsCurrent < t.seasons ? 1 : 0) }),
     { linked: 0, imported: 0, stale: 0 },
@@ -188,6 +191,14 @@ export default function PffLinksTab({ onStatsChanged }: { onStatsChanged?: () =>
           className={btn + " py-1.5"}
         >
           Refresh all stats
+        </button>
+        <button
+          onClick={() => s.runImport(qbsWithLinkedGames)}
+          disabled={running || s.loading || !statsReady || qbsWithLinkedGames.length === 0}
+          title="Re-read PFF for the QBs only: their linked games, plus each QB's full college seasons for the middle-of-the-field adjustment (about 5 PFF reads per season)"
+          className={btn + " py-1.5"}
+        >
+          Refresh QB stats ({qbsWithLinkedGames.length})
         </button>
         <button
           onClick={() => ctx.queue(ctx.toFill)}
