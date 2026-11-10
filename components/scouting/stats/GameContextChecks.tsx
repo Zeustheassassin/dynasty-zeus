@@ -14,7 +14,7 @@ import type { ProspectGameRouteCellsRow } from "../../../lib/scouting/aggregateM
 import { buildContextReport, contextMetrics, contextPValues, type ContextCheck, type ContextPValues } from "../../../lib/scouting/contextChecks";
 import { CONTEXT_TEST_MIN_PROSPECTS, PERMUTATION_P, PERMUTATIONS } from "../../../lib/scouting/contextEffects";
 import { FLAG_TEST_MIN_PROSPECTS } from "../../../lib/scouting/gameFlags";
-import { MIN_POOL, type CompositePos } from "../../../lib/scouting/aeComposite";
+import type { CompositePos } from "../../../lib/scouting/aeComposite";
 
 interface Props {
   prospects: Prospect[];
@@ -161,22 +161,6 @@ export default function GameContextChecks(props: Props) {
               <td className={`${td} text-right`}>{f.leftEarly.best ?? `waits (${f.leftEarly.prospects}/${FLAG_TEST_MIN_PROSPECTS})`}</td>
               <td className={`${td} text-right`}>{f.playedHurt.flaggedGames} / {f.playedHurt.prospects}</td>
               <td className={`${td} text-right`}>{f.playedHurt.best ?? `waits (${f.playedHurt.prospects}/${FLAG_TEST_MIN_PROSPECTS})`}</td>
-            </tr>
-          ))}</tbody>
-        </table>
-      </Section>
-
-      <Section
-        title="Trait grades"
-        note={`Your 1–10 grades on new games. They sit beside the AE Score; the Big Board's "With traits" toggle adds the uncovered ones, each counting once ${MIN_POOL} prospects at the position are graded.`}
-      >
-        <table className="min-w-full text-xs">
-          <thead><tr><th className={th}>Pos</th><th className={`${th} text-right`}>Graded games</th><th className={`${th} text-right`}>Prospects</th></tr></thead>
-          <tbody>{POS.map((pos) => (
-            <tr key={pos} className="border-t border-slate-800/60">
-              <td className={td}>{pos}</td>
-              <td className={`${td} text-right`}>{report.traits[pos].games}</td>
-              <td className={`${td} text-right`}>{report.traits[pos].prospects}/{MIN_POOL}</td>
             </tr>
           ))}</tbody>
         </table>

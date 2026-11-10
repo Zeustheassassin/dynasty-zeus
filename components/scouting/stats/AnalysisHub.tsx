@@ -60,7 +60,7 @@ export default function AnalysisHub({
   gradingData = EMPTY_GRADING_DATA, gameRouteCells = null,
 }: Props) {
   const [posTab, setPosTab] = useState<PositionTab>("WR");
-  // Each prospect's game context and trait grades (Stage 5), for every table.
+  // Each prospect's game context (Stage 5), for every table.
   const contextExtras = useMemo(() => contextExtrasFor(prospects, games, gradingData.context), [prospects, games, gradingData.context]);
 
   // Trigger lazy fetch when a non-WR tab is activated. The fetch lives on

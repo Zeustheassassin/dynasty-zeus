@@ -5,18 +5,17 @@
 //     the weather, his line's block grades and his QB's passing grade (PFF),
 //     his snap share;
 //   - the user's calls: confirm or dismiss a left-early suggestion, mark a
-//     game played hurt (old games too);
-//   - trait grades, 1–10, on new games only.
+//     game played hurt (old games too).
+// Per-game trait grades (1–10) lived here too until the user removed them on
+// 2026-11-09; their saved grades stay in scouting_games.trait_grades, unread.
 
 import type { ScoutingGame } from "../../../lib/types";
 import type { GameContext } from "../../../lib/scouting/gameContext";
 import { weatherCodeLabel } from "../../../lib/weather/openMeteo";
-import { gameTraits, isTraitGame, traitsFor, TRAIT_MAX, TRAIT_MIN } from "../../../lib/scouting/traits";
 import type { LeftEarlySuggestion } from "../../../lib/scouting/gameFlags";
 import { opponentSchool } from "../../../lib/scouting/opponentTier";
 import type { GameContextLog } from "./useGameContextLog";
 
-const GRADES = Array.from({ length: TRAIT_MAX - TRAIT_MIN + 1 }, (_, i) => TRAIT_MIN + i);
 const btn = "rounded border border-slate-700 px-1.5 py-0.5 text-[11px] text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-40";
 
 function defenseCell(c: GameContext | undefined) {
@@ -97,8 +96,6 @@ export default function GameContextPanel({ position, games, log }: {
   log: GameContextLog;
 }) {
   const isQB = position === "QB";
-  const traitGames = games.filter(isTraitGame);
-  const traits = traitsFor(position);
   return (
     <section aria-label="Game context" className="mt-6">
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
@@ -172,53 +169,6 @@ export default function GameContextPanel({ position, games, log }: {
           </tbody>
         </table>
       </div>
-      {traits.length > 0 && (
-        <div className="mt-4">
-          <div className="mb-1 text-xs text-slate-400">
-            <span className="font-semibold text-fuchsia-400">Trait grades</span>{" "}
-            <span className="text-slate-500">1–10, games charted since traits began only. Shown beside the AE Score.</span>
-          </div>
-          {traitGames.length === 0 ? (
-            <p className="text-xs text-slate-600">No new games yet: traits can be graded on games added from now on.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="text-xs">
-                <thead>
-                  <tr className="border-b border-slate-800 text-left text-slate-500">
-                    <th className="pb-1.5 pr-3">Game</th>
-                    {traits.map((t) => (
-                      <th key={t.key} className="pb-1.5 pr-2" title={`${t.label}${t.hint ? `, ${t.hint}` : ""} ${t.coveredBy ? `(already measured by ${t.coveredBy})` : `(counts with the Big Board's "With traits" toggle)`}`}>{t.short}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-900">
-                  {traitGames.map((g) => {
-                    const grades = gameTraits(position, g.trait_grades);
-                    return (
-                      <tr key={g.id}>
-                        <td className="py-1 pr-3 whitespace-nowrap text-slate-300">{g.season_year} {g.opponent}</td>
-                        {traits.map((t) => (
-                          <td key={t.key} className="py-1 pr-2">
-                            <select
-                              value={grades[t.key] ?? ""}
-                              onChange={(e) => void log.setTrait(g, t.key, e.target.value === "" ? null : Number(e.target.value))}
-                              aria-label={`${t.label}: ${g.season_year} ${g.opponent}`}
-                              className="rounded border border-slate-700 bg-slate-900 px-1 py-0.5 text-slate-200"
-                            >
-                              <option value="">—</option>
-                              {GRADES.map((v) => <option key={v} value={v}>{v}</option>)}
-                            </select>
-                          </td>
-                        ))}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
     </section>
   );
 }

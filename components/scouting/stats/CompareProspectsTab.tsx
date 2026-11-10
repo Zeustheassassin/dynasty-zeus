@@ -126,7 +126,7 @@ export default function CompareProspectsTab({
     () => tagValuesFor({ games, qbPlays, rbPlays, tePlays, wrTagRows: gradingData?.routeTagCells ?? [] }),
     [games, qbPlays, rbPlays, tePlays, gradingData],
   );
-  // Game context and trait grades (Stage 5).
+  // Game context (Stage 5).
   const extras = useMemo(() => contextExtras(prospects, games, gradingData?.context), [prospects, games, gradingData]);
   const { cols, rows } = useMemo((): { cols: ColDef[]; rows: StatRow[] } => {
     switch (position) {

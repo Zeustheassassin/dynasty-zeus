@@ -24,7 +24,7 @@ export interface UseProspectScoresReturn extends AEScores {
   contexts: Map<string, GameContext>;
   /** The covariates the context effects read. */
   contextCov: ContextCovariates;
-  /** The live AE Score (never with traits): the composite plus a WR's alignment penalty. */
+  /** The live AE Score: the composite plus a WR's alignment penalty. */
   liveScores: Map<string, ScoreView>;
   /** Each prospect's charted games by opponent tier, for the AE Score tooltip. */
   gamesByTier: Map<string, Record<OpponentTier, number>>;
@@ -46,7 +46,7 @@ export interface UseProspectScoresReturn extends AEScores {
 /**
  * Every prospect's scores, from ScoutingHub's data (lib/scouting/prospectScores.ts).
  * The Big Board and a prospect's Overview page both call this, so the two show
- * the same numbers. Viewing choices (live vs as of draft, traits, the Dynasty
+ * the same numbers. Viewing choices (live vs as of draft, the Dynasty
  * weights) stay with the screen.
  */
 export function useProspectScores(

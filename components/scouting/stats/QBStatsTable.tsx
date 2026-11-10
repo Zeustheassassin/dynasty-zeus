@@ -7,7 +7,7 @@ import type { Prospect, ScoutingGame, QBPlay, QBDepthZone, QBPressureHandling } 
 import { roleFitCols, roleFitRow } from "./roleFitCols";
 import { pffCols, pffRow } from "./pffCols";
 import { tagCols, tagRow, tagValuesFor } from "./tagCols";
-import { contextCols, traitCols } from "./contextCols";
+import { contextCols } from "./contextCols";
 import type { TagStatValue } from "../../../lib/scouting/tagStats";
 import type { PffTotals } from "../../../lib/pff/totals";
 
@@ -20,7 +20,7 @@ interface Props {
   onSelectProspect?: (p: Prospect) => void;
   /** PFF over each prospect's charted games (ScoutingHub). */
   pffTotals?: Map<string, PffTotals>;
-  /** Per-prospect game-context and trait fields (contextCols.ts). */
+  /** Per-prospect game-context fields (contextCols.ts). */
   contextExtras?: Map<string, Record<string, number | null>>;
 }
 
@@ -142,9 +142,8 @@ export const QB_STAT_COLS: ColDef[] = [
   // The tag-only stats (tagged plays only)
   ...tagCols("QB"),
   ...pffCols("QB"),
-  // Game context and the user's trait grades (Stage 5)
+  // Game context (Stage 5)
   ...contextCols("QB"),
-  ...traitCols("QB"),
 ];
 
 function pct(n: number, d: number): number | null {

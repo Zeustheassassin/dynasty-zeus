@@ -62,18 +62,6 @@ describe("TE role buckets", () => {
     expect(f.best).not.toBe("all_around");
   });
 
-  it("reads your Hands grade into All-Around, and leaves it out until a game is graded", () => {
-    const plays = [...many(50, { positioning: "inline" }), ...many(60, block())];
-    const base = inputs(plays, { all: 3 }, { all: 3, inline: 3 });
-    const none = matchFor(teRoleFit(base)!, "all_around")!.pct;
-    const good = teRoleFit({ ...base, hands: { avg: 9, games: 2 } })!;
-    const poor = teRoleFit({ ...base, hands: { avg: 3, games: 2 } })!;
-    expect(good.features.hands!.display).toBe("9.0 / 10 over 2 graded games");
-    expect(none).toBeLessThan(matchFor(good, "all_around")!.pct);
-    expect(none).toBeGreaterThan(matchFor(poor, "all_around")!.pct);
-    expect(teRoleFit(base)!.features.hands).toBeUndefined();
-  });
-
   it("drops All-Around under 6'4\" 240", () => {
     const plays = [...many(50, { positioning: "inline" }), ...many(60, block())];
     const m = matchFor(teRoleFit(inputs(plays, {}, {}, { heightIn: 75, weightLb: 235 }))!, "all_around")!;
@@ -111,10 +99,10 @@ describe("TE role buckets", () => {
     expect(fit.features.hands).toBeUndefined();
   });
 
-  it("takes the Hands grade from his graded games", () => {
+  it("no longer reads Hands trait grades (removed 2026-11-09)", () => {
     const prospects = [{ id: "te", position: "TE", height: "6'5\"", weight: 250 }] as unknown as Prospect[];
     const games = [{ id: "g1", prospect_id: "te", season_year: 2025, created_at: "2026-10-19T12:00:00Z", trait_grades: { hands: 8, inline_block: 9 } }] as unknown as ScoutingGame[];
     const plays = [...many(30, { game_id: "g1", positioning: "slot" }), ...many(20, { game_id: "g1", ...block() })];
-    expect(computeTERoleFits(prospects, games, plays).get("te")!.features.hands!.display).toBe("8.0 / 10 over 1 graded game");
+    expect(computeTERoleFits(prospects, games, plays).get("te")!.features.hands).toBeUndefined();
   });
 });

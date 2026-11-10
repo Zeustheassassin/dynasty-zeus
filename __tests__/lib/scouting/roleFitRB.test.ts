@@ -185,17 +185,6 @@ describe("RB Goal-line (the user's recipe, 2026-10-07)", () => {
     expect([bigger.best, ...bigger.also]).toContain("goal_line");
   });
 
-  it("leaves Power out until he has a graded game, then reads it against the scale's midpoint", () => {
-    const AVG = slices({ all: [0, 100], inside: [0, 100] });
-    const base = fit(plays, AVG, 72, 225)!;
-    expect(base.features.power).toBeUndefined();
-    const strong = fit(plays, AVG, 72, 225, { power: { avg: 9, games: 3 } })!;
-    expect(strong.features.power!.display).toBe("9.0 / 10 over 3 graded games");
-    expect(matchFor(strong, "goal_line")!.pct).toBeGreaterThan(matchFor(base, "goal_line")!.pct);
-    const weak = fit(plays, AVG, 72, 225, { power: { avg: 2, games: 3 } })!;
-    expect(matchFor(weak, "goal_line")!.pct).toBeLessThan(matchFor(base, "goal_line")!.pct);
-  });
-
   it(`counts tagged short-yardage runs only from ${RB_SY_TAG_MIN} on`, () => {
     const sy = (n: number, made: number) => Array.from({ length: n }, (_, i) => play({ run_type: "inside_man_gap", short_yardage: true, success: i < made }));
     expect(fit([...plays, ...sy(RB_SY_TAG_MIN - 1, 9)], POWER_SLICES, 72, 225, PFF)!.features.shortYardage).toBeUndefined();
@@ -204,14 +193,11 @@ describe("RB Goal-line (the user's recipe, 2026-10-07)", () => {
     expect(f.features.shortYardage!.fit).toBeGreaterThan(0.5);
   });
 
-  it("reads his Power grades off the charted games' trait grades", () => {
+  it("no longer reads Power trait grades (removed 2026-11-09)", () => {
     const prospects = [{ id: "a", position: "RB", height: "6'0", weight: 225 }] as unknown as Prospect[];
-    const games = [
-      { id: "g1", prospect_id: "a", season_year: 2026, created_at: "2026-10-06T00:00:00Z", trait_grades: { power: 8 } },
-      { id: "g0", prospect_id: "a", season_year: 2026, created_at: "2026-09-01T00:00:00Z", trait_grades: null },
-    ] as unknown as ScoutingGame[];
+    const games = [{ id: "g1", prospect_id: "a", season_year: 2026, created_at: "2026-10-06T00:00:00Z", trait_grades: { power: 8 } }] as unknown as ScoutingGame[];
     const fits = computeRBRoleFits(prospects, games, runs(40, "inside_zone", { game_id: "g1" }));
-    expect(fits.get("a")!.features.power!.display).toBe("8.0 / 10 over 1 graded game");
+    expect(fits.get("a")!.features.power).toBeUndefined();
   });
 });
 

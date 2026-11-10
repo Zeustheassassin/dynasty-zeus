@@ -35,10 +35,10 @@
 //
 // Goal-line (the user's recipe, 2026-10-07): inside runs above expected,
 // runs vs a loaded box, PFF yards after contact and missed tackles per carry,
-// not getting stuffed, the user's Power trait grade, and success on tagged
-// short-yardage / goal-line runs. Power counts once he has a graded game and
-// the short-yardage runs once he has RB_SY_TAG_MIN of them; until then the
-// other weights stretch to cover them.
+// not getting stuffed, and success on tagged short-yardage / goal-line runs.
+// The short-yardage runs count once he has RB_SY_TAG_MIN of them; until then
+// the other weights stretch to cover them. The user's Power trait grade was
+// 15% of it until the user removed trait grades (2026-11-09).
 //
 // 2-Down, 3rd-Down and Blocking/ST (the user's definitions, 2026-10-08):
 // - 2-Down: "a RB who isn't good at pass blocking and average to bad at
@@ -60,7 +60,6 @@ import type { Prospect, RBPlay, RBRunType, ScoutingGame } from "../types";
 import type { PffTotals } from "../pff/totals";
 import { computeRBRoleSlices } from "./aboveExpected";
 import { parseHeightInches } from "./prospectAge";
-import { traitAverages, type TraitAverage } from "./traits";
 import {
   buildRoleFit, contrastFeature, rateFeature, shrinkAE, signed, skillFeature, usageFeature, NO_RATE, RUN_SIDE_GAP, RUN_SIDE_MIN_RUNS,
   type AESliceValue, type BucketRecipe, type Feature, type FeatureSet, type Rate, type RoleFit, type RoleTag,
@@ -101,10 +100,8 @@ const SCALE = {
   // REC_PRIOR routes; calibrated the same way on the 2026-10-08 data (pool
   // 0.98 YPRR, the tenth-best back +0.59 after the prior).
   yprr: 42,
-  // PROVISIONAL, nothing to calibrate on yet (no Power grades, 5 tagged
-  // short-yardage runs in the pool): Power grade points over the 1–10 scale's
-  // midpoint, and short-yardage success pts over the pool's.
-  power: 1.8,
+  // PROVISIONAL, nothing to calibrate on yet (5 tagged short-yardage runs in
+  // the pool on 2026-10-07): short-yardage success pts over the pool's.
   shortYardage: 8,
 } as const;
 
@@ -122,9 +119,6 @@ export const RB_SY_TAG_MIN = 10;
 // (mine, 2026-10-08: "small" as the sub-200 lb back; Achane is 188).
 export const GOAL_LINE_NAMED_LB = 200;
 const SY_PRIOR = 15;
-// Power grades: pseudo-games pulling his average toward the scale's midpoint.
-const POWER_PRIOR = 2;
-const POWER_MID = 5.5;
 
 const RB_SLICES = {
   all:    { pred: () => true },
@@ -217,8 +211,6 @@ export interface RBRoleInputs {
   /** PFF receiving yards per route run over his charted games, and the pool's. */
   pffYprr?: Rate | null;
   leaguePffYprr?: Rate | null;
-  /** His Power trait average over graded games (traits.ts). */
-  power?: TraitAverage | null;
 }
 
 export function rbFeatures(inp: RBRoleInputs): FeatureSet {
@@ -250,13 +242,6 @@ export function rbFeatures(inp: RBRoleInputs): FeatureSet {
   // Left out (weights renormalize) until there's something to read.
   if (mine.shortYardage.n >= RB_SY_TAG_MIN && league.shortYardage.n > 0) {
     f.shortYardage = rateFeature("Short yardage / goal line (tagged)", mine.shortYardage, league.shortYardage, SY_PRIOR, SCALE.shortYardage, "tagged runs");
-  }
-  const pw = inp.power;
-  if (pw && pw.games > 0) {
-    f.power = {
-      ...skillFeature("Power (your grade)", pw.avg - POWER_MID, pw.games, POWER_PRIOR, SCALE.power, "graded games"),
-      display: `${pw.avg.toFixed(1)} / 10 over ${pw.games} graded game${pw.games === 1 ? "" : "s"}`,
-    };
   }
   f.handsOk = meetsBar(f.hands, HANDS_BAR, "Hands (no drops)");
   // Pass protection for the gate: the charted wins, blended by reps with PFF's
@@ -451,8 +436,8 @@ export const RB_RECIPES: readonly BucketRecipe[] = [
   },
   {
     // The user's recipe (2026-10-07). Level D: at its line it follows a level-B
-    // or C role ("Zone / Goal-line"). shortYardage and power are absent until
-    // he has them (renormalized). Graded at any size, but never named as his
+    // or C role ("Zone / Goal-line"). shortYardage is absent until he has it
+    // (renormalized). Power (your grade) was 0.15 until 2026-11-09. Graded at any size, but never named as his
     // role under GOAL_LINE_NAMED_LB (the user, 2026-10-08, of a 5'7" 193 back:
     // an elite small back can grade well and get some goal-line work, like
     // De'Von Achane, but it "just shouldn't be a projected role").
@@ -460,7 +445,6 @@ export const RB_RECIPES: readonly BucketRecipe[] = [
     ingredients: [
       { feature: "insideAE", weight: 0.25, core: true },
       { feature: "shortYardage", weight: 0.15 },
-      { feature: "power", weight: 0.15 },
       { feature: "yco", weight: 0.15, core: true },
       { feature: "btk", weight: 0.1 },
       { feature: "notStuffed", weight: 0.1 },
@@ -537,7 +521,6 @@ export function computeRBRoleFits(
   const pffMtf = pffRate((s) => s.rush_mtf, (s) => s.rush_att);
   const pffYco = pffRate((s) => s.yco, (s) => s.rush_att);
   const pffYprr = pffRate((s) => s.rec_yards, (s) => s.routes);
-  const traits = traitAverages(rbs, games);
   const slices = computeRBRoleSlices(prospects, games, rbPlays, RB_SLICES);
   const league = Object.fromEntries((Object.keys(RATES) as RateKey[]).map((k) => [k, RATES[k](rbPlays)])) as Record<RateKey, Rate>;
   const gameToProspect = new Map(games.map((g) => [g.id, g.prospect_id]));
@@ -566,7 +549,6 @@ export function computeRBRoleFits(
       leaguePffYco: pffYco.pool,
       pffYprr: pffYprr.mine.get(p.id) ?? null,
       leaguePffYprr: pffYprr.pool,
-      power: traits.get(p.id)?.power ?? null,
     }) : null);
   }
   return out;

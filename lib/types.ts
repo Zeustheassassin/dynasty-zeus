@@ -1196,7 +1196,8 @@ export interface ScoutingGame {
   played_hurt?: boolean;
   /** NULL = not reviewed; true = he left early (confirmed); false = he didn't (migration 065). */
   left_early?: boolean | null;
-  /** Per-game trait grades, 1–10 per trait key, new games only (migration 065, traits.ts). */
+  /** Per-game trait grades, 1–10 per trait key (migration 065). Unread since the user removed
+   *  trait grades on 2026-11-09; the saved grades stay in the column. */
   trait_grades?: Record<string, number> | null;
 }
 

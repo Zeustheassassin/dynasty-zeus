@@ -2,13 +2,12 @@
 // One prospect's game context for his charting board's Games tab (migration
 // 065): each charted game's opponent defense, weather and supporting cast,
 // the left-early suggestions, and the user's own per-game calls (left early,
-// played hurt, trait grades), saved to scouting_games.
+// played hurt), saved to scouting_games.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { logger } from "../../../lib/logger";
 import { leftEarlySuggestions } from "../../../lib/scouting/gameFlags";
 import { EMPTY_CONTEXT_DATA, resolveGameContexts, type GameContextData } from "../../../lib/scouting/gameContext";
-import { withTrait } from "../../../lib/scouting/traits";
 import { supabase } from "../../../lib/supabaseclient";
 import type { ScoutingGame } from "../../../lib/types";
 import {
@@ -17,7 +16,7 @@ import {
 
 const log = logger("scouting/context/useGameContextLog");
 
-type GamePatch = Partial<Pick<ScoutingGame, "played_hurt" | "left_early" | "trait_grades">>;
+type GamePatch = Partial<Pick<ScoutingGame, "played_hurt" | "left_early">>;
 
 export function useGameContextLog(
   prospectId: string,
@@ -82,11 +81,8 @@ export function useGameContextLog(
     onDirty?.();
   }, [setGames, onDirty]);
 
-  const setTrait = useCallback((g: ScoutingGame, key: string, value: number | null) =>
-    patchGame(g.id, { trait_grades: withTrait(g.trait_grades, key, value) }), [patchGame]);
-
   return {
-    contexts, suggestions, unmatched, error, refresh, patchGame, setTrait,
+    contexts, suggestions, unmatched, error, refresh, patchGame,
     refreshing: progress != null,
     progressNote: progress?.note ?? null,
     filled: games.filter((g) => contexts.has(g.id)).length,

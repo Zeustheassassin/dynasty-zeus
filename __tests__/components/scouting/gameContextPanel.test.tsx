@@ -25,7 +25,7 @@ const ctx = (gameId: string, extra: Partial<GameContext> = {}): GameContext => (
 function log(over: Partial<GameContextLog> = {}): GameContextLog {
   return {
     contexts: new Map(), suggestions: new Map(), unmatched: new Map(), error: null,
-    refresh: vi.fn(async () => {}), patchGame: vi.fn(async () => {}), setTrait: vi.fn(async () => {}),
+    refresh: vi.fn(async () => {}), patchGame: vi.fn(async () => {}),
     refreshing: false, progressNote: null, filled: 0, ...over,
   } as GameContextLog;
 }
@@ -67,28 +67,17 @@ describe("Games tab: game context", () => {
     expect(l.patchGame).toHaveBeenCalledWith("old", { played_hurt: true });
   });
 
-  it("trait grades (1–10) only on new games", () => {
-    const l = log();
+  it("has no trait grades (removed 2026-11-09), and no QB column on a QB's own board", () => {
     const newGame = game("new", "Purdue", "2026-10-06T00:00:00Z", { trait_grades: { arm: 7 } });
-    render(<GameContextPanel position="QB" games={[game("old", "Iowa", "2026-03-01T00:00:00Z"), newGame]} log={l} />);
-    expect(screen.queryByRole("combobox", { name: "Arm: 2025 Iowa" })).toBeNull();
-    const arm = screen.getByRole("combobox", { name: "Arm: 2025 Purdue" }) as HTMLSelectElement;
-    expect(arm.value).toBe("7");
-    expect(within(arm).getAllByRole("option")).toHaveLength(11);
-    fireEvent.change(screen.getByRole("combobox", { name: "Creation: 2025 Purdue" }), { target: { value: "9" } });
-    expect(l.setTrait).toHaveBeenCalledWith(newGame, "creation", 9);
-    // No QB column on a QB's own board.
+    render(<GameContextPanel position="QB" games={[newGame]} log={log()} />);
+    expect(screen.queryByText("Trait grades")).toBeNull();
+    expect(screen.queryAllByRole("combobox")).toHaveLength(0);
     expect(screen.queryByRole("columnheader", { name: "QB" })).toBeNull();
-  });
-
-  it("says when no game can be graded yet", () => {
-    render(<GameContextPanel position="TE" games={[game("old", "Iowa", "2026-03-01T00:00:00Z")]} log={log()} />);
-    expect(screen.getByText(/No new games yet/)).toBeTruthy();
   });
 });
 
 describe("Analysis → Grading checks: game context", () => {
-  it("shows the context tests, the flag tests and trait readiness", () => {
+  it("shows the context tests and the flag tests", () => {
     const games = [{ id: "g", prospect_id: "r", season_year: 2025, created_at: "2026-06-01T00:00:00Z" }] as ScoutingGame[];
     const rbPlays = Array.from({ length: 20 }, (_, i) => ({ game_id: "g", run_type: "inside_zone", formation: "gun", success: i % 2 === 0, loaded_box: false, unblocked_defender: false })) as RBPlay[];
     render(
@@ -98,9 +87,10 @@ describe("Analysis → Grading checks: game context", () => {
         gameRouteCells={null} gradingData={EMPTY_GRADING_DATA}
       />,
     );
-    for (const h of ["Game context", "Left early and played hurt", "Trait grades"]) {
+    for (const h of ["Game context", "Left early and played hurt"]) {
       expect(screen.getByRole("heading", { name: h })).toBeTruthy();
     }
+    expect(screen.queryByRole("heading", { name: "Trait grades" })).toBeNull();
     expect(screen.getByRole("button", { name: "Run the chance checks" })).toBeTruthy();
     expect(screen.getAllByText("Opp. defense SP+").length).toBeGreaterThan(0);
   });

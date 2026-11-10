@@ -9,7 +9,8 @@
 // The held-out improvements are cheap and shown at once; the chance check
 // (contextVerdict's permutations) is slow, so the screen runs it on a button
 // through contextPValues. Also: the left-early / played-hurt weight tests per
-// headline AE, and how many games carry trait grades.
+// headline AE. (Trait-grade counts were here until the user removed trait
+// grades on 2026-11-09.)
 import type { Prospect, QBPlay, RBPlay, ScoutingGame, TEPlay } from "../types";
 import {
   computeQBAboveExpectedSamples, computeRBAboveExpectedSamples,
@@ -31,7 +32,6 @@ import {
 import { flaggedGameTest, LEFT_EARLY_WEIGHT, PLAYED_HURT_WEIGHT, type FlagWeightTest } from "./gameFlags";
 import { learnOpponents, tierGames } from "./opponentTier";
 import { tagStatReps } from "./tagStats";
-import { isTraitGame, traitsFor } from "./traits";
 
 export interface ContextMetric {
   key: string;
@@ -71,8 +71,6 @@ export interface ContextReport {
   flags: { key: string; label: string; leftEarly: FlagWeightTest; playedHurt: FlagWeightTest }[];
   leftEarlyWeight: number;
   playedHurtWeight: number;
-  /** Graded new games and prospects with any trait, per position. */
-  traits: Record<CompositePos, { games: number; prospects: number; traits: number }>;
   /** Games with each piece of context. */
   coverage: { games: number; opponent: number; weather: number; cast: number };
 }
@@ -166,24 +164,11 @@ export function buildContextReport(inp: ContextInputs): ContextReport {
     playedHurt: flaggedGameTest(m.samples, hurt),
   }));
 
-  const posOf = new Map(inp.prospects.map((p) => [p.id, p.position]));
-  const traits = { QB: { games: 0, prospects: 0, traits: 6 }, RB: { games: 0, prospects: 0, traits: 6 }, WR: { games: 0, prospects: 0, traits: 6 }, TE: { games: 0, prospects: 0, traits: 6 } } as ContextReport["traits"];
-  const graded = new Map<string, Set<string>>();
-  for (const g of inp.games) {
-    const pos = posOf.get(g.prospect_id) as CompositePos | undefined;
-    if (!pos || !traits[pos] || !isTraitGame(g) || !g.trait_grades) continue;
-    if (!traitsFor(pos).some((t) => g.trait_grades![t.key] != null)) continue;
-    traits[pos].games++;
-    (graded.get(pos) ?? graded.set(pos, new Set()).get(pos)!).add(g.prospect_id);
-  }
-  for (const [pos, ids] of graded) traits[pos as CompositePos].prospects = ids.size;
-
   const contexts = resolveGameContexts(inp.games, inp.gradingData.context);
   const cs = [...contexts.values()];
   return {
     metrics: checks, flags,
     leftEarlyWeight: LEFT_EARLY_WEIGHT, playedHurtWeight: PLAYED_HURT_WEIGHT,
-    traits,
     coverage: {
       games: inp.games.length,
       opponent: cs.filter((c) => c.matched).length,
