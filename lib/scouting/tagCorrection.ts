@@ -161,13 +161,29 @@ export const ENABLED_TAG_CORRECTIONS: Record<CorrectionKey, readonly string[]> =
 // 55.8% → 59.1%); both move toward the real rates as routes come in. cSAE
 // leaves nines out, so for WRs it reaches SAE and the role buckets' route
 // reads.
+//
+// The full bar, rerun 2026-11-10 afternoon on every testable sub-route (each
+// against what's already on in its family; the user: "do the switch based on
+// your recommendations"): lower held-out loss, better in most folds, and a
+// chance check (200 shuffles of the label across the family's other split
+// routes, p ≤ .05).
+//   - Passed: WR Love of the Game again (18 routes, 7 WRs, 5/5 folds, p .005);
+//     TE Flat, True Flat vs Quick Out (22 and 21 routes from 5 TEs, 68% vs
+//     91% won, 4/5 folds, p .015 / .010). Flat has only those two, so it's
+//     one split and both go on together: True Flat's expected 76.9% → 73.5%,
+//     Quick Out's 74.2% → 77.8%, TE-SAER moves −0.14 to +0.15.
+//   - Close, not yet (chance check): WR Curl Short and Curl Intermediate (74
+//     and 35 routes, 84% vs 60% won, 4/5 folds, p .16 / .10).
+//   - No gain: WR Nine once Love of the Game is on (0/5 folds; its first pass
+//     was Love of the Game's own signal), Dig Intermediate, True Slant, Drag,
+//     Post Deep.
 export type SubRouteId = `${string}:${string}`;
 export const SUB_ROUTE_REST = "rest";
 
 export const ENABLED_SUB_ROUTES: Record<CorrectionKey, readonly SubRouteId[]> = {
   qb_aae: [], rb_srae: [], te_saeb: [],
   wr_sae: ["nine:love_of_the_game"],
-  te_saer: ["nine:love_of_the_game"],
+  te_saer: ["nine:love_of_the_game", "flat:true_flat", "flat:quick_out"],
 };
 
 /** A route or sub-route key as a label ("love_of_the_game" → "Love of the game"). */
@@ -442,20 +458,32 @@ const logLoss = (y: number, p: number) => {
   return -(y * Math.log(q) + (1 - y) * Math.log(1 - q));
 };
 
+/** One held-out comparison: the correction with `base` specs (none = today's
+ *  model alone) against the correction with `with` specs. `probe` is the spec
+ *  being tested, one of `with`: its rows are the ones it touches, and its
+ *  buckets are the reported effects. */
+interface SpecTest {
+  column: string;
+  label: string;
+  base: readonly DifficultyTagSpec[];
+  with: readonly DifficultyTagSpec[];
+  probe: DifficultyTagSpec;
+}
+
 /**
  * K-fold held out by prospect: for each fold, today's model is refit without
- * the fold's prospects (`buildBase`, once per fold for every spec), the
- * correction with just this spec is fit on the other prospects' tagged plays,
- * and both are scored on the fold's tagged plays. A spec improves when its
+ * the fold's prospects (`buildBase`, once per fold for every test), both
+ * corrections are fit on the other prospects' tagged plays, and both are
+ * scored on the fold's tagged plays. A test improves when the `with` side's
  * held-out log loss is lower.
  */
 function heldOutSpecTests<T extends Row>(
-  specs: readonly DifficultyTagSpec[],
+  tests: readonly SpecTest[],
   inp: CorrectionInputs<T>,
   prospectOf: (row: T) => string | undefined,
   buildBase: (rows: readonly T[]) => FittedDifficulty<T>,
 ): TagTestResult[] {
-  if (!specs.length) return [];
+  if (!tests.length) return [];
   const count = inp.countOf ?? (() => 1);
   const ids = [...new Set(inp.rows.filter(inp.tagged).map(prospectOf).filter((x): x is string => !!x))].sort();
   const foldOf = new Map(ids.map((id, i) => [id, i % TEST_FOLDS]));
@@ -470,28 +498,34 @@ function heldOutSpecTests<T extends Row>(
   }
   const full = buildBase(inp.rows);
   const out: TagTestResult[] = [];
-  for (const spec of specs) {
+  const logitWith = (corr: DifficultyCorrection<T> | null, row: T, z: number) =>
+    (corr ? logitFromModel(corr.model, corr.design.cols(row), z) : z);
+  for (const t of tests) {
     let baseLoss = 0, withLoss = 0, n = 0, foldsBetter = 0, foldsRun = 0;
     for (const { test, train, base } of folds) {
-      const corr = fitTagCorrection(base, { ...inp, rows: train }, [spec]);
+      const trainInp = { ...inp, rows: train };
+      const corrBase = t.base.length ? fitTagCorrection(base, trainInp, t.base) : null;
+      const corrWith = fitTagCorrection(base, trainInp, t.with);
       let b = 0, w = 0, touched = false;
       for (const row of test) {
         const y = inp.outcome(row), c = count(row);
         const z = baseLogitFor(base, row);
-        const zc = corr ? logitFromModel(corr.model, corr.design.cols(row), z) : z;
-        b += c * logLoss(y, 1 / (1 + Math.exp(-z)));
-        w += c * logLoss(y, 1 / (1 + Math.exp(-zc)));
+        b += c * logLoss(y, 1 / (1 + Math.exp(-logitWith(corrBase, row, z))));
+        w += c * logLoss(y, 1 / (1 + Math.exp(-logitWith(corrWith, row, z))));
         n += c;
-        if (tagBucket(spec, row) != null) touched = true;
+        if (tagBucket(t.probe, row) != null) touched = true;
       }
       baseLoss += b; withLoss += w;
       if (touched) { foldsRun++; if (w < b) foldsBetter++; }
     }
     if (n === 0) continue;
-    const corr = full.model ? fitTagCorrection({ ...full, model: full.model }, inp, [spec]) : null;
+    const corr = full.model ? fitTagCorrection({ ...full, model: full.model }, inp, t.with) : null;
+    // The probe's columns sit after the buckets of the specs before it.
+    let first = 1;
+    for (const s of t.with) { if (s === t.probe) break; first += s.buckets.length; }
     const effects: Record<string, number> = {};
-    spec.buckets.forEach((b, i) => { effects[b] = corr ? corr.model[i + 1] : 0; });
-    out.push({ column: spec.column, label: spec.label, baseLoss: baseLoss / n, withLoss: withLoss / n, effects, improves: withLoss < baseLoss, foldsBetter, foldsRun });
+    t.probe.buckets.forEach((b, i) => { effects[b] = corr ? corr.model[first + i] : 0; });
+    out.push({ column: t.column, label: t.label, baseLoss: baseLoss / n, withLoss: withLoss / n, effects, improves: withLoss < baseLoss, foldsBetter, foldsRun });
   }
   return out;
 }
@@ -504,7 +538,9 @@ export function heldOutTagTest<T extends Row>(
   buildBase: (rows: readonly T[]) => FittedDifficulty<T>,
 ): TagTestResult[] {
   const ready = new Set(tagReadiness(key, inp, prospectOf).filter((r) => r.testable).map((r) => r.column));
-  return heldOutSpecTests(DIFFICULTY_TAGS[key].filter((s) => ready.has(s.column)), inp, prospectOf, buildBase);
+  const tests = DIFFICULTY_TAGS[key].filter((s) => ready.has(s.column))
+    .map((spec) => ({ column: spec.column, label: spec.label, base: [], with: [spec], probe: spec }));
+  return heldOutSpecTests(tests, inp, prospectOf, buildBase);
 }
 
 // ── Sub-route readiness and test ─────────────────────────────────────────
@@ -573,16 +609,29 @@ export function subRouteReadiness<T extends Row>(
   }).sort((x, y) => y.reps - x.reps || x.id.localeCompare(y.id));
 }
 
-/** Each testable sub-route's held-out test, alone against the rest of its family. `column` is its id. */
+/**
+ * Each testable sub-route's held-out test: what it adds on top of the
+ * sub-routes already switched on in its family (2026-11-10: a Nine tested
+ * alone against the rest of the nines just re-found Love of the Game, which
+ * the rest held). With none on in the family, against today's model. An
+ * already-on sub-route is tested against its family's others. `column` is
+ * its id.
+ */
 export function heldOutSubRouteTests<T extends Row>(
   key: CorrectionKey,
   inp: CorrectionInputs<T>,
   prospectOf: (row: T) => string | undefined,
   buildBase: (rows: readonly T[]) => FittedDifficulty<T>,
   ready: readonly SubRouteReadiness[] = subRouteReadiness(key, inp, prospectOf),
+  enabled: readonly SubRouteId[] = ENABLED_SUB_ROUTES[key],
 ): TagTestResult[] {
-  const specs = ready.filter((r) => r.testable).map((r) => ({ ...subRouteSpecs([r.id])[0], column: r.id, label: r.label }));
-  return heldOutSpecTests(specs, inp, prospectOf, buildBase);
+  const tests = ready.filter((r) => r.testable).map((r) => {
+    const family = r.id.split(":")[0];
+    const others = enabled.filter((id) => id !== r.id && id.split(":")[0] === family);
+    const withSpecs = subRouteSpecs([...others, r.id]);
+    return { column: r.id, label: r.label, base: subRouteSpecs(others), with: withSpecs, probe: withSpecs[0] };
+  });
+  return heldOutSpecTests(tests, inp, prospectOf, buildBase);
 }
 
 // ── Garbage time ─────────────────────────────────────────────────────────

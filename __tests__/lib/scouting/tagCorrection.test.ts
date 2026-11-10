@@ -200,8 +200,8 @@ const rFitted = (rows: readonly R[]) => fitFromPlays([...rows], RDESIGN, rOutcom
 const LOTG = "nine:love_of_the_game" as const;
 
 describe("sub-routes", () => {
-  it("are switched on one at a time: Love of the Game for WR SAE and TE-SAER (2026-11-10)", () => {
-    expect(ENABLED_SUB_ROUTES).toEqual({ qb_aae: [], rb_srae: [], te_saeb: [], wr_sae: [LOTG], te_saer: [LOTG] });
+  it("are switched on one at a time: Love of the Game for WR SAE and TE-SAER, and TE's flat split (2026-11-10)", () => {
+    expect(ENABLED_SUB_ROUTES).toEqual({ qb_aae: [], rb_srae: [], te_saeb: [], wr_sae: [LOTG], te_saer: [LOTG, "flat:true_flat", "flat:quick_out"] });
     expect(enabledSpecs("wr_sae").map((s) => s.column)).toEqual(["double_coverage", "sub_route:nine"]);
     expect(enabledSpecs("wr_sae", undefined, []).map((s) => s.column)).toEqual(["double_coverage"]);
     expect(subRouteLabel(LOTG)).toBe("Nine: Love of the game");
@@ -284,6 +284,20 @@ describe("sub-routes", () => {
     const same = routes({ prospects: 20, perProspect: 90, lotgRate: 0.6, seed: 9 });
     const u = heldOutSubRouteTests("wr_sae", { rows: same, outcome: rOutcome, tagged: rTagged }, (x) => x.pid, rFitted).find((x) => x.column === LOTG)!;
     expect(u.withLoss).toBeGreaterThanOrEqual(u.baseLoss - 5e-4);
+  });
+
+  it("test a sub-route on top of what's already on in its family, so it can't re-find a switched-on one", () => {
+    const big = routes({ prospects: 20, perProspect: 90 });
+    const inp = { rows: big, outcome: rOutcome, tagged: rTagged };
+    const nineOf = (enabled: readonly `${string}:${string}`[]) =>
+      heldOutSubRouteTests("wr_sae", inp, (x) => x.pid, rFitted, undefined, enabled).find((x) => x.column === "nine:nine")!;
+    // Alone, "Nine" vs the rest of the nines just finds Love of the Game in the rest.
+    const alone = nineOf([]);
+    expect(alone.improves).toBe(true);
+    // On top of Love of the Game it adds nothing: the real nines are the whole rest.
+    const onTop = nineOf([LOTG]);
+    expect(Math.abs(onTop.baseLoss - onTop.withLoss)).toBeLessThan((alone.baseLoss - alone.withLoss) / 10);
+    expect(onTop.effects).toHaveProperty("love_of_the_game");
   });
 });
 
