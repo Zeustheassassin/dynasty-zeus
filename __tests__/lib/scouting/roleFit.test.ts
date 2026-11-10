@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildRoleFit, scoreBucket, skillFeature, usageFeature, inverseUsageFeature, contrastFeature, shrinkAE,
   roleLabel, roleFitTooltip, matchTooltip, matchFor, aeOf, mergeAESums,
-  ELITE_SIZE_SHARE, NEAR_TIE, VERSATILE_PCT, FALLBACK_LINE, LEVELED, levelRuleText, noLevelReached, versatileRuleText, hasVersatile, ROLES,
+  ELITE_SIZE_SHARE, NEAR_TIE, VERSATILE_PCT, FALLBACK_LINE, LEVELED, levelRuleText, noLevelReached, versatileRuleText, versatileLeadText, hasVersatile, ROLES,
   ALL_AROUND_LINE, standAloneRuleText,
   type BucketRecipe, type FeatureSet, type Feature, type RolePos,
 } from "@/lib/scouting/roleFit";
@@ -144,6 +144,33 @@ describe("buildRoleFit", () => {
     expect(roleFitTooltip(fit({ x: skill(0.65), z: skill(0.66), slot: skill(0.4), g: skill(0.3) }))).toContain("Versatile: above 60% at both X and Z");
   });
 
+  it("leads with the higher role above 60% at two of X, Z and Slot: X > Z > Slot (the user, 2026-11-09)", () => {
+    // X and Z: X leads though Z reads higher, and Z follows.
+    const xz = fit({ x: skill(0.72), z: skill(0.78), slot: skill(0.4), g: skill(0.3) });
+    expect(xz.best).toBe("x");
+    expect(roleLabel(xz)).toBe("X / Z");
+    expect(xz.versatile).toBe(true);
+    expect(xz.leadNote).toBe("X leads over Z 78%: above 60% at X and Z (X > Z > Slot)");
+    expect(roleFitTooltip(xz)).toContain(xz.leadNote);
+    // Z and Slot: Z leads.
+    expect(roleLabel(fit({ x: skill(0.4), z: skill(0.62), slot: skill(0.75), g: skill(0.3) }))).toBe("Z / Slot");
+    // Already led by the higher role: as it was.
+    const z = fit({ x: skill(0.4), z: skill(0.8), slot: skill(0.62), g: skill(0.3) });
+    expect(roleLabel(z)).toBe("Z");
+    expect(z.leadNote).toBeUndefined();
+    // 60 isn't above 60, and an unproven X doesn't count.
+    expect(fit({ x: skill(0.6), z: skill(0.78), slot: skill(0.4), g: skill(0.3) }).best).toBe("z");
+    const unproven = buildRoleFit({
+      pos: "WR",
+      recipes: recipes.map((r) => (r.role === "x" ? { ...r, requires: { feature: "x", minN: 10, why: "needs 10 reps" } } : r)),
+      features: { x: { ...skill(0.72), n: 3 }, z: skill(0.78), slot: skill(0.4), g: skill(0.3) },
+      heightIn: null, weightLb: null, sample: { n: 150, unit: "routes" }, confidenceAt: { medium: 100, high: 200 },
+    });
+    expect(unproven.best).toBe("z");
+    expect(versatileLeadText("WR")).toBe("Above 60% at two of X, Z and Slot (proven), he leads with the higher role: X > Z > Slot.");
+    expect(versatileLeadText("RB")).toBeNull();
+  });
+
   // One recipe per role, one feature each, for any position.
   const fitAt = (pos: RolePos, fits: number[]) => buildRoleFit({
     pos,
@@ -235,7 +262,9 @@ describe("buildRoleFit", () => {
   });
 
   it("treats X and Z as one level: a near tie goes to the higher match, and either beats Slot", () => {
-    expect(fit({ x: skill(0.76), z: skill(0.8), slot: skill(0.5), g: skill(0.3) }).best).toBe("z");
+    // Under the lead line (60) at one of them: the higher match. Above it at
+    // both, X leads (VERSATILE_LEADS, tested above).
+    expect(fit({ x: skill(0.56), z: skill(0.6), slot: skill(0.5), g: skill(0.3) }).best).toBe("z");
     expect(roleLabel(fit({ x: skill(0.8), z: skill(0.77), slot: skill(0.5), g: skill(0.3) }))).toBe("X / Z");
     expect(fit({ x: skill(0.5), z: skill(0.76), slot: skill(0.8), g: skill(0.3) }).best).toBe("z");
   });

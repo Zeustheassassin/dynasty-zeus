@@ -18,7 +18,7 @@ import type { ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerg
 import { HEADLINE_LABEL, type HeadlineKey, type MetricContext } from "../../lib/scouting/contextGrading";
 import { SEASON_DECAY } from "../../lib/scouting/seasonWeight";
 import { POS_COLOR } from "../../lib/uiTheme";
-import { levelRuleText, matchFor, noLevelReached, roleFitTooltip, roleLabel, roleTagRuleText, standAloneRuleText, versatileRuleText, type RoleFit } from "../../lib/scouting/roleFit";
+import { levelRuleText, matchFor, noLevelReached, roleFitTooltip, roleLabel, roleTagRuleText, standAloneRuleText, versatileLeadText, versatileRuleText, type RoleFit } from "../../lib/scouting/roleFit";
 import {
   parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange,
   GRADE_MIN, GRADE_MAX, GRADE_TIERS, type GradeField,
@@ -764,6 +764,7 @@ export default function BigBoard({
   const roleTooltip =
     "Role: the best-case NFL role from the charting plus height and weight (Analysis → Role Fit has every role's match %). " +
     "WR / TE / QB: two roles within 5 points read \"A / B\", the higher-ceiling one first. \"?\" = not proven yet (an X needs 10+ in-app press reps). " +
+    `WR: ${versatileLeadText("WR")} ` +
     `TE: ${standAloneRuleText("TE")} ` +
     `RB: ${levelRuleText("RB")} ${roleTagRuleText("RB")} ` +
     `V = Versatile: a WR ${versatileRuleText("WR")}, a TE ${versatileRuleText("TE")} (none for RB or QB: Three-down, Creator and Dual-threat already mean all-round). Greyed = little tape, or not proven yet. Feeds none of the scores.`;

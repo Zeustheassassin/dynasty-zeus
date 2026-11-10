@@ -682,24 +682,30 @@ function releaseByProspect(tagRows: readonly ProspectGameRouteTagCellsRow[]): { 
   return { byProspect, league: n > 0 ? won / n : null };
 }
 
-// PFF over each WR's charted games, and pooled over every WR's, for the
-// Gadget bucket (roleFitWR.ts): yards after the catch and missed tackles
-// forced, each over catches.
+// PFF over each WR's charted games, and pooled over every WR's: yards after
+// the catch and missed tackles forced, each over catches, for the Gadget
+// bucket; contested catches over contested targets, for X's 50/50 balls
+// (roleFitWR.ts).
 function wrPffRates(prospects: readonly Prospect[], pff: ReadonlyMap<string, PffTotals> | undefined) {
-  const rate = (hitsOf: (s: PffTotals["sum"]) => number | null) => {
+  type Sum = PffTotals["sum"];
+  const rate = (hitsOf: (s: Sum) => number | null, nOf: (s: Sum) => number | null = (s) => s.receptions) => {
     const mine = new Map<string, Rate>();
     const pool: Rate = { hits: 0, n: 0 };
     for (const p of prospects) {
       if (p.position !== "WR") continue;
       const s = pff?.get(p.id)?.sum;
-      const hits = s ? hitsOf(s) : null, n = s?.receptions ?? null;
+      const hits = s ? hitsOf(s) : null, n = s ? nOf(s) : null;
       if (hits == null || !n) continue;
       mine.set(p.id, { hits, n });
       pool.hits += hits; pool.n += n;
     }
     return { mine, pool: pool.n > 0 ? pool : null };
   };
-  return { yac: rate((s) => s.yac), mtf: rate((s) => s.rec_mtf) };
+  return {
+    yac: rate((s) => s.yac),
+    mtf: rate((s) => s.rec_mtf),
+    contested: rate((s) => s.contested_receptions, (s) => s.contested_targets),
+  };
 }
 
 // Each WR's tagged double-coverage routes (migration 072): routes, open, and
@@ -877,6 +883,8 @@ export function buildProspectsWithStats(
             skill: wrRoleSkill(cells, { ...wrModel, model: wrModel.model }),
             release: release.byProspect.get(p.id) ?? null,
             leagueRelease: release.league,
+            pffContested: wrPff.contested.mine.get(p.id) ?? null,
+            leaguePffContested: wrPff.contested.pool,
             pffYac: wrPff.yac.mine.get(p.id) ?? null,
             leaguePffYac: wrPff.yac.pool,
             pffYacMtf: wrPff.mtf.mine.get(p.id) ?? null,

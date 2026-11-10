@@ -3,14 +3,26 @@
 // features and recipes.
 //
 //   X:      excels vs press and man; slants, nines, comebacks, digs, corners,
-//           posts. Press is what makes an X ("they face press all the time"),
+//           posts, and curls and outs a little less (the user, 2026-11-09);
+//           or wins 50/50 balls instead (PFF contested catch rate,
+//           2026-11-09): an elite separator and a contested-catch merchant are
+//           both Xs, so the better of the two counts.
+//           Press is what makes an X ("they face press all the time"),
 //           so it's half the recipe, and an X isn't proven without
 //           X_PRESS_REPS in-app press reps: until then he can still top out as
 //           "X?", but X never wins a near tie.
 //   Z:      the flanker (labeled Y until 2026-11-09). Good across most of the
-//           route tree; better vs man and zone than vs press. That contrast
-//           is what splits a Z from an X. The same level as X: an X / Z near
-//           tie goes to the higher match.
+//           route tree, weighted toward the intermediate and deep routes; good
+//           vs either coverage, a slight edge vs man. Press doesn't count for
+//           or against him (the user, 2026-11-09: "You can still be good at
+//           Press and still be Z if you dont meet the requirements for X"; the
+//           role is his best one, not a verdict on press). Until 2026-11-09 a
+//           quarter of Z was man/zone over press, which cut a Z who won vs
+//           press. X vs Z now rests on X's press weight, the near tie (the
+//           same level, so a tie goes to the higher match, but an unproven X
+//           never wins one) and the lead rule: above 60% at two of X, Z and
+//           Slot, he leads with the higher role, X > Z > Slot (the user,
+//           2026-11-09; VERSATILE_LEADS in roleFit.ts).
 //   Slot:   a step below X and Z, more limited to the short game: strong vs
 //           zone on slants, curls and flats; decent vs man; weak vs press is
 //           fine (press isn't in the recipe).
@@ -53,13 +65,21 @@
 // to take over the missed tackles once enough WRs have it. With no PFF catches
 // both read as average ("no catches yet").
 //
+// X's 50/50 balls are PFF's contested catch rate (the user's call, 2026-11-09):
+// contested catches over contested targets, summed over his charted games
+// linked to PFF, against the pool of every charted WR's, like the YAC reads.
+// The user's own charted contested catches stay in the AE Score (CC%); the
+// buckets feed no score, so nothing counts twice. The back-shoulder fade
+// sub-route is too thin to read on its own (4 charted on 2026-11-09). With no
+// PFF contested targets it reads as average.
+//
 // X also reads his release vs press (tape-grading expansion, Stage 4): the
 // share of tagged press reps where he won the release, once he has
 // X_RELEASE_REPS of them. It's an extra ingredient on top of the others, so a
 // receiver without the reps keeps exactly his old X%.
 import type { LinedUp } from "../types";
 import {
-  aeOf, buildRoleFit, contrastFeature, mergeAESums, rateFeature, shrinkAE, skillFeature, usageFeature, NO_RATE,
+  aeOf, buildRoleFit, emptyAESum, rateFeature, shrinkAE, signed, skillFeature, usageFeature, NO_RATE,
   type AESum, type BucketRecipe, type Feature, type FeatureSet, type Rate, type RoleFit,
 } from "./roleFit";
 
@@ -79,6 +99,9 @@ export interface WRRoleInputs {
   /** Tagged press reps and how many releases he won, and the pool's win rate (0–1). */
   release?: { won: number; n: number } | null;
   leagueRelease?: number | null;
+  /** PFF contested catches over contested targets, over his charted games, and the pool's. */
+  pffContested?: Rate | null;
+  leaguePffContested?: Rate | null;
   /** PFF yards after the catch over catches, over his charted games, and the pool's. */
   pffYac?: Rate | null;
   leaguePffYac?: Rate | null;
@@ -114,6 +137,9 @@ const ROUTE_PRIOR = 15;
 const COVERAGE_PRIOR = 40;
 // Pseudo-catches for the YAC features.
 const CATCH_PRIOR = 20;
+// Pseudo-targets for contested catches (a WR had 7 PFF contested targets over
+// his charted games at the median on 2026-11-09, 13 at the top tenth).
+const CONTESTED_PRIOR = 10;
 const SCALE = {
   slotRoutes: 4,
   xRoutes: 4.2,
@@ -121,7 +147,12 @@ const SCALE = {
   zone: 4.5,
   man: 3.3,
   press: 4,
-  manZoneOverPress: 4.3,
+  // PFF contested catch rate, pts over the pool's (2026-11-09: 77 WRs with a
+  // role and PFF contested targets, 54.6%; it tracks the user's charted rate
+  // at r = 0.89). The Z tree's weighting (2026-11-09)
+  // left `tree` at 2: its best tenth still reads 0.80. X routes' curls and outs
+  // left `xRoutes` at 4.2 (its spread moved 5%).
+  contested: 7.8,
   // YAC, set on the 2026-11-09 data (94 charted WRs with PFF catches, pool
   // 5.70 yds and 0.171 missed tackles per catch): yards after the catch per
   // catch over the pool's, in hundredths of a yard, and missed tackles per 100
@@ -134,39 +165,54 @@ const SCALE = {
   release: 10,
 } as const;
 
-const SLOT_ROUTES = ["slant", "curl", "flat"];
-const X_ROUTES = ["slant", "nine", "comeback", "dig", "corner", "post"];
-// "Most of the route tree": every route but screens and other.
-const TREE_ROUTES = ["nine", "post", "dig", "curl", "slant", "flat", "comeback", "out", "corner"];
+// Each group's routes and what one rep of each counts for.
+const SLOT_ROUTES: Readonly<Record<string, number>> = { slant: 1, curl: 1, flat: 1 };
+// X: curls and outs a little less than the rest (the user, 2026-11-09).
+const X_ROUTES: Readonly<Record<string, number>> = { slant: 1, nine: 1, comeback: 1, dig: 1, corner: 1, post: 1, curl: 0.75, out: 0.75 };
+// "Most of the route tree": every route but screens and other, weighted toward
+// the intermediate and deep routes (the user, 2026-11-09): slants, flats and
+// outs count half.
+const TREE_ROUTES: Readonly<Record<string, number>> = { nine: 1, post: 1, dig: 1, curl: 1, comeback: 1, corner: 1, slant: 0.5, flat: 0.5, out: 0.5 };
 
 const ROUTE_NAMES: Record<string, string> = {
   nine: "go", post: "post", dig: "dig", curl: "curl", slant: "slant", screen: "screen",
   flat: "flat", comeback: "comeback", out: "out", corner: "corner",
 };
 
-const s = (sum: AESum) => ({ ae: aeOf(sum), n: sum.n });
-const group = (skill: WRRoleSkill, routes: string[]) => mergeAESums(routes.map((r) => skill.byRoute[r]));
-
-function groupFeature(label: string, skill: WRRoleSkill, routes: string[], scale: number): Feature {
-  const sum = group(skill, routes);
-  return skillFeature(label, aeOf(sum), sum.n, GROUP_PRIOR, scale, "routes");
+// His AE over a group of routes, each route's reps counted at its weight (so
+// the sample discount reads the weighted reps too); the display counts real
+// routes.
+function groupFeature(label: string, skill: WRRoleSkill, routes: Readonly<Record<string, number>>, scale: number): Feature {
+  const sum = emptyAESum();
+  let routesRun = 0;
+  for (const [r, k] of Object.entries(routes)) {
+    const s = skill.byRoute[r];
+    if (!s) continue;
+    sum.n += k * s.n; sum.w += k * s.w; sum.actual += k * s.actual; sum.expected += k * s.expected;
+    routesRun += s.n;
+  }
+  const ae = aeOf(sum);
+  const f = skillFeature(label, ae, sum.n, GROUP_PRIOR, scale, "routes");
+  return ae == null ? f : { ...f, display: `${signed(ae)} pts on ${routesRun} routes`, n: routesRun };
 }
 
-// Breadth: his sample-discounted AE on each route of the tree, averaged, so a
-// route he never runs counts as average and breadth needs reps across the tree.
-// "Winning" in the display = at least +2 pts after the discount.
+// Breadth: his sample-discounted AE on each route of the tree, averaged at the
+// route weights, so a route he never runs counts as average and breadth needs
+// reps across the tree. "Winning" in the display = at least +2 pts after the
+// discount.
 function treeFeature(skill: WRRoleSkill): Feature {
-  const shrunk = TREE_ROUTES.map((r) => {
+  const tree = Object.entries(TREE_ROUTES);
+  const shrunk = tree.map(([r]) => {
     const sum = skill.byRoute[r];
     return shrinkAE(aeOf(sum), sum?.n ?? 0, ROUTE_PRIOR);
   });
-  const mean = shrunk.reduce((a, b) => a + b, 0) / shrunk.length;
-  const winning = TREE_ROUTES.filter((_, i) => shrunk[i] >= 2).map((r) => ROUTE_NAMES[r]);
+  const mean = tree.reduce((a, [, k], i) => a + k * shrunk[i], 0) / tree.reduce((a, [, k]) => a + k, 0);
+  const winning = tree.filter((_, i) => shrunk[i] >= 2).map(([r]) => ROUTE_NAMES[r]);
   return {
-    label: "Route tree",
+    label: "Route tree (intermediate/deep count most)",
     kind: "skill",
     fit: 1 / (1 + Math.exp(-mean / SCALE.tree)),
-    display: winning.length ? `winning on ${winning.length} of ${TREE_ROUTES.length} (${winning.join(", ")})` : `winning on none of ${TREE_ROUTES.length}`,
+    display: winning.length ? `winning on ${winning.length} of ${tree.length} (${winning.join(", ")})` : `winning on none of ${tree.length}`,
   };
 }
 
@@ -175,20 +221,32 @@ export function wrFeatures(inp: WRRoleInputs): FeatureSet {
   const man = skillFeature("vs man", aeOf(skill.man), skill.man.n, COVERAGE_PRIOR, SCALE.man, "routes");
   const f: FeatureSet = {
     slotRoutes: groupFeature("Slants/curls/flats", skill, SLOT_ROUTES, SCALE.slotRoutes),
-    xRoutes: groupFeature("X routes (slant/go/comeback/dig/corner/post)", skill, X_ROUTES, SCALE.xRoutes),
+    xRoutes: groupFeature("X routes (slant/go/comeback/dig/corner/post; curl/out a little less)", skill, X_ROUTES, SCALE.xRoutes),
     tree: treeFeature(skill),
+    contested: rateFeature("50/50 balls (PFF contested catches)", inp.pffContested ?? NO_RATE, inp.leaguePffContested ?? NO_RATE, CONTESTED_PRIOR, SCALE.contested, "contested targets"),
     zone: skillFeature("vs zone", aeOf(skill.zone), skill.zone.n, COVERAGE_PRIOR, SCALE.zone, "routes"),
     man,
     yac: rateFeature("Yards after the catch (PFF)", inp.pffYac ?? NO_RATE, inp.leaguePffYac ?? NO_RATE, CATCH_PRIOR, SCALE.yac, "catches", false, " yds after the catch per catch"),
     yacMtf: rateFeature("Missed tackles after the catch (PFF)", inp.pffYacMtf ?? NO_RATE, inp.leaguePffYacMtf ?? NO_RATE, CATCH_PRIOR, SCALE.yacMtf, "catches", false, " per catch"),
   };
+  // Two ways to win as an X (the user, 2026-11-09): "X recievers who are elite
+  // seperators and then there are X recievers who are pure sacrificial
+  // contested catch merchants … Both Sodas in the end". The better of the two
+  // counts, so a separator isn't docked for his 50/50 balls or the reverse.
+  const xRoutes = f.xRoutes!, contested = f.contested!;
+  const bySep = xRoutes.fit >= contested.fit;
+  f.xWin = {
+    label: "Wins as an X (separating on X routes or 50/50 balls, the better)",
+    kind: "skill",
+    fit: Math.max(xRoutes.fit, contested.fit),
+    display: bySep ? `separating, ${xRoutes.display} (50/50: ${contested.display})` : `50/50 balls, ${contested.display} (separating: ${xRoutes.display})`,
+    n: bySep ? xRoutes.n : contested.n,
+  };
   if (skill.press.n > 0) {
     f.press = skillFeature("vs press (in-app)", aeOf(skill.press), skill.press.n, COVERAGE_PRIOR, SCALE.press, "in-app routes");
-    f.manZoneOverPress = contrastFeature("Man/zone over press", s(mergeAESums([skill.man, skill.zone])), s(skill.press), COVERAGE_PRIOR, SCALE.manZoneOverPress);
   } else {
     // Unknown, not average: no better than average, and no better than his
-    // man (an imported man rep can be a press rep). Z's press contrast is left
-    // out: it can't be read either.
+    // man (an imported man rep can be a press rep).
     f.press = { label: "vs press", kind: "skill", fit: Math.min(0.5, man.fit), display: "untested (no in-app press reps)", n: 0 };
   }
   const rel = inp.release;
@@ -229,8 +287,9 @@ export const WR_RECIPES: readonly BucketRecipe[] = [
     role: "x",
     ingredients: [
       { feature: "press", weight: 0.5, core: true },
-      { feature: "man", weight: 0.2, core: true },
-      { feature: "xRoutes", weight: 0.2 },
+      { feature: "man", weight: 0.15, core: true },
+      // The better of separating on the X routes and 50/50 balls.
+      { feature: "xWin", weight: 0.25 },
       { feature: "xShare", weight: ALIGN_WEIGHT },
       // Only with X_RELEASE_REPS tagged press reps (see the header).
       { feature: "release", weight: 0.2, core: true },
@@ -241,10 +300,10 @@ export const WR_RECIPES: readonly BucketRecipe[] = [
   {
     role: "z",
     ingredients: [
-      { feature: "tree", weight: 0.35, core: true },
-      { feature: "man", weight: 0.15, core: true },
-      { feature: "zone", weight: 0.15 },
-      { feature: "manZoneOverPress", weight: 0.25 },
+      { feature: "tree", weight: 0.5, core: true },
+      // A slight edge vs man (the user, 2026-11-09).
+      { feature: "man", weight: 0.22, core: true },
+      { feature: "zone", weight: 0.18 },
       { feature: "zShare", weight: ALIGN_WEIGHT },
     ],
     size: { minHeightIn: 70, minWeightLb: 180 },

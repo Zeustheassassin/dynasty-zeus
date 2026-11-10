@@ -97,8 +97,8 @@ export interface RoleInfo {
 export const ALL_AROUND_LINE = 65;
 export const ROLES: Record<RolePos, readonly RoleInfo[]> = {
   WR: [
-    { key: "x",      label: "X",      short: "X",      tier: 0, description: "Excels vs press and man on slants, nines, comebacks, digs, corners and posts. Needs 10+ in-app press reps to be proven (X? until then). Reads release vs press too once he has 10+ tagged press reps." },
-    { key: "z",      label: "Z",      short: "Z",      tier: 0, description: "The flanker, outside off the line: good across most of the route tree; better vs man and zone than vs press. Same level as X." },
+    { key: "x",      label: "X",      short: "X",      tier: 0, description: "Excels vs press and man, and wins either by separating on slants, nines, comebacks, digs, corners and posts (curls and outs count a little less) or on 50/50 balls (PFF contested catch rate over his charted games), whichever he's better at: a separator isn't docked for his 50/50 balls, or the reverse. Needs 10+ in-app press reps to be proven (X? until then). Reads release vs press too once he has 10+ tagged press reps." },
+    { key: "z",      label: "Z",      short: "Z",      tier: 0, description: "The flanker, outside off the line: good across most of the route tree, the intermediate and deep routes counting most (slants, flats and outs count half); good vs man and zone, a slight edge vs man. Press doesn't count for or against him: a press winner who isn't the better X can still be a strong Z. Same level as X." },
     { key: "slot",   label: "Slot",   short: "Slot",   tier: 1, description: "More limited to the short game: strong vs zone on slants, curls and flats; decent vs man; press doesn't count against him." },
     { key: "gadget", label: "Gadget", short: "Gadget", tier: 2, fallback: true, fallbackRule: { under: 50, atLeast: 50 }, description: "Schemed touches and yards after the catch: named only when he isn't good enough for X, Z or Slot (all under 50%) and his YAC reads 50%+. Its % is mostly his yards after the catch and missed tackles per catch (PFF), with a little for screens, flats and backfield snaps." },
     { key: "special_teams", label: "Special Teams", short: "ST", tier: 3, fallback: true, remainder: true, description: "Under 50% at every role, Gadget included: not good enough for X, Z or Slot, and no YAC to be a Gadget. Its % is 100 minus his best match anywhere else." },
@@ -240,6 +240,28 @@ export const VERSATILE_RULES: Partial<Record<RolePos, VersatileRule | null>> = {
 /** Whether the position uses Versatile at all. */
 export const hasVersatile = (pos: RolePos) => VERSATILE_RULES[pos] !== null;
 
+// Above `above` at two or more of these roles (each proven), he leads with the
+// first of them in this order, whichever reads higher; the role he'd otherwise
+// have led with follows as the hybrid. WR: X > Z > Slot (the user, 2026-11-09:
+// "if the player is versatile X and Z it should lead with X if hes versatile Z
+// and Slot it should lead with Z etc."), after Jeremiah Smith read Z 78 / X 72
+// ("the prototypical X … Hes Big hes fast he has good success rates accross
+// the board"): being good across the board lifts Z, half of which is the route
+// tree, so a do-everything receiver read Z whenever his tree read higher than
+// his press. The 60 is the WR Versatile line. Near-tie positions only.
+export interface VersatileLead { roles: readonly RoleKey[]; above: number }
+export const VERSATILE_LEADS: Partial<Record<RolePos, VersatileLead>> = {
+  WR: { roles: ["x", "z", "slot"], above: 60 },
+};
+
+/** The lead rule in words, for tooltips; null where there's none. */
+export function versatileLeadText(pos: RolePos): string | null {
+  const lead = VERSATILE_LEADS[pos];
+  if (!lead) return null;
+  const names = lead.roles.map((k) => roleInfo(k).label);
+  return `Above ${lead.above}% at two of ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} (proven), he leads with the higher role: ${names.join(" > ")}.`;
+}
+
 /** What Versatile means at a position, for tooltips. */
 export function versatileRuleText(pos: RolePos): string {
   const rule = VERSATILE_RULES[pos];
@@ -356,6 +378,8 @@ export interface RoleFit {
   features: FeatureSet;
   /** Style tags after the role (RB Inside / Outside); absent or empty when none. */
   tags?: RoleTag[];
+  /** Why the headline isn't the role he'd otherwise lead with, when VERSATILE_LEADS put it first. */
+  leadNote?: string;
 }
 
 /** Running above-expected sums over some reps (weights = season weights). */
@@ -632,7 +656,22 @@ export function buildRoleFit(inp: FitInputs): RoleFit {
     return top ? { ...m, pct: 100 - top.pct, drivers: [`Best other role: ${roleInfo(top.role).label} ${top.pct}%`] } : m;
   });
   const lines = LEVELED[inp.pos];
-  const [best, ...also] = lines ? pickByLevel(order, matches, lines) : pickByNearTie(order, matches);
+  let [best, ...also] = lines ? pickByLevel(order, matches, lines) : pickByNearTie(order, matches);
+  // Above the lead line at two of the lead roles: the first of them leads,
+  // ahead of the role he'd otherwise lead with (only a lower one in the order).
+  const lead = lines ? undefined : VERSATILE_LEADS[inp.pos];
+  let leadNote: string | undefined;
+  if (lead) {
+    const rank = (k: RoleKey) => lead.roles.indexOf(k);
+    const at = lead.roles.map((k) => matches.find((m) => m.role === k)!).filter((m) => m.proven && !m.unnamed && m.pct > lead.above);
+    if (at.length >= 2 && rank(best.role) > rank(at[0].role)) {
+      const names = at.map((m) => roleInfo(m.role).label);
+      leadNote = `${names[0]} leads over ${roleInfo(best.role).label} ${best.pct}%: above ${lead.above}% at ${listOf(names)} (${lead.roles.map((k) => roleInfo(k).label).join(" > ")})`;
+      also = [best];
+      best = at[0];
+    }
+  }
+  const versatile = isVersatile(inp.pos, matches, best.role);
   const skillOnly = !Object.values(inp.features).some((f) => f?.kind === "usage");
   const n = inp.sample.n;
   return {
@@ -640,7 +679,8 @@ export function buildRoleFit(inp: FitInputs): RoleFit {
     best: best.role,
     also: also.map((m) => m.role),
     matches,
-    versatile: isVersatile(inp.pos, matches, best.role),
+    versatile,
+    ...(leadNote ? { leadNote } : {}),
     usedAs: skillOnly ? null : usedAsRole(inp.recipes, inp.features, order),
     confidence: n >= inp.confidenceAt.high ? "high" : n >= inp.confidenceAt.medium ? "medium" : "low",
     sample: inp.sample,
@@ -694,7 +734,7 @@ export function roleFitTooltip(fit: RoleFit): string {
       ? `Best case: ${named(fit, fit.best)}, equally a ${also[0]}`
       : `Best case: ${named(fit, fit.best)}`;
   const all = [...fit.matches].sort((a, b) => b.pct - a.pct).map((m) => `${named(fit, m.role)} ${m.pct}%`).join(" · ");
-  const lines = [head, all, ...best.drivers];
+  const lines = [head, ...(fit.leadNote ? [fit.leadNote] : []), all, ...best.drivers];
   if (best.sizeNote) lines.push(`Size: ${best.sizeNote} → −${Math.round(best.sizeDrop * 100)}%`);
   for (const t of fit.tags ?? []) lines.push(`${t.label}: ${t.why}`);
   for (const m of fit.matches) if (m.pendingWhy && (m.role === fit.best || fit.also.includes(m.role))) lines.push(`${roleInfo(m.role).label}?: ${m.pendingWhy}`);
