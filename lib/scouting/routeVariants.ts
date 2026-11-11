@@ -83,13 +83,15 @@ export const ROUTE_VARIANTS: Record<RouteType, readonly RouteVariantSpec[]> = {
     { key: "love_of_the_game",   label: "Love of the Game",   short: "LOTG" },
     { key: "sluggo",             label: "Sluggo",             short: "Sluggo" },
     { key: "stop_and_go",        label: "Stop and Go",        short: "Stop & Go" },
+    // Moved here from Other (the user, 2026-11-11), with the plays charted under
+    // Other (migration 095). A double move like Sluggo and Stop and Go.
+    { key: "out_and_up",         label: "Out and Up",         short: "Out & Up" },
   ],
   other: [
     { key: "option",        label: "Option",            short: "Option" },
     { key: "texas",         label: "Texas",             short: "Texas" },
     { key: "wheel",         label: "Wheel",             short: "Wheel" },
     { key: "block_release", label: "Block and Release", short: "Blk & Rel" },
-    { key: "out_and_up",    label: "Out and Up",        short: "Out & Up" },
     { key: "zig",           label: "Zig",               short: "Zig" },
     // QB only (the user, 2026-10-22): a designed scramble, not a receiver's route. Shown as
     // "Scramble Drill" (the user); the key keeps its first name, saved plays use it.

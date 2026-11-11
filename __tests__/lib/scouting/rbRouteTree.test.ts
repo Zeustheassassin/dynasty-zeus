@@ -25,7 +25,9 @@ describe("RB route tree (the user, 2026-10-23)", () => {
     for (const v of ROUTE_VARIANTS.flat) expect(rbBucketFor("flat", v.key)).toBe("flats");
     expect(rbBucketFor("other", "option")).toBe("flats");
     expect(rbBucketFor("other", "block_release")).toBe("flats");
-    for (const v of ["texas", "wheel", "out_and_up", "zig"] as const) expect(rbBucketFor("other", v)).toBe("big_boy_route");
+    for (const v of ["texas", "wheel", "zig"] as const) expect(rbBucketFor("other", v)).toBe("big_boy_route");
+    // Out and Up moved from Other to Nine (2026-11-11, migration 095): same bucket either way.
+    expect(rbBucketFor("nine", "out_and_up")).toBe("big_boy_route");
     // Split out wide, every other route is the hard bucket, whatever its sub-route.
     for (const rt of ["nine", "post", "dig", "slant", "comeback", "out", "corner"] as const) {
       for (const v of ROUTE_VARIANTS[rt]) expect(rbBucketFor(rt, v.key)).toBe("big_boy_route");

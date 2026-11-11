@@ -21,8 +21,8 @@ describe("route sub-routes", () => {
     expect(labels("dig")).toEqual(["Short", "Intermediate", "Deep", "Post Dig"]);
     expect(labels("corner")).toEqual(["Short", "Intermediate", "Deep"]);
     expect(labels("post")).toEqual(["Short", "Intermediate", "Deep", "Post Sit"]);
-    expect(labels("nine")).toEqual(["Nine", "Back Shoulder Fade", "Seam Route", "Love of the Game", "Sluggo", "Stop and Go"]);
-    expect(labels("other")).toEqual(["Option", "Texas", "Wheel", "Block and Release", "Out and Up", "Zig"]);
+    expect(labels("nine")).toEqual(["Nine", "Back Shoulder Fade", "Seam Route", "Love of the Game", "Sluggo", "Stop and Go", "Out and Up"]);
+    expect(labels("other")).toEqual(["Option", "Texas", "Wheel", "Block and Release", "Zig"]);
     // Every other bucket is the same on every board.
     for (const rt of ROUTE_TYPES.filter((r) => r !== "other")) {
       for (const board of ["TE", "QB", "RB"] as const) expect(routeVariantsFor(rt, board)).toEqual(routeVariantsFor(rt, "WR"));
@@ -35,7 +35,7 @@ describe("route sub-routes", () => {
 
   it("offers Scramble Drill under Other on the QB board only", () => {
     const keys = (board: "WR" | "TE" | "QB" | "RB") => routeVariantsFor("other", board).map((v) => v.key);
-    expect(keys("QB")).toEqual(["option", "texas", "wheel", "block_release", "out_and_up", "zig", "called_scramble_drill"]);
+    expect(keys("QB")).toEqual(["option", "texas", "wheel", "block_release", "zig", "called_scramble_drill"]);
     expect(keys("WR")).not.toContain("called_scramble_drill");
     expect(keys("TE")).toEqual(keys("WR"));
     expect(keys("RB")).toEqual(keys("WR"));
@@ -82,20 +82,46 @@ describe("route sub-routes", () => {
   });
 
   it("matches the database's sub-route list (route_variant_options, 074 on) pair for pair", () => {
-    // Every migration's INSERT INTO route_variant_options, so a sub-route
-    // added later in its own migration is read too.
+    // Every migration's INSERT INTO and DELETE FROM route_variant_options, in
+    // order, so a sub-route added (or moved, like Out and Up in 095) later in
+    // its own migration is read too.
     const dir = join(process.cwd(), "supabase/migrations");
     const fromSql = new Set<string>();
     for (const f of readdirSync(dir).filter((x) => x.endsWith(".sql")).sort()) {
       const sql = readFileSync(join(dir, f), "utf8");
-      for (const ins of sql.matchAll(/INSERT INTO public\.route_variant_options[^;]*;/g)) {
-        for (const m of ins[0].matchAll(/\('(\w+)',\s*'(\w+)'\)/g)) fromSql.add(`${m[1]}|${m[2]}`);
+      for (const st of sql.matchAll(/(INSERT INTO|DELETE FROM) public\.route_variant_options[^;]*;/g)) {
+        if (st[1] === "INSERT INTO") {
+          for (const m of st[0].matchAll(/\('(\w+)',\s*'(\w+)'\)/g)) fromSql.add(`${m[1]}|${m[2]}`);
+        } else {
+          const m = st[0].match(/WHERE route_type = '(\w+)' AND route_variant = '(\w+)'/);
+          expect(m, `${f}: a DELETE names its one pair first`).not.toBeNull();
+          fromSql.delete(`${m![1]}|${m![2]}`);
+        }
       }
     }
     const fromCode = new Set(ROUTE_TYPES.flatMap((rt) => ROUTE_VARIANTS[rt].map((v) => `${rt}|${v.key}`)));
     expect([...fromSql].sort()).toEqual([...fromCode].sort());
     expect(fromSql.has("other|zig")).toBe(true);
     expect(fromSql.has("other|called_scramble_drill")).toBe(true);
+    expect(fromSql.has("nine|out_and_up")).toBe(true);
+    expect(fromSql.has("other|out_and_up")).toBe(false);
+  });
+
+  it("moves Out and Up to Nine in 095: the plays first, then the one guarded delete", () => {
+    const sql = readFileSync(join(process.cwd(), "supabase/migrations/095_out_and_up_to_nine.sql"), "utf8");
+    const code = sql.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+    expect(code).not.toMatch(/\b(DROP|TRUNCATE)\b/);
+    // Each play table's Out and Ups move, and only those (no other column changes).
+    for (const [tbl, col] of [["route_plays", "route_type"], ["te_plays", "route_type"], ["qb_plays", "route_type"], ["rb_plays", "route_detail"]]) {
+      expect(code).toMatch(new RegExp(`UPDATE public\\.${tbl}\\s+SET ${col}\\s+= 'nine' WHERE ${col}\\s+= 'other' AND route_variant = 'out_and_up';`));
+    }
+    expect(code.match(/\bUPDATE\b/g)).toHaveLength(4);
+    // The one DELETE: one list row, after the moves, only once no play on any table uses it.
+    expect(code.match(/\bDELETE\b/g)).toHaveLength(1);
+    expect(code.indexOf("INSERT INTO public.route_variant_options")).toBeLessThan(code.indexOf("UPDATE"));
+    expect(code.lastIndexOf("UPDATE")).toBeLessThan(code.indexOf("DELETE"));
+    const del = code.slice(code.indexOf("DELETE"), code.indexOf(";", code.indexOf("DELETE")));
+    for (const tbl of ["route_plays", "te_plays", "qb_plays", "rb_plays"]) expect(del).toContain(`NOT EXISTS (SELECT 1 FROM public.${tbl} `);
   });
 
   it("drops only 073's two CHECKs in 074, after each table's foreign key is on", () => {
