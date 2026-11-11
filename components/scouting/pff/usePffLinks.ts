@@ -12,6 +12,7 @@ import { logger } from "../../../lib/logger";
 import type { PffCandidate, PffGameOption } from "../../../lib/pff/api";
 import { buildPffTotals, currentGameRow, type PffTotals } from "../../../lib/pff/totals";
 import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
+import { chartedSeasonRows } from "../../../lib/scouting/middleUsage";
 import { supabase } from "../../../lib/supabaseclient";
 import type { PffGameMatchStatus, PffPlayerMatchStatus } from "../../../lib/types";
 import {
@@ -181,7 +182,9 @@ export function usePffLinks(onStatsChanged?: () => void, onImported?: (ids: stri
     if (cancelRef.current) return;
     const fresh = await reload();
     const qbIds = new Set(ids);
-    const seasons = [...new Set((fresh?.pff.depth ?? []).filter((r) => qbIds.has(r.prospect_id)).map((r) => r.season))].sort((a, b) => a - b);
+    // Only seasons he was charted in (chartedSeasonRows): older stored rows are unread.
+    const charted = chartedSeasonRows((fresh?.pff.depth ?? []).filter((r) => qbIds.has(r.prospect_id)), fresh?.games ?? []);
+    const seasons = [...new Set(charted.map((r) => r.season))].sort((a, b) => a - b);
     if (seasons.length === 0) return;
     let failure: string | null = null;
     try {

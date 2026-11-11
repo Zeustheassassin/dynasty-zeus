@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   MIDDLE_BONUS_FULL, MIDDLE_BONUS_START, MIDDLE_MAX, MIDDLE_PENALTY_FULL, MIDDLE_PENALTY_START, MIDDLE_POOL_SHARE,
-  MIDDLE_SHRINK_ATTEMPTS, depthSeasonsFor, middleAdjustment, middleUsageByProspect, seasonMiddle, zoneAttemptsFrom,
+  MIDDLE_SHRINK_ATTEMPTS, chartedSeasonRows, depthSeasonsFor, middleAdjustment, middleUsageByProspect, seasonMiddle, zoneAttemptsFrom,
   type MiddleUsage, type PffSeasonDepthRow,
 } from "@/lib/scouting/middleUsage";
 import { SEASON_DECAY } from "@/lib/scouting/seasonWeight";
@@ -87,16 +87,26 @@ describe("middle of the field adjustment (the user's picks, 2026-11-10)", () => 
   });
 });
 
-describe("depthSeasonsFor", () => {
-  it("reads the five seasons before his class, never past the season under way", () => {
-    expect(depthSeasonsFor(2027, [2025], new Date("2026-11-10T00:00:00Z"))).toEqual([2022, 2023, 2024, 2025, 2026]);
-    expect(depthSeasonsFor(2028, [2025], new Date("2026-11-10T00:00:00Z"))).toEqual([2023, 2024, 2025, 2026]);
+describe("depthSeasonsFor (charted seasons only, the user's call 2026-11-10)", () => {
+  it("reads only the seasons he was charted in, once each, never past his class or the season under way", () => {
+    const now = new Date("2026-11-10T00:00:00Z");
+    expect(depthSeasonsFor(2027, [2026, 2025, 2025, 2026], now)).toEqual([2025, 2026]);
+    expect(depthSeasonsFor(2026, [2025, 2026], now)).toEqual([2025]); // nothing past his class
     // Before August the season under way is last year's.
-    expect(depthSeasonsFor(2028, [], new Date("2026-05-01T00:00:00Z"))).toEqual([2023, 2024, 2025]);
-    expect(depthSeasonsFor(2026, [2025], new Date("2026-11-10T00:00:00Z"))).toEqual([2021, 2022, 2023, 2024, 2025]);
+    expect(depthSeasonsFor(2028, [2025, 2026], new Date("2026-05-01T00:00:00Z"))).toEqual([2025]);
+    expect(depthSeasonsFor(null, [2024, 2025], now)).toEqual([2024, 2025]);
+    expect(depthSeasonsFor(2027, [], now)).toEqual([]);
   });
+});
 
-  it("without a class, from a season before his first charted one", () => {
-    expect(depthSeasonsFor(null, [2025, 2024], new Date("2026-11-10T00:00:00Z"))).toEqual([2023, 2024, 2025, 2026]);
+describe("chartedSeasonRows", () => {
+  it("keeps a stored season only when he was charted that season; older imports stay stored but unread", () => {
+    const rows = [row("Q", 2023, 400, 120), row("Q", 2025, 300, 60), row("R", 2025, 300, 60)];
+    const games = [{ prospect_id: "Q", season_year: 2025 }, { prospect_id: "Q", season_year: 2025 }, { prospect_id: "R", season_year: 2024 }];
+    expect(chartedSeasonRows(rows, games).map((r) => `${r.prospect_id} ${r.season}`)).toEqual(["Q 2025"]);
+    // A great old season (40% middle) no longer lifts him: only 2025 counts.
+    const u = middleUsageByProspect(chartedSeasonRows(rows, games)).get("Q")!;
+    expect(u.seasons).toEqual([2025]);
+    expect(u.rawShare).toBeCloseTo(20, 9);
   });
 });

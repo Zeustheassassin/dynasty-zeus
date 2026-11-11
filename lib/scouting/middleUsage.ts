@@ -176,19 +176,29 @@ export function zoneAttemptsFrom(row: Record<string, unknown>): Record<string, n
 }
 
 /**
- * The college seasons to read for a QB: the five before his draft class
- * (a redshirt senior's whole career), never past the season under way
- * (August on). Without a class, a season before his first charted one
- * through the season under way.
+ * The college seasons to read for a QB: only the seasons the user charted him
+ * in (the user, 2026-11-10: "QBs improve over time, I don't want a season 4
+ * years ago haunting a massively improved QB"), never past his draft class or
+ * the season under way (August on). Each is still the WHOLE season, not just
+ * the charted games.
  */
 export function depthSeasonsFor(draftClassYear: number | null, chartedSeasons: readonly number[], now: Date): number[] {
   const underway = now.getUTCMonth() >= 7 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
-  const charted = chartedSeasons.filter(Number.isFinite);
   const last = draftClassYear != null ? Math.min(underway, draftClassYear - 1) : underway;
-  const first = draftClassYear != null ? draftClassYear - 5 : (charted.length ? Math.min(...charted) : underway) - 1;
-  const out: number[] = [];
-  for (let y = first; y <= last; y++) out.push(y);
-  return out;
+  return [...new Set(chartedSeasons.filter((y) => Number.isFinite(y) && y <= last))].sort((a, b) => a - b);
+}
+
+/**
+ * The stored full seasons a prospect's numbers may read: only the seasons he
+ * was charted in (depthSeasonsFor's rule). Rows imported before that rule
+ * (every college season) stay stored but unread. Feeds the middle-of-the-field
+ * adjustment, the rushing bonus and the style profile alike.
+ */
+export function chartedSeasonRows<R extends Pick<PffSeasonDepthRow, "prospect_id" | "season">>(
+  rows: readonly R[], games: readonly { prospect_id: string; season_year: number }[],
+): R[] {
+  const charted = new Set(games.map((g) => `${g.prospect_id}|${g.season_year}`));
+  return rows.filter((r) => charted.has(`${r.prospect_id}|${r.season}`));
 }
 
 const ramp = (x: number) => Math.min(1, Math.max(0, x)) ** MIDDLE_CURVE;

@@ -13,7 +13,7 @@ import {
 import { landingInputsFrom } from "../../../../lib/scouting/landingSpot";
 import { roleStandings, type RoleStanding } from "../../../../lib/scouting/roleStanding";
 import type { DraftPickRow } from "../../../../lib/nflDraft";
-import { middleUsageByProspect, type MiddleUsage } from "../../../../lib/scouting/middleUsage";
+import { chartedSeasonRows, middleUsageByProspect, type MiddleUsage } from "../../../../lib/scouting/middleUsage";
 import { qbFullSeasons, qbStyleValues, type QBFullSeasons } from "../../../../lib/scouting/qbStyle";
 import { qbRushingByProspect, rushingBonuses, type QBRushing, type RushingBonus } from "../../../../lib/scouting/qbRushing";
 import { pastFirstRead } from "../../../../lib/scouting/chartedComponents";
@@ -91,11 +91,14 @@ export function useProspectScores(
   );
   // A QB's middle of the field (10+ yds between the numbers) over PFF's full
   // seasons adds to his live AE Score (middleUsage.ts).
-  const middleUsage = useMemo(() => middleUsageByProspect(gradingData.pffSeasonDepth ?? []), [gradingData.pffSeasonDepth]);
+  // Only the seasons he was charted in (chartedSeasonRows): an older season
+  // must not haunt a QB who has improved (the user, 2026-11-10).
+  const seasonRows = useMemo(() => chartedSeasonRows(gradingData.pffSeasonDepth ?? [], games), [gradingData.pffSeasonDepth, games]);
+  const middleUsage = useMemo(() => middleUsageByProspect(seasonRows), [seasonRows]);
   const liveScores = useMemo(() => liveScoresFrom(prospects, ae.composite, middleUsage), [prospects, ae.composite, middleUsage]);
   // A QB's rushing over PFF's full seasons and the Dynasty Score's rushing
   // bonus, gated by his passing (qbRushing.ts).
-  const qbRushing = useMemo(() => qbRushingByProspect(gradingData.pffSeasonDepth ?? []), [gradingData.pffSeasonDepth]);
+  const qbRushing = useMemo(() => qbRushingByProspect(seasonRows), [seasonRows]);
   const rushing = useMemo(
     () => rushingBonuses(prospects, liveScores, ae.composite, qbRushing),
     [prospects, liveScores, ae.composite, qbRushing],
@@ -129,7 +132,7 @@ export function useProspectScores(
 
   // QBs' full-season style profile; its middle 10+ share and the charted read
   // rate join the PFF values as the Big Board's QB style columns (qs_*).
-  const qbFull = useMemo(() => qbFullSeasons(gradingData.pffSeasonDepth ?? []), [gradingData.pffSeasonDepth]);
+  const qbFull = useMemo(() => qbFullSeasons(seasonRows), [seasonRows]);
   const qbReads = useMemo(() => {
     const g2p = new Map(games.map((g) => [g.id, g.prospect_id]));
     const m = new Map<string, { num: number; den: number }>();
