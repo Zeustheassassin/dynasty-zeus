@@ -236,7 +236,7 @@ describe("BigBoard Above Exp columns", () => {
       .toEqual(["Above Exp", "AAE Breakdown", "PFF (charted games)", "QB Style"]);
     expect(cols.map((l) => cell("Quarter One", l))).toEqual(["+3.5", "+1.5", "+7.2", "—", "-3.0", "+2.0"]);
     // The style band: middle of the field (PFF full seasons) and reads (charted); none loaded here.
-    expect(headerLabels().slice(-2)).toEqual(["Mid 10+", "Reads"]);
+    expect(headerLabels().slice(-3)).toEqual(["Mid 10+", "Reads", "Held 2.5s+"]);
     expect(cell("Quarter One", "Mid 10+")).toBe("—");
   });
 

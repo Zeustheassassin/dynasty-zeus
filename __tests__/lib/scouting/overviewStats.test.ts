@@ -201,7 +201,7 @@ describe("qbOverview", () => {
     const full = {
       seasons: [2024, 2025], teams: "A 2024 · B 2025", attempts: 120, dropbacks: 150, ttt: 2.61, adot: 8.4,
       sacks: 9, pressures: 45, scrambles: 6, behindLos: 25, deep: 25, middle: null,
-      middleRaw: { middle: 20, pastLos: 90 }, zones,
+      middleRaw: { middle: 20, pastLos: 90 }, zones, pocket: null,
     };
     const page = qbOverview(withRpo, {}, null, 2, full);
     expect(stat(page, "fs_mid10")).toMatchObject({ dir: 1, detail: "20 / 90 past the line" });
@@ -211,6 +211,17 @@ describe("qbOverview", () => {
     expect(stat(page, "fs_sack")).toMatchObject({ dir: -1, detail: "9 / 150 dropbacks" });
     expect(stat(page, "fs_p2s")).toMatchObject({ detail: "9 / 45 pressures" });
     expect(section(page, "style")!.title).toContain("2024–2025");
+    expect(section(page, "style3")).toBeUndefined();
+    // Time in the pocket (migration 093), once imported.
+    const pocket = {
+      seasons: [2025], dropbacks: 300, held: 150, heldPct: 50, sacks: 12, heldSacks: 9, timeToSack: 3.6,
+      scrambles: 10, timeToScramble: 5.2, quickAccuracy: 82, heldAccuracy: 61, quickAimed: 140, heldAimed: 90,
+    };
+    const withPocket = qbOverview(withRpo, {}, null, 2, { ...full, pocket });
+    expect(stat(withPocket, "tp_held")).toMatchObject({ dir: 0, detail: "150 / 300 dropbacks", value: 50 });
+    expect(stat(withPocket, "tp_sack_t")).toMatchObject({ value: 3.6, detail: "average over 12 sacks" });
+    expect(stat(withPocket, "tp_held_sk")).toMatchObject({ dir: -1, detail: "9 / 150 held dropbacks" });
+    expect(stat(withPocket, "tp_acc_h")).toMatchObject({ value: 61, detail: "90 aimed" });
   });
 });
 

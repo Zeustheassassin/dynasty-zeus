@@ -19,7 +19,7 @@ import type { ProspectWithStats, QBPlay, RBPlay, ScoutingGame, TEPlay } from "..
 import type { PffValues } from "../pff/totals";
 import { pastFirstRead } from "./chartedComponents";
 import { middleAdjustment } from "./middleUsage";
-import type { QBFullSeasons } from "./qbStyle";
+import type { QBFullSeasons, QBPocket } from "./qbStyle";
 
 export type OverviewFmt = "pct0" | "pct1" | "dec1" | "dec2" | "int" | "text";
 /** Which bar colour: the user's charting or PFF. */
@@ -275,7 +275,26 @@ function qbStyleSections(plays: readonly QBPlay[], full: QBFullSeasons | null): 
         ...(pa ? [pa] : []),
       ],
     },
+    ...(full.pocket ? [pocketSection(full.pocket)] : []),
   ];
+}
+
+// Time in the pocket (migration 093): PFF's signature report, "held" = 2.5s+
+// from the snap to the throw, sack or scramble. Seasons may be fewer than the
+// depth's (a season imported before 093 has none until a refresh).
+function pocketSection(pk: QBPocket): OverviewSection {
+  const span = pk.seasons.length === 1 ? `${pk.seasons[0]}` : `${pk.seasons[0]}–${pk.seasons[pk.seasons.length - 1]}`;
+  const SRC = `PFF time in pocket, ${span}`;
+  return {
+    key: "style3", title: null, size: "md", stats: [
+      rate("tp_held", "Held 2.5s+", pk.held, pk.dropbacks, { tone: "pff", dir: 0, minN: 0, detail: `${pk.held} / ${pk.dropbacks} dropbacks`, tooltip: `${SRC}: dropbacks where he had the ball 2.5 seconds or longer before the throw, sack or scramble.` }),
+      metric("tp_sack_t", "Time to sack", pk.timeToSack, "dec2", { tone: "pff", dir: 0, minN: 0, n: pk.sacks, unit: "s", detail: `average over ${pk.sacks} sacks`, tooltip: `${SRC}: average seconds from the snap to a sack.` }),
+      metric("tp_scr_t", "Time to scramble", pk.timeToScramble, "dec2", { tone: "pff", dir: 0, minN: 0, n: pk.scrambles, unit: "s", detail: `average over ${pk.scrambles} scrambles`, tooltip: `${SRC}: average seconds from the snap to a scramble.` }),
+      rate("tp_held_sk", "Sacked when held", pk.heldSacks, pk.held, { tone: "pff", dir: -1, minN: 50, fmt: "pct1", detail: `${pk.heldSacks} / ${pk.held} held dropbacks`, tooltip: `${SRC}: sacks ÷ dropbacks held 2.5s+. Who holds it and goes down.` }),
+      metric("tp_acc_q", "Accuracy under 2.5s", pk.quickAccuracy, "pct1", { tone: "pff", dir: 0, minN: 0, n: pk.quickAimed, barMax: 100, detail: `${pk.quickAimed} aimed`, tooltip: `${SRC}: PFF accuracy % on aimed passes released under 2.5 seconds.` }),
+      metric("tp_acc_h", "Accuracy 2.5s+", pk.heldAccuracy, "pct1", { tone: "pff", dir: 0, minN: 0, n: pk.heldAimed, barMax: 100, detail: `${pk.heldAimed} aimed`, tooltip: `${SRC}: PFF accuracy % on aimed passes released at 2.5 seconds or later.` }),
+    ],
+  };
 }
 
 export function qbOverview(plays: readonly QBPlay[], pff: PffValues, cover: PffCover | null, games: number, full?: QBFullSeasons | null): OverviewPage {

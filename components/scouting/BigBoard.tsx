@@ -587,11 +587,11 @@ export default function BigBoard({
     const vals = pffVals.get(p.id);
     const v = vals?.[c.key];
     if (v == null) {
-      const why = c.key === "pff_qs_mid10" ? "No PFF full seasons yet (Scouting → PFF Links → Refresh QB stats)" : "No charted throws from a read";
+      const why = c.key === "pff_qs_reads" ? "No charted throws from a read" : "No PFF full seasons yet (Scouting → PFF Links → Refresh QB stats)";
       return <td key={c.key} className={`${tdBase} text-slate-600 ${cls}`} title={why}>—</td>;
     }
     const n = vals?.[`${c.key}_n`];
-    const of = c.key === "pff_qs_mid10" ? "attempts past the line" : "throws from a read";
+    const of = c.key === "pff_qs_mid10" ? "attempts past the line" : c.key === "pff_qs_held" ? "dropbacks" : "throws from a read";
     return <td key={c.key} className={`${tdBase} text-slate-300 ${cls}`} title={`${c.tooltip} · ${n ?? 0} ${of}`}>{fmtVal(v, c.fmt)}</td>;
   }
 

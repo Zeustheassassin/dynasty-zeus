@@ -190,6 +190,21 @@ export async function playerSeasonDepth(client: PffClient, playerId: number, sea
   }, null);
 }
 
+/**
+ * PFF's time-in-pocket report for every NCAA passer over a whole season (one
+ * row per player). The report needs a week list and ignores a franchise, so
+ * this lists every week (0–22) and the caller picks its players out. For the
+ * QB style profile (lib/scouting/qbStyle.ts, migration 093).
+ */
+export async function leagueTimeInPocket(client: PffClient, season: number): Promise<PffStatRow[]> {
+  return getOrEmpty(async () => {
+    const week = Array.from({ length: 23 }, (_, i) => i).join(",");
+    const body = await client.get("/v1/facet/signature/passing/time_in_pocket", { league: "ncaa", season, week });
+    const r = reportBody(body, "time_in_pockets");
+    return Array.isArray(r) ? (r as PffStatRow[]) : [];
+  }, []);
+}
+
 /** Every player of one team, aggregated over the given weeks of one season. */
 export async function teamFacet(
   client: PffClient, path: string, key: string, season: number, weeks: readonly number[], franchiseId: number,

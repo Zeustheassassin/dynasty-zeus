@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { COLLEGE_ZONE_ACCURACY, COLLEGE_ZONE_SHARE, qbFullSeasons, qbStyleValues } from "@/lib/scouting/qbStyle";
-import { DEPTH_ZONES, SEASON_DEPTH_SELECT, type PffSeasonDepthRow } from "@/lib/scouting/middleUsage";
+import { DEPTH_ZONES, SEASON_DEPTH_SELECT, SEASON_DEPTH_SELECT_NO_POCKET, type PffSeasonDepthRow } from "@/lib/scouting/middleUsage";
 import { pastFirstRead } from "@/lib/scouting/chartedComponents";
 import type { QBPlay } from "@/lib/types";
 
@@ -36,6 +36,24 @@ describe("qbFullSeasons", () => {
     // Middle 10+ past the line: center_medium + center_deep over everything but behind the line.
     expect(f.middleRaw).toEqual({ middle: 40 + 20, pastLos: total - 60 });
     expect(f.middle).not.toBeNull();
+    expect(f.pocket).toBeNull(); // no pocket row imported
+  });
+
+  it("sums the time-in-pocket rows (migration 093): held share, time to sack and scramble by count, accuracy by aimed passes", () => {
+    const rows = [
+      season(2024, 10, { }),
+      { ...season(2025, 10, {}), fp_dropbacks: 300, fp_held: 120, fp_ttt_sacks: 3.5, fp_less_sacks: 2, fp_more_sacks: 8, fp_ttt_scrambles: 5, fp_less_scrambles: 1, fp_more_scrambles: 9, fp_less_acc: 80, fp_less_aimed: 150, fp_more_acc: 60, fp_more_aimed: 100 },
+      { ...season(2026, 10, {}), fp_dropbacks: 100, fp_held: 60, fp_ttt_sacks: 4.0, fp_less_sacks: 0, fp_more_sacks: 5, fp_ttt_scrambles: null, fp_less_scrambles: 0, fp_more_scrambles: 0, fp_less_acc: 70, fp_less_aimed: 50, fp_more_acc: 50, fp_more_aimed: 50 },
+    ];
+    const pk = qbFullSeasons(rows).get("Q")!.pocket!;
+    expect(pk.seasons).toEqual([2025, 2026]); // 2024 has no pocket row
+    expect(pk.heldPct).toBeCloseTo((100 * 180) / 400, 12);
+    expect([pk.sacks, pk.heldSacks, pk.scrambles]).toEqual([15, 13, 10]);
+    expect(pk.timeToSack).toBeCloseTo((3.5 * 10 + 4.0 * 5) / 15, 12);
+    expect(pk.timeToScramble).toBeCloseTo(5, 12);
+    expect(pk.quickAccuracy).toBeCloseTo((80 * 150 + 70 * 50) / 200, 12);
+    expect(pk.heldAccuracy).toBeCloseTo((60 * 100 + 50 * 50) / 150, 12);
+    expect(qbStyleValues(qbFullSeasons(rows).get("Q"), undefined)).toMatchObject({ pff_qs_held: 45, pff_qs_held_n: 400 });
   });
 
   it("leaves time and aDOT blank without PFF's season numbers, and skips a prospect with no attempts", () => {
@@ -55,6 +73,10 @@ describe("qbFullSeasons", () => {
     }
     expect(Object.values(COLLEGE_ZONE_SHARE).reduce((a, v) => a + v, 0)).toBeCloseTo(100, 0);
     expect(SEASON_DEPTH_SELECT).toContain("fs_ttt_total:raw->ttt_total_time");
+    expect(SEASON_DEPTH_SELECT).toContain("fp_held:pocket->more_dropbacks");
+    // Before migration 093 the client falls back to a select with no pocket column.
+    expect(SEASON_DEPTH_SELECT_NO_POCKET).not.toContain("pocket");
+    expect(SEASON_DEPTH_SELECT.startsWith(SEASON_DEPTH_SELECT_NO_POCKET)).toBe(true);
   });
 });
 
@@ -63,9 +85,9 @@ describe("the Big Board's QB style values", () => {
     const f = qbFullSeasons([season(2025, 10, {})]).get("Q")!;
     expect(qbStyleValues(f, { num: 30, den: 60 })).toEqual({
       pff_qs_mid10: (100 * f.middleRaw.middle) / f.middleRaw.pastLos, pff_qs_mid10_n: f.middleRaw.pastLos,
-      pff_qs_reads: 50, pff_qs_reads_n: 60,
+      pff_qs_reads: 50, pff_qs_reads_n: 60, pff_qs_held: null, pff_qs_held_n: null,
     });
-    expect(qbStyleValues(undefined, undefined)).toEqual({ pff_qs_mid10: null, pff_qs_mid10_n: null, pff_qs_reads: null, pff_qs_reads_n: null });
+    expect(qbStyleValues(undefined, undefined)).toEqual({ pff_qs_mid10: null, pff_qs_mid10_n: null, pff_qs_reads: null, pff_qs_reads_n: null, pff_qs_held: null, pff_qs_held_n: null });
   });
 });
 

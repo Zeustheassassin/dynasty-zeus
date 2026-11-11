@@ -46,6 +46,15 @@ export const SEASON_RAW_FIELDS: Readonly<Record<string, string>> = {
   ...Object.fromEntries(DEPTH_ZONES.flatMap((z) => [[`aimed_${z}`, `${z}_aimed_passes`], [`acc_${z}`, `${z}_accuracy_percent`]])),
 };
 
+// The same from `pocket` (migration 093, PFF's time-in-pocket report):
+// `fp_<name>` ← pocket.<PFF column>. less_* = released under 2.5s, more_* = 2.5s+.
+export const SEASON_POCKET_FIELDS: Readonly<Record<string, string>> = {
+  dropbacks: "dropbacks", held: "more_dropbacks",
+  ttt_sacks: "avg_ttt_sacks", less_sacks: "less_sacks", more_sacks: "more_sacks",
+  ttt_scrambles: "avg_ttt_scrambles", less_scrambles: "less_scrambles", more_scrambles: "more_scrambles",
+  less_acc: "less_accuracy_percent", less_aimed: "less_aimed_passes", more_acc: "more_accuracy_percent", more_aimed: "more_aimed_passes",
+};
+
 /** One prospect-season of PFF's full-season passing depth (migration 092). */
 export type PffSeasonDepthRow = {
   prospect_id: string;
@@ -58,10 +67,18 @@ export type PffSeasonDepthRow = {
 } & {
   /** SEASON_RAW_FIELDS, when selected (absent in older callers and tests). */
   [k: `fs_${string}`]: number | null | undefined;
+} & {
+  /** SEASON_POCKET_FIELDS; null until the season's pocket row is imported (093). */
+  [k: `fp_${string}`]: number | null | undefined;
 };
-export const SEASON_DEPTH_SELECT = [
+/** Without the pocket fields: the select before migration 093 is applied. */
+export const SEASON_DEPTH_SELECT_NO_POCKET = [
   "prospect_id,season,pff_player_id,team_name,zone_attempts,fetched_at",
   ...Object.entries(SEASON_RAW_FIELDS).map(([name, col]) => `fs_${name}:raw->${col}`),
+].join(",");
+export const SEASON_DEPTH_SELECT = [
+  SEASON_DEPTH_SELECT_NO_POCKET,
+  ...Object.entries(SEASON_POCKET_FIELDS).map(([name, col]) => `fp_${name}:pocket->${col}`),
 ].join(",");
 /** The zones counted as middle of the field: 10+ air yards, between the numbers. */
 export const MIDDLE_ZONES = ["center_medium", "center_deep"] as const;

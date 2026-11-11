@@ -55,6 +55,28 @@ export interface QBFullSeasons {
   /** Middle 10+ throws ÷ attempts past the line, summed over his seasons. */
   middleRaw: { middle: number; pastLos: number };
   zones: Record<string, ZoneCell>;
+  /** PFF's time-in-pocket report over the seasons that have it (migration 093); null with none. */
+  pocket: QBPocket | null;
+}
+
+/** Time in the pocket, summed over the seasons PFF's report covers. "Held" = 2.5s or longer before the throw, sack or scramble. */
+export interface QBPocket {
+  seasons: number[];
+  dropbacks: number;
+  held: number;
+  /** % of dropbacks held 2.5s+. */
+  heldPct: number | null;
+  sacks: number;
+  heldSacks: number;
+  /** Average seconds from the snap to a sack / a scramble. */
+  timeToSack: number | null;
+  scrambles: number;
+  timeToScramble: number | null;
+  /** PFF accuracy % on aimed passes released under 2.5s / at 2.5s+. */
+  quickAccuracy: number | null;
+  heldAccuracy: number | null;
+  quickAimed: number;
+  heldAimed: number;
 }
 
 const n = (v: number | null | undefined) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -72,6 +94,7 @@ export function qbFullSeasons(rows: readonly PffSeasonDepthRow[]): Map<string, Q
     list.sort((a, b) => a.season - b.season);
     let attempts = 0, dropbacks = 0, tttTotal = 0, tttDb = 0, adotSum = 0, adotAtt = 0, sacks = 0, pressures = 0, scrambles = 0;
     let mid = 0, past = 0;
+    const pk = { seasons: [] as number[], dropbacks: 0, held: 0, sacks: 0, heldSacks: 0, sackTime: 0, sackTimeN: 0, scrambles: 0, scrTime: 0, scrTimeN: 0, qAcc: 0, qAimed: 0, hAcc: 0, hAimed: 0 };
     const zoneAtt: Record<string, number> = {}, zoneAimed: Record<string, number> = {}, zoneAcc: Record<string, number> = {};
     for (const z of DEPTH_ZONES) { zoneAtt[z] = 0; zoneAimed[z] = 0; zoneAcc[z] = 0; }
     for (const r of list) {
@@ -88,6 +111,16 @@ export function qbFullSeasons(rows: readonly PffSeasonDepthRow[]): Map<string, Q
       sacks += n(r.fs_sacks); pressures += n(r.fs_pressures); scrambles += n(r.fs_scrambles);
       const s = seasonMiddle(r.zone_attempts);
       mid += s.middle; past += s.pastLos;
+      if (n(r.fp_dropbacks) > 0) {
+        pk.seasons.push(r.season);
+        pk.dropbacks += n(r.fp_dropbacks); pk.held += n(r.fp_held);
+        const sk = n(r.fp_less_sacks) + n(r.fp_more_sacks), sc = n(r.fp_less_scrambles) + n(r.fp_more_scrambles);
+        pk.sacks += sk; pk.heldSacks += n(r.fp_more_sacks); pk.scrambles += sc;
+        if (sk > 0 && r.fp_ttt_sacks != null) { pk.sackTime += n(r.fp_ttt_sacks) * sk; pk.sackTimeN += sk; }
+        if (sc > 0 && r.fp_ttt_scrambles != null) { pk.scrTime += n(r.fp_ttt_scrambles) * sc; pk.scrTimeN += sc; }
+        if (n(r.fp_less_aimed) > 0 && r.fp_less_acc != null) { pk.qAcc += n(r.fp_less_acc) * n(r.fp_less_aimed); pk.qAimed += n(r.fp_less_aimed); }
+        if (n(r.fp_more_aimed) > 0 && r.fp_more_acc != null) { pk.hAcc += n(r.fp_more_acc) * n(r.fp_more_aimed); pk.hAimed += n(r.fp_more_aimed); }
+      }
     }
     const totalAtt = DEPTH_ZONES.reduce((a, z) => a + zoneAtt[z], 0);
     if (totalAtt <= 0) continue;
@@ -110,17 +143,26 @@ export function qbFullSeasons(rows: readonly PffSeasonDepthRow[]): Map<string, Q
       middle: middle.get(id) ?? null,
       middleRaw: { middle: mid, pastLos: past },
       zones,
+      pocket: pk.dropbacks > 0 ? {
+        seasons: pk.seasons, dropbacks: pk.dropbacks, held: pk.held, heldPct: (100 * pk.held) / pk.dropbacks,
+        sacks: pk.sacks, heldSacks: pk.heldSacks, timeToSack: pk.sackTimeN > 0 ? pk.sackTime / pk.sackTimeN : null,
+        scrambles: pk.scrambles, timeToScramble: pk.scrTimeN > 0 ? pk.scrTime / pk.scrTimeN : null,
+        quickAccuracy: pk.qAimed > 0 ? pk.qAcc / pk.qAimed : null, heldAccuracy: pk.hAimed > 0 ? pk.hAcc / pk.hAimed : null,
+        quickAimed: pk.qAimed, heldAimed: pk.hAimed,
+      } : null,
     });
   }
   return out;
 }
 
-/** The Big Board's QB style columns (pffCols.ts QB_STYLE_BOARD_COLS), as PffValues keys. They ride the PFF values (so the board sorts them like its PFF columns), but Mid 10+ is PFF's full seasons and Reads is the user's charting. */
+/** The Big Board's QB style columns (pffCols.ts QB_STYLE_BOARD_COLS), as PffValues keys. They ride the PFF values (so the board sorts them like its PFF columns), but Mid 10+ and Held 2.5s+ are PFF's full seasons and Reads is the user's charting. */
 export function qbStyleValues(f: QBFullSeasons | undefined, reads: { num: number; den: number } | undefined): Record<string, number | null> {
   return {
     pff_qs_mid10: f && f.middleRaw.pastLos > 0 ? (100 * f.middleRaw.middle) / f.middleRaw.pastLos : null,
     pff_qs_mid10_n: f ? f.middleRaw.pastLos : null,
     pff_qs_reads: reads && reads.den > 0 ? (100 * reads.num) / reads.den : null,
     pff_qs_reads_n: reads ? reads.den : null,
+    pff_qs_held: f?.pocket?.heldPct ?? null,
+    pff_qs_held_n: f?.pocket ? f.pocket.dropbacks : null,
   };
 }

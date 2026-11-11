@@ -210,4 +210,7 @@ export const QB_STYLE_BOARD_COLS: ColDef[] = [
     colorDir: 1,
     tooltip: "Past 1st read: throws past his first read (2nd option or checkdown) ÷ throws from a read, from your charting. In the AE Score at 0.2.",
   }),
+  col("pff_qs_held", "Held 2.5s+", "QB Style", "pct", {
+    tooltip: "Dropbacks where he had the ball 2.5 seconds or longer before the throw, sack or scramble, over every college season (PFF time in pocket). Not scored.",
+  }),
 ];
