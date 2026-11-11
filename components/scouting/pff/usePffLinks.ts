@@ -15,7 +15,7 @@ import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
 import { supabase } from "../../../lib/supabaseclient";
 import type { PffGameMatchStatus, PffPlayerMatchStatus } from "../../../lib/types";
 import {
-  fetchPffRows, isMissingPffTables, PFF_STATS_MIGRATION_HINT, pffAuthHeader, runPffImport, runPffMatch,
+  fetchPffRows, isMissingPffTables, PFF_STATS_MIGRATION_HINT, pffAuthHeader, runPffImport, runPffMatch, runQbPocket,
   type PffBatchProgress, type PffImportProgress, type PffRows,
 } from "./pffClient";
 
@@ -170,6 +170,34 @@ export function usePffLinks(onStatsChanged?: () => void, onImported?: (ids: stri
     onImported?.(ids);
   }, [reload, onStatsChanged, onImported]);
 
+  /**
+   * Refresh QB stats: the import for these QBs, then PFF's time-in-pocket
+   * report for each season their stored full seasons cover (one slow,
+   * league-wide read per season; /api/pff/qb-pocket), then a reload.
+   */
+  const runQbRefresh = useCallback(async (ids: string[]) => {
+    if (ids.length === 0) return;
+    await runImport(ids);
+    if (cancelRef.current) return;
+    const fresh = await reload();
+    const qbIds = new Set(ids);
+    const seasons = [...new Set((fresh?.pff.depth ?? []).filter((r) => qbIds.has(r.prospect_id)).map((r) => r.season))].sort((a, b) => a - b);
+    if (seasons.length === 0) return;
+    let failure: string | null = null;
+    try {
+      const out = await runQbPocket(seasons, { onProgress: setImportProgress, isCancelled: () => cancelRef.current });
+      if (out.errors.length) failure = `PFF pocket times: ${out.errors[0]}${out.errors.length > 1 ? ` (+${out.errors.length - 1} more)` : ""}`;
+    } catch (err) {
+      log.error("QB pocket run failed", { err: String(err) });
+      failure = `Pocket times stopped: ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      setImportProgress(null);
+    }
+    await reload();
+    if (failure) setError(failure);
+    onStatsChanged?.();
+  }, [runImport, reload, onStatsChanged]);
+
   /** After links change: import whichever of these prospects now need it. */
   const importIfNeeded = useCallback(async (ids: string[], fresh: (LinkRows & { pff: PffRows }) | null) => {
     if (!fresh || cancelRef.current) return;
@@ -248,7 +276,7 @@ export function usePffLinks(onStatsChanged?: () => void, onImported?: (ids: stri
   return {
     prospects, games, loading, error, progress,
     totals, importedGameIds, statsError, importProgress, missing,
-    runMatch, runImport, cancel, reload,
+    runMatch, runImport, runQbRefresh, cancel, reload,
     confirmPlayer, choosePlayer, markPlayerNone, resetPlayer,
     confirmGame, chooseGame, markGameNone, resetGame,
   };

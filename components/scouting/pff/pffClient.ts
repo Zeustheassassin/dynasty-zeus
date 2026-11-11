@@ -7,7 +7,7 @@
 import { logger } from "../../../lib/logger";
 import {
   PFF_BIO_BATCH, PFF_IMPORT_BATCH, PFF_MATCH_BATCH,
-  type PffBioResult, type PffImportResult, type PffMatchResult,
+  type PffBioResult, type PffImportResult, type PffMatchResult, type QbPocketResponse,
 } from "../../../lib/pff/api";
 import { GAME_ROW_SELECT, SEASON_ROW_SELECT, type PffGameRow, type PffSeasonRow } from "../../../lib/pff/stats";
 import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
@@ -163,6 +163,40 @@ export async function runPffImport(ids: readonly string[], opts: PffBatchOpts = 
     else if (r.note) outcome.notes.set(r.prospectId, r.note);
   });
   return { ...outcome, ...run };
+}
+
+/**
+ * QBs' time-in-pocket rows, one season per request (/api/pff/qb-pocket): PFF's
+ * report is league-wide and slow (10–65 s), so it runs after the import, a
+ * season at a time. Waits out PFF's read budget and the route's rate limit.
+ */
+export async function runQbPocket(seasons: readonly number[], opts: PffBatchOpts = {}): Promise<{ failed: number; errors: string[]; cancelled: boolean }> {
+  const queue = [...seasons];
+  let done = 0, failed = 0;
+  const errors: string[] = [];
+  const report = (note: string | null) => opts.onProgress?.({ done, total: seasons.length, failed, note });
+  report("pocket times by season");
+  while (queue.length > 0) {
+    if (opts.isCancelled?.()) return { failed, errors, cancelled: true };
+    const season = queue[0];
+    const res = await fetch("/api/pff/qb-pocket", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await pffAuthHeader()) },
+      body: JSON.stringify({ season }),
+    });
+    const body = (await res.json().catch(() => null)) as (QbPocketResponse & { error?: string }) | null;
+    if (res.status === 429) { report("Rate limited, waiting a minute…"); await sleep(60_000); continue; }
+    if (res.ok && body?.retryAfterMs) { report("PFF read budget used up, waiting for it to reset…"); await sleep(Math.min(body.retryAfterMs, 65_000)); continue; }
+    queue.shift();
+    if (!res.ok || !body) {
+      failed++;
+      errors.push(`${season}: ${body?.error ?? `HTTP ${res.status}`}`);
+      log.warn("QB pocket times failed for a season", { season, status: res.status, err: body?.error });
+    }
+    done++;
+    report("pocket times by season");
+  }
+  return { failed, errors, cancelled: false };
 }
 
 /** Link these prospects and their charted games to PFF (/api/pff/match). Results by prospect id. */

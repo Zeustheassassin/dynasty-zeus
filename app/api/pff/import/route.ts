@@ -18,7 +18,7 @@ import { apiError } from "../../../../lib/apiHelpers";
 import { logger } from "../../../../lib/logger";
 import { PFF_IMPORT_BATCH, type PffImportResponse, type PffImportResult } from "../../../../lib/pff/api";
 import { getPffClient, PffError, type PffClient } from "../../../../lib/pff/client";
-import { leagueTimeInPocket, playerSeasonDepth, playerSeasonRushing, type PffStatRow } from "../../../../lib/pff/ncaa";
+import { playerSeasonDepth, playerSeasonRushing } from "../../../../lib/pff/ncaa";
 import { importProspect, type GameToImport, type ProspectImport } from "../../../../lib/pff/runImport";
 import { depthSeasonsFor, zoneAttemptsFrom } from "../../../../lib/scouting/middleUsage";
 import { GAME_AVERAGE_KEYS, GAME_STAT_KEYS, SEASON_AVERAGE_KEYS, SEASON_STAT_KEYS, pffPos } from "../../../../lib/pff/stats";
@@ -36,7 +36,6 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const LINKED = new Set(["auto", "confirmed"]);
 const MIGRATION_HINT = "Apply migration 063 (supabase/migrations/063_pff_game_stats.sql) first.";
 const DEPTH_MIGRATION_HINT = "Full-season depth needs migration 092 (supabase/migrations/092_prospect_season_pff_depth.sql)";
-const POCKET_MIGRATION_HINT = "Pocket times need migration 093 (supabase/migrations/093_season_pff_depth_pocket.sql); depth saved without them";
 const RUSHING_MIGRATION_HINT = "Full-season rushing needs migration 094 (supabase/migrations/094_season_pff_depth_rushing.sql); depth saved without it";
 
 interface ProspectRow { id: string; position: string; pff_player_id: number | null; pff_match_status: string | null; draft_class_year: number | null }
@@ -74,17 +73,6 @@ export async function POST(req: NextRequest) {
   const started = Date.now();
   const results: PffImportResult[] = [];
   let retryAfterMs: number | null = null;
-  // PFF's time-in-pocket report comes league-wide per season (~1,300
-  // passers), so each season is read once per batch and shared by its QBs.
-  const pocketBySeason = new Map<number, Promise<Map<number, PffStatRow>>>();
-  const pocketFor = (season: number) => {
-    let hit = pocketBySeason.get(season);
-    if (!hit) {
-      hit = leagueTimeInPocket(client, season).then((rows) => new Map(rows.map((r) => [Number(r.player_id), r])));
-      pocketBySeason.set(season, hit);
-    }
-    return hit;
-  };
 
   for (const p of prospects) {
     if (retryAfterMs != null || Date.now() - started > TIME_BUDGET_MS) {
@@ -109,7 +97,7 @@ export async function POST(req: NextRequest) {
         saveErr = await save(supabase, user.id, p.id, p.pff_player_id, imp);
       }
       const depth = pos === "QB"
-        ? await importSeasonDepth(supabase, client, pocketFor, user.id, p.id, p.pff_player_id,
+        ? await importSeasonDepth(supabase, client, user.id, p.id, p.pff_player_id,
           depthSeasonsFor(p.draft_class_year, games.filter((g) => g.prospect_id === p.id).map((g) => g.season_year), new Date()))
         : null;
       const notes = [linked.length === 0 && "No charted games linked to PFF", depth?.note].filter(Boolean).join("; ");
@@ -182,14 +170,15 @@ async function save(
 }
 
 /**
- * A QB's full-season passing depth for each season he threw (migration 092),
- * one PFF read per season, with his row of that season's time-in-pocket
- * report beside it (migration 093; `pocketFor` reads each season once per
- * batch). Before 092 is applied it says so in a note and leaves the rest of
- * the import alone; before 093, it saves the depth without the pocket times.
+ * A QB's full-season passing depth (migration 092) and rushing (094) for each
+ * season he threw, two quick PFF reads per season. The time-in-pocket report
+ * (093) is league-wide and slow, so it's filled separately, a season at a
+ * time (/api/pff/qb-pocket); this upsert leaves `pocket` alone. Before 092 is
+ * applied it says so in a note and leaves the rest of the import alone;
+ * before 094, it saves the depth without the rushing.
  */
 async function importSeasonDepth(
-  supabase: SupabaseClient, client: PffClient, pocketFor: (season: number) => Promise<Map<number, PffStatRow>>,
+  supabase: SupabaseClient, client: PffClient,
   userId: string, prospectId: string, playerId: number, seasons: readonly number[],
 ): Promise<{ saved: number; note?: string; error?: string }> {
   const fetchedAt = new Date().toISOString();
@@ -197,28 +186,24 @@ async function importSeasonDepth(
   for (const season of seasons) {
     const row = await playerSeasonDepth(client, playerId, season);
     if (!row) continue;
-    const pocket = (await pocketFor(season)).get(playerId) ?? null;
     const rushing = await playerSeasonRushing(client, playerId, season);
     rows.push({
       user_id: userId, prospect_id: prospectId, season, pff_player_id: playerId,
       team_name: typeof row.team_name === "string" ? row.team_name : null,
-      zone_attempts: zoneAttemptsFrom(row), raw: row, pocket, rushing, fetched_at: fetchedAt,
+      zone_attempts: zoneAttemptsFrom(row), raw: row, rushing, fetched_at: fetchedAt,
     });
   }
   if (!rows.length) return { saved: 0 };
   const upsert = (list: Record<string, unknown>[]) =>
     supabase.from("prospect_season_pff_depth").upsert(list, { onConflict: "prospect_id,season" });
-  // A column a migration hasn't added yet (094 rushing, then 093 pocket) is
-  // dropped and the save retried, so the depth always lands.
+  // Before 094 the rushing column doesn't exist: drop it and save the rest.
   let { error } = await upsert(rows);
-  const notes: string[] = [];
-  for (const [col, hint] of [["rushing", RUSHING_MIGRATION_HINT], ["pocket", POCKET_MIGRATION_HINT]] as const) {
-    if (!error || !missingColumn(error)) break;
-    for (const r of rows) delete r[col];
+  let note: string | undefined;
+  if (error && missingColumn(error)) {
+    for (const r of rows) delete r.rushing;
     ({ error } = await upsert(rows));
-    notes.push(hint);
+    note = RUSHING_MIGRATION_HINT;
   }
-  const note = notes.length ? notes.join("; ") : undefined;
   if (!error) return { saved: rows.length, ...(note ? { note } : {}) };
   if (missingTable(error)) return { saved: 0, note: DEPTH_MIGRATION_HINT };
   log.error("season depth save failed", { prospectId, err: error.message });

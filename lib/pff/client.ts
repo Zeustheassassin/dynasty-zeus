@@ -189,3 +189,18 @@ export function getPffClient(): PffClient | null {
   shared ??= createPffClient({ apiKey });
   return shared;
 }
+
+let sharedSlow: PffClient | null = null;
+/**
+ * A client for PFF's league-wide season reports, which take 10–65 s to answer
+ * (~2.5 MB; the time-in-pocket report for 2022 and 2026 took ~63 s on
+ * 2026-11-10, past the default 20 s timeout). Two minutes, one retry. Only
+ * for a route that makes one such read per request (/api/pff/qb-pocket).
+ */
+export function getSlowPffClient(): PffClient | null {
+  if (typeof window !== "undefined") throw new Error("lib/pff is server-only");
+  const apiKey = process.env.PFF_API_KEY;
+  if (!apiKey) return null;
+  sharedSlow ??= createPffClient({ apiKey, timeoutMs: 120_000, retries: 1 });
+  return sharedSlow;
+}

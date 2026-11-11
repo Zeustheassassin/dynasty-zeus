@@ -44,6 +44,17 @@ export interface PffImportResponse {
   retryAfterMs: number | null;
 }
 
+/** POST /api/pff/qb-pocket { season }: one season's time-in-pocket rows filled into the caller's QB seasons. */
+export interface QbPocketResponse {
+  season: number;
+  /** QB season rows given a pocket row. */
+  updated: number;
+  /** QB season rows PFF had no pocket row for. */
+  missing: number;
+  /** Set when PFF's read budget ran out: wait this long, then send the season again. */
+  retryAfterMs: number | null;
+}
+
 /** Prospects per POST /api/pff/bio; one PFF read per linked prospect. */
 export const PFF_BIO_BATCH = 20;
 

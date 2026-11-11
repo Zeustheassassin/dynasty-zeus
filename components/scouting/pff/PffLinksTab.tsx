@@ -193,9 +193,9 @@ export default function PffLinksTab({ onStatsChanged }: { onStatsChanged?: () =>
           Refresh all stats
         </button>
         <button
-          onClick={() => s.runImport(qbsWithLinkedGames)}
+          onClick={() => s.runQbRefresh(qbsWithLinkedGames)}
           disabled={running || s.loading || !statsReady || qbsWithLinkedGames.length === 0}
-          title="Re-read PFF for the QBs only: their linked games, plus each QB's full college seasons for the middle-of-the-field adjustment (about 5 PFF reads per season)"
+          title="Re-read PFF for the QBs only: their linked games and each QB's full college seasons (depth and rushing), then PFF's time-in-pocket report one season at a time (slow: up to about a minute per season)"
           className={btn + " py-1.5"}
         >
           Refresh QB stats ({qbsWithLinkedGames.length})
