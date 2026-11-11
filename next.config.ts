@@ -21,6 +21,12 @@ const nextConfig: NextConfig = {
     unoptimized: true,
   },
 
+  // parquet-wasm's Node build loads parquet_wasm_bg.wasm from its own folder
+  // (readFileSync of `${__dirname}/...`), which breaks once bundled. Left
+  // external, it's required from node_modules at runtime and file tracing
+  // ships the .wasm with the route (the NFL contracts cron, lib/server/nflContracts.ts).
+  serverExternalPackages: ["parquet-wasm"],
+
   // Security & caching headers applied to all routes
   async headers() {
     return [

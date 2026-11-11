@@ -16,6 +16,14 @@
     {
       "path": "/api/cron/player-value-history",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/nfl-contracts",
+      "schedule": "0 12 * 3-5 *"
+    },
+    {
+      "path": "/api/cron/nfl-contracts",
+      "schedule": "0 12 * 1-2,6-12 5"
     }
   ]
 }
