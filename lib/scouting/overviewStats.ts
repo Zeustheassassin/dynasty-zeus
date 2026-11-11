@@ -17,6 +17,9 @@
 
 import type { ProspectWithStats, QBPlay, RBPlay, ScoutingGame, TEPlay } from "../types";
 import type { PffValues } from "../pff/totals";
+import { pastFirstRead } from "./chartedComponents";
+import { middleAdjustment } from "./middleUsage";
+import type { QBFullSeasons } from "./qbStyle";
 
 export type OverviewFmt = "pct0" | "pct1" | "dec1" | "dec2" | "int" | "text";
 /** Which bar colour: the user's charting or PFF. */
@@ -218,7 +221,64 @@ export function wrOverview(p: ProspectWithStats, pff: PffValues, cover: PffCover
 const isThrown = (pl: QBPlay) =>
   pl.play_type !== "run" && pl.timing !== "scramble" && pl.timing !== "sack" && pl.timing !== "throw_away";
 
-export function qbOverview(plays: readonly QBPlay[], pff: PffValues, cover: PffCover | null, games: number): OverviewPage {
+// Style and pocket (2026-11-10): how he plays, not how well. Past 1st read
+// (charted, the AE Score's reads piece), RPO and play action (charted), and
+// from PFF's FULL college seasons (qbStyle.ts) the middle of the field (the AE
+// Score's adjustment), time to throw, aDOT, screens, deep shots, sacks and
+// scrambles. Describing numbers carry no percentile (dir 0).
+function qbStyleSections(plays: readonly QBPlay[], full: QBFullSeasons | null): OverviewSection[] {
+  const reads = plays.map(pastFirstRead).filter((r): r is boolean => r != null);
+  const dropbacks = plays.filter((pl) => pl.play_type !== "run");
+  const tagged = dropbacks.filter((pl) => pl.play_action != null);
+  const charted: OverviewStat[] = [
+    rate("reads", "Past 1st read", reads.filter(Boolean).length, reads.length, {
+      tone: "chart", dir: 1, minN: 25, detail: `${reads.filter(Boolean).length} / ${reads.length} throws from a read`,
+      tooltip: `${CHARTED}: throws past his first read (2nd option or checkdown) ÷ throws from a read. Extended plays, scrambles, sacks and throwaways have no read. Scored in the AE Score (0.2).`,
+    }),
+  ];
+  const rpo = rate("rpo", "RPO", dropbacks.filter((pl) => pl.play_type === "rpo").length, dropbacks.length, {
+    tone: "chart", dir: 0, minN: 0, tooltip: `${CHARTED}: RPOs ÷ dropbacks (pass plays and RPOs).`,
+  });
+  const pa = tagged.length > 0
+    ? rate("pa", "Play action", tagged.filter((pl) => pl.play_action).length, tagged.length, {
+      tone: "chart", dir: 0, minN: 0, tooltip: `${CHARTED}: play action ÷ dropbacks tagged for it (charted since the tags).`,
+    })
+    : null;
+  if (!full) {
+    return [{ key: "style", title: "Style & pocket", size: "md", stats: [...charted, rpo, ...(pa ? [pa] : [])] }];
+  }
+  const span = full.seasons.length === 1 ? `${full.seasons[0]}` : `${full.seasons[0]}–${full.seasons[full.seasons.length - 1]}`;
+  const FULL = `PFF, every college season (${full.teams})`;
+  const band = (b: string) => full.zones[`left_${b}`].attempts + full.zones[`center_${b}`].attempts + full.zones[`right_${b}`].attempts;
+  const zoneAtt = Object.values(full.zones).reduce((a, z) => a + z.attempts, 0);
+  const adj = middleAdjustment(full.middle);
+  return [
+    {
+      key: "style", title: `Style & pocket · his charting and PFF's full seasons, ${span}`, size: "md", stats: [
+        ...charted,
+        rate("fs_mid10", "Middle 10+", full.middleRaw.middle, full.middleRaw.pastLos, {
+          tone: "pff", dir: 1, minN: 100, fmt: "pct1", detail: `${full.middleRaw.middle} / ${full.middleRaw.pastLos} past the line`,
+          tooltip: `${FULL}: throws 10+ yards downfield between the numbers ÷ attempts past the line of scrimmage. College QBs (2024–25): median 22%, bottom quarter under 19%, top quarter over 25%. In the AE Score: ${adj ? `${adj.value >= 0 ? "+" : ""}${adj.value.toFixed(2)}` : "no adjustment (between the quarters)"}.`,
+        }),
+        metric("fs_ttt", "Time to throw", full.ttt, "dec2", { tone: "pff", dir: 0, minN: 0, n: full.dropbacks, unit: "s", detail: `per dropback · ${full.dropbacks} dropbacks`, tooltip: `${FULL}: average time to throw, seconds.` }),
+        rate("fs_behind", "Behind the line", band("behind_los"), zoneAtt, { tone: "pff", dir: 0, minN: 0, tooltip: `${FULL}: attempts thrown behind the line of scrimmage (screens and the like) ÷ attempts. College QBs: ~19%.` }),
+        rate("fs_deep", "Deep 20+", band("deep"), zoneAtt, { tone: "pff", dir: 0, minN: 0, tooltip: `${FULL}: attempts 20+ yards downfield ÷ attempts. College QBs: ~16%.` }),
+        rpo,
+      ],
+    },
+    {
+      key: "style2", title: null, size: "md", stats: [
+        metric("fs_adot", "aDOT", full.adot, "dec1", { tone: "pff", dir: 0, minN: 0, n: full.attempts, detail: "yards downfield per attempt", tooltip: `${FULL}: average depth of target.` }),
+        rate("fs_sack", "Sack rate", full.sacks, full.dropbacks, { tone: "pff", dir: -1, minN: 100, fmt: "pct1", detail: `${full.sacks} / ${full.dropbacks} dropbacks`, tooltip: `${FULL}: sacks ÷ dropbacks.` }),
+        rate("fs_p2s", "Pressure → sack", full.sacks, full.pressures, { tone: "pff", dir: -1, minN: 40, fmt: "pct1", detail: `${full.sacks} / ${full.pressures} pressures`, tooltip: `${FULL}: sacks ÷ pressured dropbacks.` }),
+        rate("fs_scr", "Scramble rate", full.scrambles, full.dropbacks, { tone: "pff", dir: 0, minN: 0, fmt: "pct1", detail: `${full.scrambles} / ${full.dropbacks} dropbacks`, tooltip: `${FULL}: scrambles ÷ dropbacks.` }),
+        ...(pa ? [pa] : []),
+      ],
+    },
+  ];
+}
+
+export function qbOverview(plays: readonly QBPlay[], pff: PffValues, cover: PffCover | null, games: number, full?: QBFullSeasons | null): OverviewPage {
   const PFF = pffSource(cover);
   const graded = plays.filter((pl) => isThrown(pl) && pl.accuracy != null && pl.accuracy !== "tipped_ball");
   const onTgt = (list: readonly QBPlay[], key: string, label: string, minN: number, what: string) =>
@@ -259,6 +319,8 @@ export function qbOverview(plays: readonly QBPlay[], pff: PffValues, cover: PffC
       ],
     });
   }
+
+  main.push(...qbStyleSections(plays, full ?? null));
 
   const plat = (key: string, label: string, list: readonly QBPlay[]) => {
     const ot = list.filter((pl) => pl.accuracy === "on_target").length;
@@ -575,6 +637,8 @@ export interface OverviewPoolInput {
   pffVals: ReadonlyMap<string, PffValues>;
   /** Charted games with imported PFF stats, per prospect (PffTotals.games). */
   pffGames: ReadonlyMap<string, number>;
+  /** QBs' PFF full-season profiles (qbStyle.ts), for the Style & pocket section. */
+  qbFull?: ReadonlyMap<string, QBFullSeasons>;
 }
 
 /**
@@ -599,7 +663,7 @@ export function overviewPagesFor(inp: OverviewPoolInput): Map<string, OverviewPa
     for (const x of atPos) out.set(x.id, wrOverview(x, pffOf(x.id), coverOf(x.id)));
   } else if (pos === "QB") {
     const by = playsByProspect(inp.qbPlays, inp.games);
-    for (const x of atPos) out.set(x.id, qbOverview(by.get(x.id) ?? [], pffOf(x.id), coverOf(x.id), gameCount.get(x.id) ?? 0));
+    for (const x of atPos) out.set(x.id, qbOverview(by.get(x.id) ?? [], pffOf(x.id), coverOf(x.id), gameCount.get(x.id) ?? 0, inp.qbFull?.get(x.id) ?? null));
   } else if (pos === "RB") {
     const by = playsByProspect(inp.rbPlays, inp.games);
     for (const x of atPos) out.set(x.id, rbOverview(by.get(x.id) ?? [], pffOf(x.id), coverOf(x.id), gameCount.get(x.id) ?? 0));

@@ -33,8 +33,21 @@
 // liveScoresFrom), so Dynasty and Dynasty+ carry it.
 import { SEASON_DECAY } from "./seasonWeight";
 
+export const DEPTH_SIDES = ["left", "center", "right"] as const;
+export const DEPTH_BANDS = ["behind_los", "short", "medium", "deep"] as const;
+export const DEPTH_ZONES: readonly string[] = DEPTH_SIDES.flatMap((s) => DEPTH_BANDS.map((b) => `${s}_${b}`));
+
+// The season numbers the QB style profile reads out of each stored row's
+// `raw` (qbStyle.ts), selected by name so the 668-key row never loads whole:
+// `fs_<name>` ← raw.<PFF column>. Per zone, aimed passes and accuracy.
+export const SEASON_RAW_FIELDS: Readonly<Record<string, string>> = {
+  dropbacks: "dropbacks", attempts: "attempts", ttt_total: "ttt_total_time", adot: "avg_depth_of_target",
+  sacks: "sacks", pressures: "def_gen_pressures", scrambles: "scrambles",
+  ...Object.fromEntries(DEPTH_ZONES.flatMap((z) => [[`aimed_${z}`, `${z}_aimed_passes`], [`acc_${z}`, `${z}_accuracy_percent`]])),
+};
+
 /** One prospect-season of PFF's full-season passing depth (migration 092). */
-export interface PffSeasonDepthRow {
+export type PffSeasonDepthRow = {
   prospect_id: string;
   season: number;
   pff_player_id: number;
@@ -42,11 +55,14 @@ export interface PffSeasonDepthRow {
   /** PFF's <zone>_attempts: left / center / right × behind_los / short / medium / deep. */
   zone_attempts: Record<string, number>;
   fetched_at: string;
-}
-export const SEASON_DEPTH_SELECT = "prospect_id,season,pff_player_id,team_name,zone_attempts,fetched_at";
-
-export const DEPTH_SIDES = ["left", "center", "right"] as const;
-export const DEPTH_BANDS = ["behind_los", "short", "medium", "deep"] as const;
+} & {
+  /** SEASON_RAW_FIELDS, when selected (absent in older callers and tests). */
+  [k: `fs_${string}`]: number | null | undefined;
+};
+export const SEASON_DEPTH_SELECT = [
+  "prospect_id,season,pff_player_id,team_name,zone_attempts,fetched_at",
+  ...Object.entries(SEASON_RAW_FIELDS).map(([name, col]) => `fs_${name}:raw->${col}`),
+].join(",");
 /** The zones counted as middle of the field: 10+ air yards, between the numbers. */
 export const MIDDLE_ZONES = ["center_medium", "center_deep"] as const;
 

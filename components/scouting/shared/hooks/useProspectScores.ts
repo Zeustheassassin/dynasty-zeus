@@ -14,6 +14,8 @@ import { landingInputsFrom } from "../../../../lib/scouting/landingSpot";
 import { roleStandings, type RoleStanding } from "../../../../lib/scouting/roleStanding";
 import type { DraftPickRow } from "../../../../lib/nflDraft";
 import { middleUsageByProspect, type MiddleUsage } from "../../../../lib/scouting/middleUsage";
+import { qbFullSeasons, qbStyleValues, type QBFullSeasons } from "../../../../lib/scouting/qbStyle";
+import { pastFirstRead } from "../../../../lib/scouting/chartedComponents";
 import {
   computeAEScores, defenseFacedFrom, gamesByTierFrom, liveScoresFrom,
   type AEScores, type ProspectScoresInput, type ScoreView,
@@ -32,6 +34,8 @@ export interface UseProspectScoresReturn extends AEScores {
   liveScores: Map<string, ScoreView>;
   /** Each QB's middle-of-the-field share over his PFF full seasons (middleUsage.ts). */
   middleUsage: Map<string, MiddleUsage>;
+  /** Each QB's style and pocket profile over his PFF full seasons (qbStyle.ts). */
+  qbFull: Map<string, QBFullSeasons>;
   /** Each prospect's charted games by opponent tier, for the AE Score tooltip. */
   gamesByTier: Map<string, Record<OpponentTier, number>>;
   /** Each prospect's charted opponents' average defensive SP+, for the tooltip. */
@@ -111,11 +115,30 @@ export function useProspectScores(
     [prospects, games, rbPlays, qbPlays, tePlays, pffTotals],
   );
 
+  // QBs' full-season style profile; its middle 10+ share and the charted read
+  // rate join the PFF values as the Big Board's QB style columns (qs_*).
+  const qbFull = useMemo(() => qbFullSeasons(gradingData.pffSeasonDepth ?? []), [gradingData.pffSeasonDepth]);
+  const qbReads = useMemo(() => {
+    const g2p = new Map(games.map((g) => [g.id, g.prospect_id]));
+    const m = new Map<string, { num: number; den: number }>();
+    for (const pl of qbPlays) {
+      const r = pastFirstRead(pl);
+      const pid = g2p.get(pl.game_id);
+      if (r == null || !pid) continue;
+      const c = m.get(pid) ?? { num: 0, den: 0 };
+      c.den++; if (r) c.num++;
+      m.set(pid, c);
+    }
+    return m;
+  }, [games, qbPlays]);
   const pffVals = useMemo(() => {
     const m = new Map<string, PffValues>();
-    for (const p of prospects) m.set(p.id, pffValues(pffTotals?.get(p.id)));
+    for (const p of prospects) {
+      const v = pffValues(pffTotals?.get(p.id));
+      m.set(p.id, p.position === "QB" ? { ...v, ...qbStyleValues(qbFull.get(p.id), qbReads.get(p.id)) } : v);
+    }
     return m;
-  }, [prospects, pffTotals]);
+  }, [prospects, pffTotals, qbFull, qbReads]);
 
   // The landing spot (2027 classes on): role standing at the role he'll play,
   // and rookie competition, his team's picks ahead of him.
@@ -126,7 +149,7 @@ export function useProspectScores(
   );
 
   return {
-    ...ae, gameTiers, contexts, contextCov, liveScores, middleUsage, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, standings, pffVals, landing,
+    ...ae, gameTiers, contexts, contextCov, liveScores, middleUsage, qbFull, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, standings, pffVals, landing,
   };
 }
 

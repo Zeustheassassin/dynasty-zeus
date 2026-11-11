@@ -199,3 +199,15 @@ export const PFF_BOARD_KEYS: Record<PffPos, string[]> = {
   TE: ["pff_gr_off", "pff_yprr", "pff_rte_part", "pff_gr_rblk", "pff_pr_pct"],
 };
 export const PFF_ALL_TAB_KEY = "pff_gr_off";
+
+/** The Big Board QB tab's style band (qbStyle.ts qbStyleValues): not over the charted games like the PFF band. */
+export const QB_STYLE_BOARD_COLS: ColDef[] = [
+  col("pff_qs_mid10", "Mid 10+", "QB Style", "pct", {
+    colorDir: 1,
+    tooltip: "Throws 10+ yards downfield between the numbers ÷ attempts past the line, over every college season (PFF full seasons, not just the charted games). College QBs: median 22%. Feeds the AE Score's middle-of-the-field adjustment.",
+  }),
+  col("pff_qs_reads", "Reads", "QB Style", "pct", {
+    colorDir: 1,
+    tooltip: "Past 1st read: throws past his first read (2nd option or checkdown) ÷ throws from a read, from your charting. In the AE Score at 0.2.",
+  }),
+];

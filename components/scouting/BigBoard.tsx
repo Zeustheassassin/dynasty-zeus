@@ -28,7 +28,7 @@ import {
   GRADE_MIN, GRADE_MAX, GRADE_TIERS, type GradeField,
 } from "../../lib/scouting/prospectGrade";
 import { fmtVal, type ColDef } from "./stats/StatsTableShell";
-import { pffCols, PFF_ALL_TAB_KEY, PFF_BOARD_KEYS } from "./stats/pffCols";
+import { pffCols, PFF_ALL_TAB_KEY, PFF_BOARD_KEYS, QB_STYLE_BOARD_COLS } from "./stats/pffCols";
 import type { PffTotals, PffValues } from "../../lib/pff/totals";
 import { pffPos } from "../../lib/pff/stats";
 import { EMPTY_GRADING_DATA, type GradingData } from "../../lib/scouting/aeComponents";
@@ -581,6 +581,20 @@ export default function BigBoard({
     return <td key={c.key} className={`${tdBase} text-slate-300 ${cls}`} title={title}>{fmtVal(v, c.fmt)}</td>;
   }
 
+  // ── QB style cells ────────────────────────────────────────────
+  // Mid 10+ (PFF full seasons) and Reads (charted), each with its sample.
+  function styleCell(p: ProspectWithStats, c: ColDef, cls: string) {
+    const vals = pffVals.get(p.id);
+    const v = vals?.[c.key];
+    if (v == null) {
+      const why = c.key === "pff_qs_mid10" ? "No PFF full seasons yet (Scouting → PFF Links → Refresh QB stats)" : "No charted throws from a read";
+      return <td key={c.key} className={`${tdBase} text-slate-600 ${cls}`} title={why}>—</td>;
+    }
+    const n = vals?.[`${c.key}_n`];
+    const of = c.key === "pff_qs_mid10" ? "attempts past the line" : "throws from a read";
+    return <td key={c.key} className={`${tdBase} text-slate-300 ${cls}`} title={`${c.tooltip} · ${n ?? 0} ${of}`}>{fmtVal(v, c.fmt)}</td>;
+  }
+
   // ── AE Score cell ─────────────────────────────────────────────
   // "—" for a prospect under the position's sample floor, or at a position
   // without enough charted prospects to join the score yet; the tooltip says
@@ -795,6 +809,10 @@ export default function BigBoard({
       .filter(Boolean)
       .map((c) => (c.key === PFF_ALL_TAB_KEY ? { ...c, label: "Grade" } : c));
   })();
+
+  // The QB tab's style band, after PFF's: middle of the field over full
+  // seasons and the charted read rate (qbStyle.ts).
+  const styleColumnDefs: ColDef[] = boardTab === "QB" ? QB_STYLE_BOARD_COLS : [];
 
   const rankUpdater = boardTab === "all" ? onUpdateOverallRank : onUpdateRank;
   const rankField = (p: ProspectWithStats) => boardTab === "all" ? p.overall_rank : p.personal_rank;
@@ -1050,6 +1068,9 @@ export default function BigBoard({
             {pffColumnDefs.length > 0 && (
               <th colSpan={pffColumnDefs.length} title={PFF_BAND_TOOLTIP} className="px-2 py-1 text-center text-sky-900 font-medium border-r border-slate-800 whitespace-nowrap">PFF (charted games)</th>
             )}
+            {styleColumnDefs.length > 0 && (
+              <th colSpan={styleColumnDefs.length} title="How he plays: Mid 10+ over PFF's full college seasons, Reads from your charting" className="px-2 py-1 text-center text-amber-900 font-medium border-r border-slate-800 whitespace-nowrap">QB Style</th>
+            )}
           </tr>
           <tr className="border-b border-slate-800 bg-slate-950">
             <th className="sticky left-0 z-20 bg-slate-950 w-6 text-slate-700 text-center px-1">⠿</th>
@@ -1073,6 +1094,7 @@ export default function BigBoard({
             {th("Role", "role", "border-l border-r border-slate-800 text-violet-500", roleTooltip)}
             {aeCols.map((c, i) => th(c.label, `ae_${c.key}`, `${aeBorder[i]} text-emerald-700`, c.tooltip))}
             {pffColumnDefs.map((c, i) => th(c.label, c.key as SortKey, `${pffBorder(i, pffColumnDefs.length)} text-sky-600`, c.tooltip))}
+            {styleColumnDefs.map((c, i) => th(c.label, c.key as SortKey, `${pffBorder(i, styleColumnDefs.length)} text-amber-600`, c.tooltip))}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-900">
@@ -1103,6 +1125,7 @@ export default function BigBoard({
                 {roleCell(p)}
                 {aeCols.map((c, i) => aeCell(p, c, aeBorder[i]))}
                 {pffColumnDefs.map((c, i) => pffCell(p, c, pffBorder(i, pffColumnDefs.length)))}
+                {styleColumnDefs.map((c, i) => styleCell(p, c, pffBorder(i, styleColumnDefs.length)))}
               </tr>
             );
           })}

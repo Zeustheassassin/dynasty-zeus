@@ -10,6 +10,7 @@ import { formatGrade } from "../../../lib/scouting/prospectGrade";
 import { roleFitTooltip, roleInfo, roleLabel } from "../../../lib/scouting/roleFit";
 import { aeScoreMissingReason, dynastyScores, scorePieces, type AEKey } from "../../../lib/scouting/prospectScores";
 import type { OverviewPage } from "../../../lib/scouting/overviewStats";
+import { COLLEGE_ZONE_ACCURACY, COLLEGE_ZONE_SHARE, type QBFullSeasons } from "../../../lib/scouting/qbStyle";
 import { ChipLegend, ColumnSection, MainSection, ReportCard, ScoreTile, SectionTitle, type Ranks } from "./ReportParts";
 import { useReportTheme } from "./reportTheme";
 import type { UseProspectReportReturn } from "./useProspectReport";
@@ -160,6 +161,79 @@ function ScoreStrip({ p, pos, report }: { p: ProspectWithStats; pos: CompositePo
   return <div className={`px-6 pb-6 grid gap-3 break-inside-avoid ${t.layout.strip}`}>{tiles}</div>;
 }
 
+// ── QB: where he throws ──────────────────────────────────────
+
+const FIELD_ROWS = [
+  { band: "deep", label: "Deep 20+" },
+  { band: "medium", label: "Intermediate 10–19" },
+  { band: "short", label: "Short 0–9" },
+  { band: "behind_los", label: "Behind the line" },
+] as const;
+const FIELD_COLS = [
+  { side: "left", label: "Left" },
+  { side: "center", label: "Middle" },
+  { side: "right", label: "Right" },
+] as const;
+
+/** A tint for his share against college QBs': green more, red fewer, by how far off. */
+function shareTint(share: number, college: number): string {
+  const ratio = college > 0 ? share / college : 1;
+  const strength = Math.min(1, Math.abs(Math.log2(ratio)) / 1.5);
+  if (strength < 0.08) return "transparent";
+  const a = (0.08 + 0.32 * strength).toFixed(2);
+  return ratio >= 1 ? `rgba(16, 185, 129, ${a})` : `rgba(239, 68, 68, ${a})`;
+}
+
+/**
+ * Where a QB throws over PFF's full college seasons (qbStyle.ts): each zone's
+ * share of his attempts and his accuracy there, against college QBs'
+ * (2024–25 FBS seasons with 200+ attempts). Middle is between the numbers.
+ */
+function FieldUsage({ full }: { full: QBFullSeasons }) {
+  const t = useReportTheme();
+  const span = full.seasons.length === 1 ? `${full.seasons[0]}` : `${full.seasons[0]}–${full.seasons[full.seasons.length - 1]}`;
+  const attempts = Object.values(full.zones).reduce((a, z) => a + z.attempts, 0);
+  return (
+    <section className={`px-6 pb-6 pt-5 flex flex-col gap-3 border-t break-inside-avoid ${t.divider}`}>
+      <SectionTitle title={`Where he throws · PFF full seasons, ${span}`} />
+      <div className={`text-xs ${t.muted}`} title={full.teams}>
+        {attempts} attempts ({full.teams}). Each zone: his share of attempts (college QBs in brackets) and his accuracy there.
+        Green = more than college QBs throw there, red = fewer. Middle = between the numbers.
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] text-sm border-separate border-spacing-1">
+          <thead>
+            <tr className={`text-xs ${t.label}`}>
+              <th className="text-left font-semibold w-36" />
+              {FIELD_COLS.map((c) => <th key={c.side} className="font-semibold pb-1">{c.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {FIELD_ROWS.map((r) => (
+              <tr key={r.band}>
+                <td className={`text-xs font-semibold pr-2 ${t.label}`}>{r.label}</td>
+                {FIELD_COLS.map((c) => {
+                  const zone = `${c.side}_${r.band}`;
+                  const z = full.zones[zone];
+                  const college = COLLEGE_ZONE_SHARE[zone];
+                  const collegeAcc = COLLEGE_ZONE_ACCURACY[zone];
+                  return (
+                    <td key={zone} className={`rounded px-2 py-2 text-center border ${t.divider}`} style={{ background: shareTint(z.share, college) }}
+                      title={`${c.label}, ${r.label.toLowerCase()}: ${z.attempts} of ${attempts} attempts (${z.share.toFixed(1)}%; college QBs ${college}%). Accuracy ${z.accuracy == null ? "—" : `${z.accuracy.toFixed(1)}%`} on ${z.aimed} aimed (college QBs ${collegeAcc}%).`}>
+                      <div className={`font-bold tabular-nums ${t.strong}`}>{z.share.toFixed(1)}%<span className={`ml-1 text-[11px] font-normal ${t.muted}`}>({college})</span></div>
+                      <div className={`text-[11px] tabular-nums ${t.muted}`}>acc {z.accuracy == null ? "—" : `${Math.round(z.accuracy)}%`} ({Math.round(collegeAcc)})</div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 // ── Page 1: Overview ─────────────────────────────────────────
 
 /** Page 1: the scores, then the numbers that say what he is. */
@@ -173,6 +247,7 @@ export function OverviewView({ report, actions }: { report: UseProspectReportRet
       <ReportHeader kicker="PLAYER REPORT" p={p} facts={bioFacts(p, report, page.meta)} actions={actions} report={report} />
       <ScoreStrip p={p} pos={pos} report={report} />
       {page.main.map((s) => <MainSection key={s.key} section={s} ranks={ranks} id={p.id} />)}
+      {pos === "QB" && report.scores.qbFull.get(p.id) && <FieldUsage full={report.scores.qbFull.get(p.id)!} />}
       {page.columns.length > 0 && (
         <div className={`border-t grid ${t.layout.band} ${t.divider}`}>
           {page.columns.map((s) => <ColumnSection key={s.key} section={s} ranks={ranks} id={p.id} />)}

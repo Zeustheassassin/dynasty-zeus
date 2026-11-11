@@ -187,6 +187,31 @@ describe("qbOverview", () => {
     expect(stat(page, "twp")).toMatchObject({ dir: -1, detail: "2 / 80 dropbacks" });
     expect(stat(page, "p2s")).toMatchObject({ detail: "3 / 20 pressures" });
   });
+
+  it("shows style and pocket: charted reads and RPO always, PFF's full seasons once stored (2026-11-10)", () => {
+    const withRpo = [...plays, throwPlay("on_target", { play_type: "rpo", timing: "second_option" }), throwPlay("on_target", { timing: "checkdown", play_action: true })];
+    const charted = qbOverview(withRpo, {}, null, 2);
+    // Throws from a read: 5 first option (tipped and ungraded ones included), 1 second option, 1 checkdown; the scramble has no read.
+    expect(stat(charted, "reads")).toMatchObject({ dir: 1, detail: "2 / 7 throws from a read" });
+    expect(stat(charted, "rpo")).toMatchObject({ dir: 0, detail: "1 / 8" });
+    expect(stat(charted, "pa")).toMatchObject({ detail: "1 / 1" });
+    expect(stat(charted, "fs_mid10")).toBeUndefined();
+    const zone = (attempts: number, aimed = attempts, accuracy = 70) => ({ attempts, share: 0, aimed, accuracy });
+    const zones = Object.fromEntries(["left", "center", "right"].flatMap((s) => ["behind_los", "short", "medium", "deep"].map((b) => [`${s}_${b}`, zone(10)])));
+    const full = {
+      seasons: [2024, 2025], teams: "A 2024 · B 2025", attempts: 120, dropbacks: 150, ttt: 2.61, adot: 8.4,
+      sacks: 9, pressures: 45, scrambles: 6, behindLos: 25, deep: 25, middle: null,
+      middleRaw: { middle: 20, pastLos: 90 }, zones,
+    };
+    const page = qbOverview(withRpo, {}, null, 2, full);
+    expect(stat(page, "fs_mid10")).toMatchObject({ dir: 1, detail: "20 / 90 past the line" });
+    expect(stat(page, "fs_mid10")!.value).toBeCloseTo((100 * 20) / 90, 9);
+    expect(stat(page, "fs_ttt")).toMatchObject({ value: 2.61, dir: 0 });
+    expect(stat(page, "fs_behind")).toMatchObject({ detail: "30 / 120" });
+    expect(stat(page, "fs_sack")).toMatchObject({ dir: -1, detail: "9 / 150 dropbacks" });
+    expect(stat(page, "fs_p2s")).toMatchObject({ detail: "9 / 45 pressures" });
+    expect(section(page, "style")!.title).toContain("2024–2025");
+  });
 });
 
 describe("rbOverview", () => {

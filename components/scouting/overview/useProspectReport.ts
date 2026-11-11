@@ -77,8 +77,8 @@ export function useProspectReport(prospectId: string, data: OverviewData): UsePr
     [pffTotals],
   );
   const pages = useMemo(
-    () => overviewPagesFor({ prospectId, prospects, games, qbPlays, rbPlays, tePlays, pffVals, pffGames }),
-    [prospectId, prospects, games, qbPlays, rbPlays, tePlays, pffVals, pffGames],
+    () => overviewPagesFor({ prospectId, prospects, games, qbPlays, rbPlays, tePlays, pffVals, pffGames, qbFull: scores.qbFull }),
+    [prospectId, prospects, games, qbPlays, rbPlays, tePlays, pffVals, pffGames, scores.qbFull],
   );
   const ranks = useMemo(() => percentileRanks(pages), [pages]);
 

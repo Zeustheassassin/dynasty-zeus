@@ -54,6 +54,9 @@ const one = (hit: boolean) => ({ n: 1, hits: hit ? 1 : 0 });
 // "make it happen" QB and the 2nd / 3rd read QB are different players), and
 // scrambles, sacks and throwaways have no read.
 const READ_TIMINGS: ReadonlySet<string> = new Set(["first_option", "second_option", "checkdown"]);
+/** Past his first read on a throw from a read (true / false), or null when no read is charted. */
+export const pastFirstRead = (pl: Pick<QBPlay, "play_type" | "timing">): boolean | null =>
+  pl.play_type !== "run" && pl.timing != null && READ_TIMINGS.has(pl.timing) ? pl.timing !== "first_option" : null;
 
 export const QB_CHARTED: readonly PlayCountDef<QBPlay>[] = [
   { key: "ch_qb_p2s", label: "Sk% pressured", source: "charted", pos: "QB", dir: -1, scale: 100, unit: "pressured dropbacks", floor: 20, suffix: "%",
@@ -67,7 +70,7 @@ export const QB_CHARTED: readonly PlayCountDef<QBPlay>[] = [
   // first-read throws, so an RPO-heavy QB reads lower.
   { key: "ch_qb_reads", label: "Past 1st read%", source: "charted", pos: "QB", dir: 1, scale: 100, unit: "throws", floor: 25, suffix: "%",
     description: "Throws past his first read (2nd option or checkdown) per throw from a read, from your charting: working the progression. Extended plays, scrambles, sacks and throwaways have no read, so they don't count.",
-    of: (pl) => (pl.play_type !== "run" && pl.timing != null && READ_TIMINGS.has(pl.timing) ? one(pl.timing !== "first_option") : null) },
+    of: (pl) => { const r = pastFirstRead(pl); return r == null ? null : one(r); } },
 ];
 
 /**

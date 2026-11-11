@@ -232,9 +232,12 @@ describe("BigBoard Above Exp columns", () => {
     const cols = ["AAE", "Outside", "Inside", "Deep", "Intermediate", "Short"];
     const at = headerLabels().indexOf("AAE");
     expect(headerLabels().slice(at, at + cols.length)).toEqual(cols);
-    expect(within(screen.getAllByRole("row")[0]).getAllByRole("columnheader").slice(-3).map((h) => h.textContent))
-      .toEqual(["Above Exp", "AAE Breakdown", "PFF (charted games)"]);
+    expect(within(screen.getAllByRole("row")[0]).getAllByRole("columnheader").slice(-4).map((h) => h.textContent))
+      .toEqual(["Above Exp", "AAE Breakdown", "PFF (charted games)", "QB Style"]);
     expect(cols.map((l) => cell("Quarter One", l))).toEqual(["+3.5", "+1.5", "+7.2", "—", "-3.0", "+2.0"]);
+    // The style band: middle of the field (PFF full seasons) and reads (charted); none loaded here.
+    expect(headerLabels().slice(-2)).toEqual(["Mid 10+", "Reads"]);
+    expect(cell("Quarter One", "Mid 10+")).toBe("—");
   });
 
   it("adds the RB breakdown to the RB tab", () => {
