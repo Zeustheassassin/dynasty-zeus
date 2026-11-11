@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { NflRoomsResponse, NflTeamRoom, RoomPlayer } from "@/lib/nflRooms";
 import {
-  OFFENSE_VALUE, PATH_VALUE, PECKING_VALUE, PROE_EDGE, QB_CAP,
-  ageOnSept1, isEstablished, patchedLandingInputs, peckingValue, qbValue, resolveTeamLanding, savedEntries,
+  ONE_STARTER, OFFENSE_VALUE, PATH_VALUE, PECKING_VALUE, PROE_EDGE, QB_CAP, ROLE_PASS_SHARE,
+  ageOnSept1, isEstablished, passShare, patchedLandingInputs, peckingValue, qbValue, resolveTeamLanding, roomStarters, savedEntries,
   suggestedOffense, suggestedPath, suggestedVetsAhead, teamLandingLines, teamLandingTotal, teamSnapshotFor, vetsAheadLabel,
   type SnapPlayer, type TeamSnapshot,
 } from "@/lib/scouting/teamLanding";
@@ -52,7 +52,23 @@ describe("the values", () => {
 describe("suggestions", () => {
   it("counts the established veterans in his room", () => {
     const s = snap({ room: [vet("Star", 90, 0.88), vet("Hurt Star", 80, 0.2), vet("Fringe", 55, 0.6), vet("Spot", 70, 0.1)] });
-    expect(suggestedVetsAhead(s).map((v) => v.name)).toEqual(["Star", "Hurt Star"]);
+    expect(suggestedVetsAhead(s, "WR").map((v) => v.name)).toEqual(["Star", "Hurt Star"]);
+  });
+
+  it("counts a QB's or RB's starter on a regular's snaps whatever his grade", () => {
+    const weak = vet("Weak Starter", 41.7, 0.88, "1998-03-10", 1);
+    const backup = vet("Backup", 50, 0.5, "1999-01-01", 2);
+    const s = snap({ room: [weak, backup] });
+    expect(roomStarters(s.room, "QB").map((v) => v.name)).toEqual(["Weak Starter"]);
+    expect(suggestedVetsAhead(s, "QB").map((v) => v.name)).toEqual(["Weak Starter"]);
+    expect(suggestedVetsAhead(s, "RB").map((v) => v.name)).toEqual(["Weak Starter"]);
+    // More than one starting spot: a WR or TE is expected to pass a regular under the bar.
+    expect(suggestedVetsAhead(s, "WR")).toEqual([]);
+    expect(suggestedVetsAhead(s, "TE")).toEqual([]);
+    expect(ONE_STARTER).toEqual({ QB: true, RB: true, WR: false, TE: false });
+    // A first-on-the-chart fill-in short of a regular's share isn't the starter.
+    expect(suggestedVetsAhead(snap({ room: [vet("Fill-in", 61, 0.31, null, 1), backup] }), "QB")).toEqual([]);
+    expect(roomStarters([], "QB")).toEqual([]);
   });
 
   it("reads pass-heavy and run-heavy off pass rate over expectation", () => {
@@ -80,8 +96,17 @@ describe("suggestions", () => {
 
   it("opens a QB's path behind a bridge (under the median regular)", () => {
     const s = snap({ bar: { regular: 60, star: 80 } });
-    expect(suggestedPath("QB", 2027, s, [vet("Bridge", 65, 0.9, "2000-01-01")]).call).toBe("opens");
+    expect(suggestedPath("QB", 2027, s, [vet("Bridge", 65, 0.9, "2000-01-01")])).toEqual({ call: "opens", why: "Bridge 65.0: graded like a bridge (under 70.0)" });
     expect(suggestedPath("QB", 2027, s, [vet("Starter", 75, 0.9, "2000-01-01")]).call).toBe("same");
+  });
+
+  it("opens an RB's path behind a weak starter (under the bar)", () => {
+    const weak = vet("Weak", 59.9, 0.7, "2003-01-01");
+    expect(suggestedPath("RB", 2027, snap(), [weak])).toEqual({ call: "opens", why: "Weak 59.9: a weak starter (under 60.0)" });
+    expect(suggestedPath("RB", 2027, snap(), [vet("Solid", 60, 0.7, "2003-01-01")]).call).toBe("same");
+    expect(suggestedPath("RB", 2027, snap(), [weak, vet("Solid", 70, 0.5, "2003-01-01")]).call).toBe("same");
+    // At WR a weak regular isn't counted ahead in the first place.
+    expect(suggestedPath("WR", 2027, snap(), [weak]).call).toBe("same");
   });
 });
 
@@ -153,6 +178,24 @@ describe("resolveTeamLanding", () => {
 
   it("is null off the four positions", () => {
     expect(resolveTeamLanding({ position: "OT", draft_class_year: 2027, draft_team: "Eagles" })).toBeNull();
+  });
+
+  it("halves a Blocking TE's QB and offense values, and only his", () => {
+    const te = (role: "blocking" | "move" | null) =>
+      resolveTeamLanding({ position: "TE", draft_class_year: 2027, draft_team: "Eagles", landing_inputs: { pff: snap({ room }) } }, role)!;
+    const full = te(null);
+    expect(full).toMatchObject({ role: null, passShare: 1 });
+    expect(full.values.qb).toBeCloseTo(0.1, 12);
+    expect(full.values.offense).toBe(OFFENSE_VALUE.TE.pass);
+    expect(te("move").values).toEqual(full.values);
+    const blocking = te("blocking");
+    expect(blocking).toMatchObject({ role: "blocking", passShare: ROLE_PASS_SHARE.blocking });
+    expect(blocking.values).toEqual({ ...full.values, qb: expect.closeTo(0.05, 12), offense: OFFENSE_VALUE.TE.pass / 2 });
+    expect(passShare("blocking")).toBe(0.5);
+    expect(passShare(undefined)).toBe(1);
+    const lines = teamLandingLines(blocking, { landing: 1, offense: 1 });
+    expect(lines[2]).toBe("QB: Starter 82.0 passing grade, suggested (half for a Blocking TE) → +0.05");
+    expect(lines[3]).toBe("Offense: pass-heavy, suggested (pass rate over expectation +4.5% in 2026) (half for a Blocking TE) → +0.05");
   });
 });
 

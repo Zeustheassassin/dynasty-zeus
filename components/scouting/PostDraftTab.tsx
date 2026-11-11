@@ -25,9 +25,9 @@ import { nflTeamId } from "../../lib/nflDraft";
 import type { NflRoomsResponse, RoomPos } from "../../lib/nflRooms";
 import { competitionLine, standingPoolText } from "../../lib/scouting/landingSpot";
 import { roleInfo, type RoleFit, type RolePos } from "../../lib/scouting/roleFit";
-import { poolRankText, roleStandingText, type RoleStanding } from "../../lib/scouting/roleStanding";
+import { poolRankText, rolePlayed, roleStandingText, type RoleStanding } from "../../lib/scouting/roleStanding";
 import {
-  OFFENSE_LABEL, OFFENSE_LEANS, PATH_CALLS, PATH_LABEL, offenseLine, pathLine, patchedLandingInputs, qbLine, resolveTeamLanding,
+  ONE_STARTER, OFFENSE_LABEL, OFFENSE_LEANS, PATH_CALLS, PATH_LABEL, offenseLine, pathLine, patchedLandingInputs, qbLine, resolveTeamLanding,
   snapPlayerText, suggestedOffense, suggestedPath, suggestedVetsAhead, teamSnapshotFor, vetsAheadLabel, vetsAheadLine, vetsAheadMax,
   type LandingSaved, type TeamLanding, type TeamSnapshot,
 } from "../../lib/scouting/teamLanding";
@@ -63,7 +63,7 @@ const SELECT_CLS = "bg-slate-900 border border-slate-700 rounded text-slate-200 
 
 /** A room in a line: "vets ahead 2 (Smith 90.5 (88%), …) · QB Hurts 78.2 · pass-heavy". */
 function snapshotSummary(snap: TeamSnapshot, pos: RoomPos, classYear: number): string {
-  const ahead = suggestedVetsAhead(snap);
+  const ahead = suggestedVetsAhead(snap, pos);
   const parts = [`vets ahead ${vetsAheadLabel(pos, ahead.length)}${ahead.length ? ` (${ahead.map(snapPlayerText).join(", ")})` : ""}`];
   const path = suggestedPath(pos, classYear, snap, ahead);
   if (path.call === "opens") parts.push(`path opens (${path.why})`);
@@ -142,7 +142,11 @@ export default function PostDraftTab({
   );
   const boardPicks = yearPicks.filter((pk) => draftSkillPosition(pk.position) != null).length;
 
-  const team = useMemo(() => new Map(drafted.map((p) => [p.id, resolveTeamLanding(p)])), [drafted]);
+  // His role halves the QB and offense values for a Blocking TE, as in Dynasty+ (landingInputsFrom).
+  const team = useMemo(
+    () => new Map(drafted.map((p) => [p.id, resolveTeamLanding(p, rolePlayed(p, roleFits.get(p.id))?.role ?? null)])),
+    [drafted, roleFits],
+  );
   // After a load: each drafted player's room from it, split into rooms not saved
   // yet (or saved for another team) and rooms that would replace a saved one.
   const roomRows = useMemo(() => {
@@ -448,14 +452,14 @@ function TeamCells({ p, t, weights, disabled, onSave }: {
   const pos = t.pos;
   const saved = p.landing_inputs ?? null;
   const snap = t.snapshot;
-  const ahead = snap ? suggestedVetsAhead(snap) : [];
+  const ahead = snap ? suggestedVetsAhead(snap, pos) : [];
   const autoVets = snap ? `Auto: ${vetsAheadLabel(pos, ahead.length)}` : "—";
   const autoPath = snap ? `Auto: ${PATH_LABEL[suggestedPath(pos, p.draft_class_year, snap, ahead).call]}` : "—";
   const pffLean = snap ? suggestedOffense(snap.passOe) : null;
   const autoLean = pffLean ? `Auto: ${OFFENSE_LABEL[pffLean]}` : "—";
   const pffQb = snap?.qb && !snap.qb.rookie ? snap.qb.grade : null;
   const roomTitle = snap
-    ? `${snap.team}, depth chart ${dateOf(snap.asOf)}, ${snap.season} grades:\n${snap.room.map(snapPlayerText).join("\n") || "no veterans at his position"}${snap.bar ? `\nEstablished = 40%+ of snaps and ${snap.bar.regular.toFixed(1)}+ (or 15%+ and ${snap.bar.star.toFixed(1)}+).` : ""}`
+    ? `${snap.team}, depth chart ${dateOf(snap.asOf)}, ${snap.season} grades:\n${snap.room.map(snapPlayerText).join("\n") || "no veterans at his position"}${snap.bar ? `\nEstablished = 40%+ of snaps and ${snap.bar.regular.toFixed(1)}+ (or 15%+ and ${snap.bar.star.toFixed(1)}+).` : ""}${ONE_STARTER[pos] ? "\nThe first on the depth chart counts at 40%+ of snaps whatever his grade (one starting spot)." : ""}`
     : t.stale ? "The saved room is for another team: load the rooms and save his again." : "No room saved yet: load the NFL rooms and save them.";
   const tone = (v: number) => (v > 0 ? "text-emerald-400" : v < 0 ? "text-red-400" : "text-slate-500");
   const val = (v: number) => <span className={`ml-1 ${tone(v)}`}>{sgn2(v)}</span>;

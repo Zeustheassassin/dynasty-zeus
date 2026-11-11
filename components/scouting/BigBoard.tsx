@@ -679,7 +679,7 @@ export default function BigBoard({
     if (d.rushing) lines.push(`Rushing: ${d.rushing.label} → ${signed(weights.rushing * d.rushing.value, 2)}`);
     lines.push(`= Dynasty ${signed(d.dynasty, 2)}`);
     if (plus && d.draftCapital != null) {
-      lines.push(`Drafted: ${draftCapitalLabel(p.draft_round!, p.draft_pick)} → ${signed(weights.draft * d.draftCapital, 2)}`);
+      lines.push(`Drafted: ${draftCapitalLabel(p.draft_round!, p.draft_pick, p.position)} → ${signed(weights.draft * d.draftCapital, 2)}`);
       lines.push(...landingLines(d.landing, p.draft_class_year, weights));
       lines.push(`= Dynasty+ ${signed(d.plus!, 2)}`);
     }

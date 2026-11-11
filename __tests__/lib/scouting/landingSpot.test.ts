@@ -132,6 +132,21 @@ describe("landingInputsFrom", () => {
     expect(landingInputsFrom([withInputs], [], fits).get("ti")!.team!.values.pecking).toBe(-0.2);
   });
 
+  it("halves a Blocking TE's QB and offense inputs, by Will Play (Post) or his best bucket", () => {
+    const inputs = { qbGrade: 92, offense: "pass" as const };
+    const te = (id: string, will_play_post = "") =>
+      prospect(id, "Block Tight", "TE", { draft_round: 2, draft_pick: 60, draft_team: "Eagles", will_play_post, landing_inputs: inputs });
+    const m = landingInputsFrom(
+      [te("best"), te("post", "blocking"), te("moved", "move")],
+      draft,
+      new Map([["best", { best: "blocking" } as unknown as RoleFit], ["moved", { best: "blocking" } as unknown as RoleFit]]),
+    );
+    expect(m.get("best")!.team).toMatchObject({ role: "blocking", passShare: 0.5, values: { qb: 0.1, offense: 0.05 } });
+    expect(m.get("post")!.team).toMatchObject({ role: "blocking", passShare: 0.5 });
+    // Will Play (Post) wins over his best bucket.
+    expect(m.get("moved")!.team).toMatchObject({ role: "move", passShare: 1, values: { qb: 0.2, offense: 0.1 } });
+  });
+
   it("reads a Move TE prospect from his role bucket when Will Play (Post) is blank", () => {
     const m = landingInputsFrom(
       [prospect("rb", "Block Tight", "TE", { draft_round: 2, draft_pick: 60, draft_team: "Eagles" })],

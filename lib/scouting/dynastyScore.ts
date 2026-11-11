@@ -129,27 +129,79 @@ export const ROUND_MIDDLE_PICK: Record<number, number> = {
 
 const CAPITAL_ANCHORS: readonly [number, number][] = [1, 2, 3, 4, 5, 6, 7].map((r) => [ROUND_MIDDLE_PICK[r], DRAFT_CAPITAL[r]]);
 
-/** Draft capital at an overall pick (1 = first pick), on the round table's scale. */
-export function draftCapitalForPick(pick: number): number {
-  const a = CAPITAL_ANCHORS;
+// QBs fall off faster after round 1 (the user, 2026-11-10: "QB's drafted after
+// round 1 rarely" hit). The user's QB hit rates (multi-year starter, a second
+// contract as a starter, or star level; 2016–22 classes): round 1 ~40–50%,
+// round 2 ~15–20%, round 3 ~10–15%, rounds 4–7 ~3–5%. Taken to log-odds on the
+// same scale as the RB/WR curve above, at each range's middle (17.5%, 12.5%,
+// then 5 / 4 / 3.5 / 3% across rounds 4–7): round 2 +0.04, round 3 −0.14,
+// round 4 −0.58, round 5 −0.68, round 6 −0.75, round 7 −0.82, rounded to the
+// table's 0.05. So a 2nd-round QB hits about as often as a 3rd/4th-round RB or
+// WR, and a 4th-rounder about as often as a 7th.
+//
+// Round 1 stays as it is for every position, through its last pick (the user:
+// "I'd be more willing to gamble on Carr with the first round value"; a
+// first-round QB hits at least as often as the RB/WR curve credits, top picks
+// more). The cliff comes after it: from pick 32 down to the 2nd round's middle.
+// The user's check: a 4th-round QB they like (Drake Lindsey at pick 109 in the
+// 2027 mock) belongs in the middle to late 3rd round of a rookie draft, not the
+// 2nd; this puts him about 31st.
+export const QB_DRAFT_CAPITAL: Record<number, number> = {
+  1: 1.0, 2: 0.05, 3: -0.15, 4: -0.6, 5: -0.7, 6: -0.75, 7: -0.8, [UNDRAFTED_ROUND]: -1.0,
+};
+/** Round 1's last pick, through which a QB's capital is everyone's. */
+export const QB_ROUND1_LAST = 32;
+
+function anchorValue(a: readonly [number, number][], pick: number): number {
   let i = 0;
   while (i < a.length - 2 && pick > a[i + 1][0]) i++;
   const [x0, y0] = a[i];
   const [x1, y1] = a[i + 1];
-  const v = y0 + ((pick - x0) * (y1 - y0)) / (x1 - x0);
+  return y0 + ((pick - x0) * (y1 - y0)) / (x1 - x0);
+}
+
+const QB_CAPITAL_ANCHORS: readonly [number, number][] = [
+  [ROUND_MIDDLE_PICK[1], QB_DRAFT_CAPITAL[1]],
+  [QB_ROUND1_LAST, anchorValue(CAPITAL_ANCHORS, QB_ROUND1_LAST)],
+  ...[2, 3, 4, 5, 6, 7].map((r): [number, number] => [ROUND_MIDDLE_PICK[r], QB_DRAFT_CAPITAL[r]]),
+];
+
+/** Draft capital at an overall pick (1 = first pick), on the round table's scale; a QB's falls faster after round 1. */
+export function draftCapitalForPick(pick: number, pos?: string | null): number {
+  const v = anchorValue(pos === "QB" ? QB_CAPITAL_ANCHORS : CAPITAL_ANCHORS, pick);
   // Never below going undrafted.
   return Math.max(DRAFT_CAPITAL[UNDRAFTED_ROUND], v);
+}
+
+/** 2025's round lines (comp picks stretch rounds 3 to 7), for a QB's round average. */
+export const ROUND_PICKS: Record<number, readonly [number, number]> = {
+  1: [1, 32], 2: [33, 64], 3: [65, 102], 4: [103, 138], 5: [139, 176], 6: [177, 216], 7: [217, 257],
+};
+
+/**
+ * A QB's average capital over a round, for a round with no pick set. (The
+ * RB/WR table's values are their rounds' averages already, within 0.025; a
+ * QB's round 2 isn't, since the cliff after round 1 runs into it.)
+ */
+export function qbRoundAverage(round: number): number | null {
+  const range = ROUND_PICKS[round];
+  if (!range) return null;
+  let s = 0;
+  for (let p = range[0]; p <= range[1]; p++) s += draftCapitalForPick(p, "QB");
+  return s / (range[1] - range[0] + 1);
 }
 
 /**
  * Draft capital for Dynasty+: by overall pick when one is set, else the round's
  * average. Undrafted is −1 whatever the pick (the Rookie Draft Hub writes an
- * undrafted rookie as pick 300). Null before a round is set.
+ * undrafted rookie as pick 300). Null before a round is set. A QB's falls
+ * faster after round 1 (QB_DRAFT_CAPITAL).
  */
-export function draftCapitalAt(round: number | null, pick: number | null): number | null {
+export function draftCapitalAt(round: number | null, pick: number | null, pos?: string | null): number | null {
   if (round == null) return null;
   if (round === UNDRAFTED_ROUND) return DRAFT_CAPITAL[UNDRAFTED_ROUND];
-  if (pick != null && pick >= 1) return draftCapitalForPick(pick);
+  if (pick != null && pick >= 1) return draftCapitalForPick(pick, pos);
+  if (pos === "QB") return qbRoundAverage(round);
   return DRAFT_CAPITAL[round] ?? null;
 }
 
@@ -192,7 +244,8 @@ export interface CompetitionResult {
 export function rookieCompetition(myCapital: number, competitors: readonly Competitor[]): CompetitionResult {
   let sum = 0;
   const out = competitors.map((c) => {
-    const gap = Math.max(0, draftCapitalForPick(c.overall) - myCapital);
+    // Each on his own position's curve (a QB behind a QB: both on the QB curve).
+    const gap = Math.max(0, draftCapitalForPick(c.overall, c.position) - myCapital);
     const cost = COMPETITION_PER_PLAYER * Math.min(1, gap / COMPETITION_FULL_GAP);
     sum += cost;
     return { ...c, cost };
@@ -287,7 +340,7 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
   const size = flags.reduce((s, f) => s + f.value, 0);
   const rushing = inp.pos === "QB" ? inp.rushing ?? null : null;
   const dynasty = inp.aeScore + w.age * (window ?? 0) + w.size * size + (w.rushing ?? 0) * (rushing?.value ?? 0);
-  const draftCapital = draftCapitalAt(inp.draftRound, inp.draftPick);
+  const draftCapital = draftCapitalAt(inp.draftRound, inp.draftPick, inp.pos);
   let landing: LandingBreakdown | null = null;
   if (inp.landing && draftCapital != null) {
     const competition = inp.landing.competitors ? rookieCompetition(draftCapital, inp.landing.competitors) : null;

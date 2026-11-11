@@ -18,12 +18,15 @@ export function draftRoundLabel(round: number): string {
 /**
  * What Dynasty+'s draft capital was read from: "1st round, pick 20", "1st round
  * (no pick set, the round's average)", or "Undrafted" (dynastyScore.draftCapitalAt).
+ * A QB past round 1 says he's on the QB scale (dynastyScore.QB_DRAFT_CAPITAL).
  */
-export function draftCapitalLabel(round: number, pick: number | null): string {
+export function draftCapitalLabel(round: number, pick: number | null, pos?: string | null): string {
   if (round === UNDRAFTED_ROUND) return "Undrafted";
-  return pick != null && pick >= 1
-    ? `${draftRoundLabel(round)} round, pick ${pick}`
-    : `${draftRoundLabel(round)} round (no pick set, the round's average)`;
+  const hasPick = pick != null && pick >= 1;
+  const qb = pos === "QB" && (hasPick ? pick! > 32 : round >= 2) ? ", on the QB scale (QBs fall faster after round 1)" : "";
+  return hasPick
+    ? `${draftRoundLabel(round)} round, pick ${pick}${qb}`
+    : `${draftRoundLabel(round)} round (no pick set, the round's average)${qb}`;
 }
 
 /** A compact NFL draft slot: "KC · R1 · #8", "KC · Undrafted". Null when empty. */

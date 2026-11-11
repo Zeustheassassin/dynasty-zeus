@@ -10,9 +10,14 @@ import {
   WR_LIGHT_PENALTY,
   draftCapitalAt,
   draftCapitalForPick,
+  qbRoundAverage,
+  rookieCompetition,
+  QB_DRAFT_CAPITAL,
+  QB_ROUND1_LAST,
+  ROUND_PICKS,
   type DynastyInputs,
 } from "@/lib/scouting/dynastyScore";
-import { draftCapitalLabel } from "@/lib/draftRound";
+import { UNDRAFTED_ROUND, draftCapitalLabel } from "@/lib/draftRound";
 
 describe("careerWindowAdjustment", () => {
   it("credits young rookies and docks old ones, more so at short-prime positions", () => {
@@ -183,5 +188,69 @@ describe("draft capital by pick", () => {
     expect(draftCapitalLabel(1, 20)).toBe("1st round, pick 20");
     expect(draftCapitalLabel(5, null)).toBe("5th round (no pick set, the round's average)");
     expect(draftCapitalLabel(8, 300)).toBe("Undrafted");
+  });
+});
+
+describe("a QB's draft capital", () => {
+  it("is everyone's through round 1's last pick", () => {
+    for (let pick = 1; pick <= QB_ROUND1_LAST; pick++) {
+      expect(draftCapitalForPick(pick, "QB")).toBeCloseTo(draftCapitalForPick(pick), 12);
+    }
+    // The user's call: a late first-round QB (CJ Carr at 26 in the 2027 mock) keeps first-round value.
+    expect(draftCapitalForPick(26, "QB")).toBeCloseTo(draftCapitalForPick(26, "WR"), 12);
+  });
+
+  it("puts the QB table at each later round's middle, under everyone's, and falls with every pick", () => {
+    for (const r of [2, 3, 4, 5, 6, 7]) {
+      expect(draftCapitalForPick(ROUND_MIDDLE_PICK[r], "QB")).toBeCloseTo(QB_DRAFT_CAPITAL[r], 12);
+      expect(QB_DRAFT_CAPITAL[r]).toBeLessThan(DRAFT_CAPITAL[r]);
+    }
+    for (let pick = QB_ROUND1_LAST + 1; pick <= 262; pick++) {
+      expect(draftCapitalForPick(pick, "QB")).toBeLessThan(draftCapitalForPick(pick));
+      expect(draftCapitalForPick(pick, "QB")).toBeLessThan(draftCapitalForPick(pick - 1, "QB"));
+    }
+    expect(QB_DRAFT_CAPITAL[1]).toBe(DRAFT_CAPITAL[1]);
+    expect(QB_DRAFT_CAPITAL[UNDRAFTED_ROUND]).toBe(DRAFT_CAPITAL[UNDRAFTED_ROUND]);
+  });
+
+  it("drops off a cliff after round 1, and a 4th-rounder to about a 7th-round WR", () => {
+    expect(draftCapitalForPick(33, "QB")).toBeCloseTo(0.80625 - 0.75625 / 16.5, 9);
+    // Drake Lindsey at pick 109 in the 2027 mock: between round 3's middle (−0.15) and round 4's (−0.6).
+    expect(draftCapitalForPick(109, "QB")).toBeCloseTo(-0.15 - (26 * 0.45) / 37, 9);
+    expect(draftCapitalForPick(109)).toBeCloseTo(0.25 - (26 * 0.4) / 37, 9); // everyone else: about −0.03
+    expect(draftCapitalForPick(257, "QB")).toBeCloseTo(-0.825, 9);
+    expect(draftCapitalForPick(2000, "QB")).toBe(-1);
+  });
+
+  it("averages the QB curve over a round without a pick, and leaves the others on the table", () => {
+    expect(qbRoundAverage(1)).toBeCloseTo(1, 9);
+    expect(qbRoundAverage(2)).toBeGreaterThan(QB_DRAFT_CAPITAL[2]); // the cliff runs into round 2
+    expect(qbRoundAverage(9)).toBeNull();
+    expect(draftCapitalAt(2, null, "QB")).toBeCloseTo(qbRoundAverage(2)!, 12);
+    expect(draftCapitalAt(2, null, "WR")).toBe(DRAFT_CAPITAL[2]);
+    expect(draftCapitalAt(4, 109, "QB")).toBeCloseTo(draftCapitalForPick(109, "QB"), 12);
+    expect(draftCapitalAt(8, 300, "QB")).toBe(-1);
+    expect(ROUND_PICKS[7]).toEqual([217, 257]);
+  });
+
+  it("scores a QB on his curve, and his rookie competition too", () => {
+    const qb = (draftPick: number): DynastyInputs => ({
+      pos: "QB", aeScore: 0, rookieAge: null, heightIn: null, weightLb: null, draftRound: 4, draftPick,
+    });
+    expect(scoreDynasty(qb(109), DEFAULT_DYNASTY_WEIGHTS).draftCapital).toBeCloseTo(draftCapitalForPick(109, "QB"), 12);
+    // A QB taken at 20 ahead of one at 109: on the QB curve they're more than a full
+    // point of capital apart (the full 0.2); on everyone else's, 0.987 apart.
+    const ahead = { name: "Ahead", position: "QB" as const, overall: 20, round: 1, moveTe: false };
+    expect(rookieCompetition(draftCapitalForPick(109, "QB"), [ahead]).competitors[0].cost).toBeCloseTo(0.2, 12);
+    expect(rookieCompetition(draftCapitalForPick(109), [{ ...ahead, position: "WR" as const }]).competitors[0].cost)
+      .toBeCloseTo(0.2 * (draftCapitalForPick(20) - draftCapitalForPick(109)), 12);
+  });
+
+  it("says a QB past round 1 is on the QB scale", () => {
+    expect(draftCapitalLabel(2, 40, "QB")).toBe("2nd round, pick 40, on the QB scale (QBs fall faster after round 1)");
+    expect(draftCapitalLabel(3, null, "QB")).toBe("3rd round (no pick set, the round's average), on the QB scale (QBs fall faster after round 1)");
+    expect(draftCapitalLabel(1, 26, "QB")).toBe("1st round, pick 26");
+    expect(draftCapitalLabel(2, 40, "WR")).toBe("2nd round, pick 40");
+    expect(draftCapitalLabel(8, 300, "QB")).toBe("Undrafted");
   });
 });

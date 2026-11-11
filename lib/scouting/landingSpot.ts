@@ -10,7 +10,7 @@ import type { Prospect } from "../types";
 import { COMPETITION_CAP, LANDING_FIRST_CLASS, type Competitor, type LandingBreakdown, type LandingInputs } from "./dynastyScore";
 import { isCompositePos } from "./prospectScores";
 import { roleInfo, type RoleFit } from "./roleFit";
-import { ROLE_STANDING_MAX, roleStandingText, willPlayRole, type RoleStanding } from "./roleStanding";
+import { ROLE_STANDING_MAX, rolePlayed, roleStandingText, willPlayRole, type RoleStanding } from "./roleStanding";
 import { resolveTeamLanding, teamLandingLines } from "./teamLanding";
 
 export type LandingProspect = Pick<
@@ -71,7 +71,8 @@ export function landingInputsFrom(
     if (p.draft_class_year == null || p.draft_class_year < LANDING_FIRST_CLASS) continue;
     if (!isCompositePos(p.position) || p.draft_round == null) continue;
     const standing = standings.get(p.id) ?? null;
-    const teamInputs = resolveTeamLanding(p);
+    // His role (Will Play (Post), else his best bucket) halves the QB and offense values for a Blocking TE.
+    const teamInputs = resolveTeamLanding(p, rolePlayed(p, roleFits.get(p.id))?.role ?? null);
     const list = byYear.get(p.draft_class_year);
     if (!list?.length) {
       out.set(p.id, { competitors: null, note: `the ${p.draft_class_year} draft results aren't loaded (Post-Draft tab)`, standing, team: teamInputs });
