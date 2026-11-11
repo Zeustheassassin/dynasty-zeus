@@ -65,7 +65,8 @@ export interface ContractStatus {
   /** He has a current deal (false = free agent: released, expired or retired). */
   active: boolean;
   kind: ContractKind;
-  /** ESPN team id (lib/nflDraft.ts NFL_TEAMS) of the team holding the deal; null for a free agent. */
+  /** ESPN team id (lib/nflDraft.ts NFL_TEAMS) of his current team by OTC (see contractStatus); null for a
+   *  free agent, or a traded player OTC has no season line for. Sleeper's team is fresher when he maps. */
   teamId: number | null;
   /** The last real season of the deal; null for a free agent. */
   endYear: number | null;
@@ -233,10 +234,15 @@ export function contractStatus(row: NflContractRow, now: Date): ContractStatus {
 
   const minimumLevel = row.apy_cap_pct != null ? row.apy_cap_pct < MINIMUM_CAP_SHARE : n(row.apy) < MINIMUM_APY;
 
-  // OTC writes a mid-year move as "NEW/OLD" ("BAL/ARI": Brissett, now a Raven, whose yearly lines still
-  // say Cardinals), so the first part is the current team; the season line is only a fallback.
-  const currentTeam = row.team?.split("/")[0]?.trim() || null;
-  const teamId = active ? nflTeamId(currentTeam) ?? nflTeamId(seasons.find((s) => s.year === cy)?.team) : null;
+  // `team` is the team on his latest contract, so a signing elsewhere shows there first (Estime: "Saints",
+  // his 2026 line still "Browns"). A trade writes both teams in no fixed order ("GB/DAL" Kenny Clark, now
+  // a Cowboy; "NE/PHI" A.J. Brown, now a Patriot); then this season's line names the current one. Checked
+  // against Sleeper's teams 2026-11-11: 1,731 of 1,747 matched players agree; the rest are moves OTC
+  // hasn't caught up with, and a traded 2026 rookie without a season line (3) has no team.
+  const lineTeam = seasons.find((s) => s.year === cy)?.team ?? null;
+  const teamId = !active ? null
+    : row.team?.includes("/") ? nflTeamId(lineTeam)
+    : nflTeamId(row.team) ?? nflTeamId(lineTeam);
 
   const cuts: CutMath[] = [];
   for (const s of run) {

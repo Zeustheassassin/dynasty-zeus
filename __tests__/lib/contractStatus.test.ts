@@ -216,14 +216,18 @@ describe("contractStatus", () => {
     expect(st).toMatchObject({ active: false, endYear: null, yearsLeft: null, expiring: false, longTerm: false, teamId: null, cuts: [] });
   });
 
-  it("a mid-year move ('NEW/OLD') reads the first team, even when the season lines lag", () => {
-    const mccarthy = row({ team: "NYG/MIN", seasons: [s(2025, 1, 0, 0, 0, 0, 0, 1, "Vikings"), s(2026, 1, 0, 0, 0, 0, 0, 1, "Giants")] });
-    expect(contractStatus(mccarthy, NOV_2026).teamId).toBe(19);
-    const brissett = row({ team: "BAL/ARI", seasons: [s(2026, 1, 0, 0, 0, 0, 0, 1, "Cardinals")] });
-    expect(contractStatus(brissett, NOV_2026).teamId).toBe(33);
+  it("a trade ('A/B', either order) reads this season's line; a signing reads the latest contract's team", () => {
+    // Live rows, 2026-11-11 (Sleeper agreed on all of these).
+    const clark = row({ team: "GB/DAL", seasons: [s(2025, 1, 0, 0, 0, 0, 0, 1, "Packers"), s(2026, 1, 0, 0, 0, 0, 0, 1, "Cowboys")] });
+    expect(contractStatus(clark, NOV_2026).teamId).toBe(6);
+    const brown = row({ team: "NE/PHI", seasons: [s(2025, 1, 0, 0, 0, 0, 0, 1, "Eagles"), s(2026, 1, 0, 0, 0, 0, 0, 1, "Patriots")] });
+    expect(contractStatus(brown, NOV_2026).teamId).toBe(17);
+    const estime = row({ team: "Saints", contract_type: "SFA", seasons: [s(2026, 1, 0, 0, 0, 0, 0, 1, "Browns")] });
+    expect(contractStatus(estime, NOV_2026).teamId).toBe(18);
+    // A traded 2026 rookie OTC hasn't broken down: no season line, so no team.
     const rookie = row({ team: "WAS/MIA", contract_type: "Drafted", year_signed: 2026, years: 4, seasons: [] });
-    expect(contractStatus(rookie, NOV_2026).teamId).toBe(28);
-    expect(contractStatus(row({ team: "Packers", seasons: [s(2026, 1, 0, 0, 0, 0, 0, 1, "Packers")] }), NOV_2026).teamId).toBe(9);
+    expect(contractStatus(rookie, NOV_2026).teamId).toBeNull();
+    expect(contractStatus(row({ team: "Packers", seasons: [] }), NOV_2026).teamId).toBe(9);
   });
 
   it("a season OTC shows unpaid (no cash) isn't part of the deal; the deal reads from the next real one", () => {
