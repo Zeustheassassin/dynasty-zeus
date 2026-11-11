@@ -29,6 +29,7 @@ import { applyOpponentStrength, type OpponentAdjusted } from "./opponentAdjust";
 import { activeLock } from "./scoreLock";
 import { alignmentPenalty } from "./alignmentPenalty";
 import { middleAdjustment, type MiddleUsage } from "./middleUsage";
+import type { RushingBonus } from "./qbRushing";
 import { buildWRGameSplits, buildWRTierSplits, type ProspectGameRouteCellsRow } from "./aggregateMerge";
 import type { ContextCovariates, GameContext } from "./gameContext";
 import { contextAdjust, type HeadlineKey, type MetricContext } from "./contextGrading";
@@ -319,6 +320,7 @@ export function dynastyScores(
   hsClass: ReadonlyMap<string, number | null>,
   weights: DynastyWeights,
   landing?: ReadonlyMap<string, LandingInputs>,
+  rushing?: ReadonlyMap<string, RushingBonus>,
 ): Map<string, DynastyBreakdown> {
   const m = new Map<string, DynastyBreakdown>();
   for (const p of prospects) {
@@ -333,6 +335,7 @@ export function dynastyScores(
       draftRound: p.draft_round,
       draftPick: p.draft_pick,
       landing: landing?.get(p.id) ?? null,
+      rushing: rushing?.get(p.id) ?? null,
     }, weights));
   }
   return m;

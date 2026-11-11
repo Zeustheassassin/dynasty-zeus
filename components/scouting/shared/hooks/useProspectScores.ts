@@ -15,6 +15,7 @@ import { roleStandings, type RoleStanding } from "../../../../lib/scouting/roleS
 import type { DraftPickRow } from "../../../../lib/nflDraft";
 import { middleUsageByProspect, type MiddleUsage } from "../../../../lib/scouting/middleUsage";
 import { qbFullSeasons, qbStyleValues, type QBFullSeasons } from "../../../../lib/scouting/qbStyle";
+import { qbRushingByProspect, rushingBonuses, type QBRushing, type RushingBonus } from "../../../../lib/scouting/qbRushing";
 import { pastFirstRead } from "../../../../lib/scouting/chartedComponents";
 import {
   computeAEScores, defenseFacedFrom, gamesByTierFrom, liveScoresFrom,
@@ -36,6 +37,10 @@ export interface UseProspectScoresReturn extends AEScores {
   middleUsage: Map<string, MiddleUsage>;
   /** Each QB's style and pocket profile over his PFF full seasons (qbStyle.ts). */
   qbFull: Map<string, QBFullSeasons>;
+  /** Each QB's rushing over his PFF full seasons (qbRushing.ts). */
+  qbRushing: Map<string, QBRushing>;
+  /** The Dynasty Score's QB rushing bonus, before its slider, gated by passing. */
+  rushing: Map<string, RushingBonus>;
   /** Each prospect's charted games by opponent tier, for the AE Score tooltip. */
   gamesByTier: Map<string, Record<OpponentTier, number>>;
   /** Each prospect's charted opponents' average defensive SP+, for the tooltip. */
@@ -88,6 +93,13 @@ export function useProspectScores(
   // seasons adds to his live AE Score (middleUsage.ts).
   const middleUsage = useMemo(() => middleUsageByProspect(gradingData.pffSeasonDepth ?? []), [gradingData.pffSeasonDepth]);
   const liveScores = useMemo(() => liveScoresFrom(prospects, ae.composite, middleUsage), [prospects, ae.composite, middleUsage]);
+  // A QB's rushing over PFF's full seasons and the Dynasty Score's rushing
+  // bonus, gated by his passing (qbRushing.ts).
+  const qbRushing = useMemo(() => qbRushingByProspect(gradingData.pffSeasonDepth ?? []), [gradingData.pffSeasonDepth]);
+  const rushing = useMemo(
+    () => rushingBonuses(prospects, liveScores, ae.composite, qbRushing),
+    [prospects, liveScores, ae.composite, qbRushing],
+  );
 
   const gamesByTier = useMemo(() => gamesByTierFrom(games, gameTiers.byGame), [games, gameTiers]);
   const defenseFaced = useMemo(() => defenseFacedFrom(games, contexts), [games, contexts]);
@@ -149,7 +161,7 @@ export function useProspectScores(
   );
 
   return {
-    ...ae, gameTiers, contexts, contextCov, liveScores, middleUsage, qbFull, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, standings, pffVals, landing,
+    ...ae, gameTiers, contexts, contextCov, liveScores, middleUsage, qbFull, qbRushing, rushing, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, standings, pffVals, landing,
   };
 }
 

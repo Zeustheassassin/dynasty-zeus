@@ -191,6 +191,19 @@ export async function playerSeasonDepth(client: PffClient, playerId: number, sea
 }
 
 /**
+ * His rushing totals over a WHOLE season (no week list: PFF answers with
+ * every week and the season total), or null when he had none. For the
+ * Dynasty Score's QB rushing bonus (lib/scouting/qbRushing.ts, migration 094).
+ */
+export async function playerSeasonRushing(client: PffClient, playerId: number, season: number): Promise<PffStatRow | null> {
+  return getOrEmpty(async () => {
+    const body = await client.get("/v1/player/rushing/summary", { league: "ncaa", player_id: playerId, season });
+    const r = reportBody(body, "rushing_summary") as { week_totals?: PffStatRow[] } | null;
+    return r?.week_totals?.[0] ?? null;
+  }, null);
+}
+
+/**
  * PFF's time-in-pocket report for every NCAA passer over a whole season (one
  * row per player). The report needs a week list and ignores a franchise, so
  * this lists every week (0–22) and the caller picks its players out. For the

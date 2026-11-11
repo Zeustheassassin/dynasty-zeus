@@ -93,6 +93,7 @@ const BOARD_SCORES_DELAY_MS = 1000;
 const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }[] = [
   { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
   { key: "size",  label: "Size",  hint: "How much size counts: RBs and WRs carrying more weight for their height gain, lean and very light ones lose" },
+  { key: "rushing", label: "QB Rushing", hint: "How much a QB's rushing counts: rushing yards per game over his PFF full seasons (carries × yards per carry, no TDs), 0 at the college median (26) up to +0.3 at 62+ at 1×, only as much as his passing allows (none in the bottom third of charted QBs, all of it in the top third)" },
   { key: "draft", label: "Draft", hint: "How much draft capital counts in Dynasty Score Plus: by overall pick, or the round's average when no pick is set" },
   { key: "landing", label: "Landing", hint: "How much his team's room counts in Dynasty Score Plus (2027 classes on): rookie competition (the players at his position his team drafted ahead of him; WRs and Move TEs count against each other), the established veterans ahead of him, and his path by year 2 (Post-Draft tab)" },
   { key: "role", label: "Role", hint: "How much role standing counts in Dynasty Score Plus (2027 classes on): where he ranks among his class's players at the role he'll play (Will Play (Post), else his best role bucket), up to ±0.25 at 1×" },
@@ -302,7 +303,7 @@ export default function BigBoard({
   // scores built on it) take the opponent-strength and context adjustments.
   const {
     aeMaps, composite, compositeInputs, opponent, contextInfo,
-    gameTiers, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, standings, pffVals, landing,
+    gameTiers, contextCov, liveScores, gamesByTier, defenseFaced, hsClass, recruitsReady, ages, roleFits, standings, pffVals, landing, rushing,
   } = useProspectScores({ prospects, games, rbPlays, qbPlays, tePlays, gameRouteCells, gradingData, pffTotals, draftPicks });
 
   const [scoreMode, setScoreMode] = useState<ScoreViewMode>(() =>
@@ -394,8 +395,8 @@ export default function BigBoard({
 
   // Dynasty Score (+ Plus) for every prospect with an AE Score.
   const dynasty = useMemo(
-    () => dynastyScores(prospects, scoreViews, hsClass, weights, landing),
-    [prospects, scoreViews, hsClass, weights, landing],
+    () => dynastyScores(prospects, scoreViews, hsClass, weights, landing, rushing),
+    [prospects, scoreViews, hsClass, weights, landing, rushing],
   );
 
   // Each prospect's charted sample against his position's full sample
@@ -411,8 +412,8 @@ export default function BigBoard({
   // still pending, and saves run one after another so an older one can't land
   // last.
   const savedDynasty = useMemo(
-    () => dynastyScores(prospects, scoreViewsFrom(prospects, liveScores, "live", new Date()), hsClass, weights, landing),
-    [prospects, liveScores, hsClass, weights, landing],
+    () => dynastyScores(prospects, scoreViewsFrom(prospects, liveScores, "live", new Date()), hsClass, weights, landing, rushing),
+    [prospects, liveScores, hsClass, weights, landing, rushing],
   );
   const boardScores = useMemo(
     () => buildBoardScores(prospects, savedDynasty, samples, weights),
@@ -675,6 +676,7 @@ export default function BigBoard({
     }
     if (d.flags.length) for (const f of d.flags) lines.push(`Size: ${f.label} → ${signed(weights.size * f.value, 2)}`);
     else lines.push("Size: no flag → +0.00");
+    if (d.rushing) lines.push(`Rushing: ${d.rushing.label} → ${signed(weights.rushing * d.rushing.value, 2)}`);
     lines.push(`= Dynasty ${signed(d.dynasty, 2)}`);
     if (plus && d.draftCapital != null) {
       lines.push(`Drafted: ${draftCapitalLabel(p.draft_round!, p.draft_pick)} → ${signed(weights.draft * d.draftCapital, 2)}`);

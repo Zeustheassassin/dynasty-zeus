@@ -128,18 +128,19 @@ function ScoreStrip({ p, pos, report }: { p: ProspectWithStats; pos: CompositePo
     tiles.push(<ScoreTile key="ae" primary label="AE SCORE" value="—" tone="dim" lines={["Not scored yet", aeScoreMissingReason(scores.composite, pos)]} />);
   }
 
-  const d = sc ? dynastyScores([p], new Map([[p.id, sc]]), scores.hsClass, weights, scores.landing).get(p.id) : undefined;
+  const d = sc ? dynastyScores([p], new Map([[p.id, sc]]), scores.hsClass, weights, scores.landing, scores.rushing).get(p.id) : undefined;
   if (d) {
     const size = d.flags.reduce((s, f) => s + f.value, 0);
     const parts = [
       d.window != null ? `age ${signed(weights.age * d.window, 2)}` : "age unknown",
       ...(d.flags.length ? [`size ${signed(weights.size * size, 2)}`] : []),
+      ...(d.rushing ? [`rushing ${signed(weights.rushing * d.rushing.value, 2)}`] : []),
     ];
     const ageTitle = d.rookieAge
       ? `Age ${d.rookieAge.years.toFixed(1)} as a rookie${d.rookieAge.estimated ? " (est. from HS class)" : ""}; ${pos} primes end at ${PRIME_END_AGE[pos]}`
       : "Age unknown";
     tiles.push(<ScoreTile key="dyn" label="DYNASTY" value={signed(d.dynasty, 2)} tone={toneOf(d.dynasty)} lines={[parts.join(" · ")]}
-      title={[`AE Score ${signed(d.aeScore, 2)}`, ageTitle, ...d.flags.map((f) => `Size: ${f.label}`), "Weighted by the Big Board's Dynasty sliders."].join("\n")} />);
+      title={[`AE Score ${signed(d.aeScore, 2)}`, ageTitle, ...d.flags.map((f) => `Size: ${f.label}`), ...(d.rushing ? [`Rushing: ${d.rushing.label}`] : []), "Weighted by the Big Board's Dynasty sliders."].join("\n")} />);
     tiles.push(d.plus != null && d.draftCapital != null && p.draft_round != null
       ? <ScoreTile key="plus" label="DYNASTY+" value={signed(d.plus, 2)} tone={toneOf(d.plus)} lines={[`${p.draft_round === UNDRAFTED_ROUND ? "Undrafted" : p.draft_pick ? `pick ${p.draft_pick}` : `${draftRoundLabel(p.draft_round)} rd avg`} capital ${signed(weights.draft * d.draftCapital, 2)}`, ...(d.landing?.competition?.value ? [`competition ${signed(weights.landing * d.landing.competition.value, 2)}`] : []), ...(d.landing?.standing?.value ? [`role standing ${signed(weights.role * d.landing.standing.value, 2)}`] : []), ...(teamLandingTotal(d.landing?.team, weights) ? [`team ${signed(teamLandingTotal(d.landing?.team, weights), 2)}`] : [])]}
           title={[`Draft capital from the ${draftCapitalLabel(p.draft_round, p.draft_pick)}, × the Big Board's Draft slider (${weights.draft}).`, ...landingLines(d.landing, p.draft_class_year, weights)].join("\n")} />

@@ -70,16 +70,32 @@ export type PffSeasonDepthRow = {
 } & {
   /** SEASON_POCKET_FIELDS; null until the season's pocket row is imported (093). */
   [k: `fp_${string}`]: number | null | undefined;
+} & {
+  /** SEASON_RUSH_FIELDS; null until the season's rushing is imported (094). */
+  [k: `fr_${string}`]: number | null | undefined;
+};
+
+// The same from `rushing` (migration 094, PFF's rushing summary for the whole
+// season): `fr_<name>` ← rushing.<PFF column>. For the QB rushing bonus.
+export const SEASON_RUSH_FIELDS: Readonly<Record<string, string>> = {
+  games: "player_game_count", att: "attempts", yds: "yards", scr: "scrambles", designed: "designed_yards",
 };
 /** Without the pocket fields: the select before migration 093 is applied. */
 export const SEASON_DEPTH_SELECT_NO_POCKET = [
   "prospect_id,season,pff_player_id,team_name,zone_attempts,fetched_at",
   ...Object.entries(SEASON_RAW_FIELDS).map(([name, col]) => `fs_${name}:raw->${col}`),
 ].join(",");
-export const SEASON_DEPTH_SELECT = [
+/** With the pocket fields: the select between migrations 093 and 094. */
+export const SEASON_DEPTH_SELECT_NO_RUSHING = [
   SEASON_DEPTH_SELECT_NO_POCKET,
   ...Object.entries(SEASON_POCKET_FIELDS).map(([name, col]) => `fp_${name}:pocket->${col}`),
 ].join(",");
+export const SEASON_DEPTH_SELECT = [
+  SEASON_DEPTH_SELECT_NO_RUSHING,
+  ...Object.entries(SEASON_RUSH_FIELDS).map(([name, col]) => `fr_${name}:rushing->${col}`),
+].join(",");
+/** Tried in order by the client: a column a migration hasn't added yet fails its select, so the next one runs. */
+export const SEASON_DEPTH_SELECTS: readonly string[] = [SEASON_DEPTH_SELECT, SEASON_DEPTH_SELECT_NO_RUSHING, SEASON_DEPTH_SELECT_NO_POCKET];
 /** The zones counted as middle of the field: 10+ air yards, between the numbers. */
 export const MIDDLE_ZONES = ["center_medium", "center_deep"] as const;
 

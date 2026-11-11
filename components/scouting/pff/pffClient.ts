@@ -11,7 +11,7 @@ import {
 } from "../../../lib/pff/api";
 import { GAME_ROW_SELECT, SEASON_ROW_SELECT, type PffGameRow, type PffSeasonRow } from "../../../lib/pff/stats";
 import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
-import { SEASON_DEPTH_SELECT, SEASON_DEPTH_SELECT_NO_POCKET, type PffSeasonDepthRow } from "../../../lib/scouting/middleUsage";
+import { SEASON_DEPTH_SELECTS, type PffSeasonDepthRow } from "../../../lib/scouting/middleUsage";
 import { supabase } from "../../../lib/supabaseclient";
 
 const log = logger("scouting/pff/pffClient");
@@ -37,26 +37,23 @@ export interface PffRows {
   depth?: PffSeasonDepthRow[];
 }
 
-/** QBs' full-season passing depth rows. Before migration 093 (the pocket
- *  column) it falls back to the select without the pocket times; a failure
- *  there too (092 not applied) only empties them. */
+/** QBs' full-season passing depth rows. Before migrations 094 (rushing) and
+ *  093 (pocket) it falls back to the selects without those columns; a failure
+ *  of all of them (092 not applied) only empties the rows. */
 async function fetchSeasonDepth(prospectId?: string): Promise<PffSeasonDepthRow[]> {
   const load = (select: string) => fetchAllRows<PffSeasonDepthRow>((from, to) => {
     let q = supabase.from("prospect_season_pff_depth").select(select);
     if (prospectId) q = q.eq("prospect_id", prospectId);
     return q.order("prospect_id").order("season").range(from, to) as unknown as PromiseLike<{ data: PffSeasonDepthRow[] | null; error: { message: string } | null }>;
   });
-  try {
-    return await load(SEASON_DEPTH_SELECT);
-  } catch (err) {
-    log.warn("season depth load with pocket times failed (migration 093 applied?)", { err: String(err) });
+  for (const select of SEASON_DEPTH_SELECTS) {
+    try {
+      return await load(select);
+    } catch (err) {
+      log.warn("season depth load failed; trying the next select (migrations 092–094 applied?)", { err: String(err) });
+    }
   }
-  try {
-    return await load(SEASON_DEPTH_SELECT_NO_POCKET);
-  } catch (err) {
-    log.warn("season depth load failed (migration 092 applied?)", { err: String(err) });
-    return [];
-  }
+  return [];
 }
 
 /** The user's stored PFF rows, all of them or one prospect's. Throws on error. */

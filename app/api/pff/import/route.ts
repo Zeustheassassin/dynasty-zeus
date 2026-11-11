@@ -18,7 +18,7 @@ import { apiError } from "../../../../lib/apiHelpers";
 import { logger } from "../../../../lib/logger";
 import { PFF_IMPORT_BATCH, type PffImportResponse, type PffImportResult } from "../../../../lib/pff/api";
 import { getPffClient, PffError, type PffClient } from "../../../../lib/pff/client";
-import { leagueTimeInPocket, playerSeasonDepth, type PffStatRow } from "../../../../lib/pff/ncaa";
+import { leagueTimeInPocket, playerSeasonDepth, playerSeasonRushing, type PffStatRow } from "../../../../lib/pff/ncaa";
 import { importProspect, type GameToImport, type ProspectImport } from "../../../../lib/pff/runImport";
 import { depthSeasonsFor, zoneAttemptsFrom } from "../../../../lib/scouting/middleUsage";
 import { GAME_AVERAGE_KEYS, GAME_STAT_KEYS, SEASON_AVERAGE_KEYS, SEASON_STAT_KEYS, pffPos } from "../../../../lib/pff/stats";
@@ -37,6 +37,7 @@ const LINKED = new Set(["auto", "confirmed"]);
 const MIGRATION_HINT = "Apply migration 063 (supabase/migrations/063_pff_game_stats.sql) first.";
 const DEPTH_MIGRATION_HINT = "Full-season depth needs migration 092 (supabase/migrations/092_prospect_season_pff_depth.sql)";
 const POCKET_MIGRATION_HINT = "Pocket times need migration 093 (supabase/migrations/093_season_pff_depth_pocket.sql); depth saved without them";
+const RUSHING_MIGRATION_HINT = "Full-season rushing needs migration 094 (supabase/migrations/094_season_pff_depth_rushing.sql); depth saved without it";
 
 interface ProspectRow { id: string; position: string; pff_player_id: number | null; pff_match_status: string | null; draft_class_year: number | null }
 interface GameRow extends GameToImport { prospect_id: string; pff_match_status: string | null }
@@ -197,21 +198,27 @@ async function importSeasonDepth(
     const row = await playerSeasonDepth(client, playerId, season);
     if (!row) continue;
     const pocket = (await pocketFor(season)).get(playerId) ?? null;
+    const rushing = await playerSeasonRushing(client, playerId, season);
     rows.push({
       user_id: userId, prospect_id: prospectId, season, pff_player_id: playerId,
       team_name: typeof row.team_name === "string" ? row.team_name : null,
-      zone_attempts: zoneAttemptsFrom(row), raw: row, pocket, fetched_at: fetchedAt,
+      zone_attempts: zoneAttemptsFrom(row), raw: row, pocket, rushing, fetched_at: fetchedAt,
     });
   }
   if (!rows.length) return { saved: 0 };
   const upsert = (list: Record<string, unknown>[]) =>
     supabase.from("prospect_season_pff_depth").upsert(list, { onConflict: "prospect_id,season" });
+  // A column a migration hasn't added yet (094 rushing, then 093 pocket) is
+  // dropped and the save retried, so the depth always lands.
   let { error } = await upsert(rows);
-  let note: string | undefined;
-  if (error && missingColumn(error)) {
-    ({ error } = await upsert(rows.map(({ pocket: _pocket, ...rest }) => rest)));
-    note = POCKET_MIGRATION_HINT;
+  const notes: string[] = [];
+  for (const [col, hint] of [["rushing", RUSHING_MIGRATION_HINT], ["pocket", POCKET_MIGRATION_HINT]] as const) {
+    if (!error || !missingColumn(error)) break;
+    for (const r of rows) delete r[col];
+    ({ error } = await upsert(rows));
+    notes.push(hint);
   }
+  const note = notes.length ? notes.join("; ") : undefined;
   if (!error) return { saved: rows.length, ...(note ? { note } : {}) };
   if (missingTable(error)) return { saved: 0, note: DEPTH_MIGRATION_HINT };
   log.error("season depth save failed", { prospectId, err: error.message });
