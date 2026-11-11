@@ -91,6 +91,8 @@ export interface PffOffenseRow {
   grades_offense?: number | null;
   grades_pass?: number | null;
   snap_counts_total?: number | null;
+  /** Games he played (read by the contracts outlook's missed-time rule). */
+  player_game_count?: number | null;
 }
 /** /v2/nfl/teams/{team}/roster row. */
 export interface PffRosterRow {

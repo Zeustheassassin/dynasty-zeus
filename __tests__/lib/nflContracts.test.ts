@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  cleanSeasons, pickLatestContracts, contractTypeOf, keepContract, parseCsv, parsePlayerIdsCsv,
+  cleanSeasons, pickLatestContracts, contractTypeOf, keepContract, parseCsv, parsePlayerIdsCsv, parseCrosswalkIds,
   parseNflverseTimestamp, buildContractRows, type RawContract, type RawContractSeason,
 } from "@/lib/nflContracts";
 
@@ -130,6 +130,24 @@ describe("parseCsv / parsePlayerIdsCsv", () => {
 
   it("returns an empty map when a column is missing", () => {
     expect(parsePlayerIdsCsv("mfl_id,name\n1,x").size).toBe(0);
+  });
+});
+
+describe("parseCrosswalkIds", () => {
+  it("maps gsis_id to the PFF id and birth date, keeping a row with either, NA as missing", () => {
+    const csv = [
+      "gsis_id,pff_id,sleeper_id,name,birthdate",
+      "00-0036900,61579,7564,Ja'Marr Chase,2000-03-01",
+      "00-0000002,NA,1,No Pff,1999-01-02",
+      "00-0000003,NA,2,Nothing,NA",
+      "NA,5,3,No Gsis,2001-01-01",
+      "00-0000004,12.5,4,Bad Pff,junk",
+    ].join("\n");
+    expect([...parseCrosswalkIds(csv).entries()]).toEqual([
+      ["00-0036900", { pffId: 61579, birthDate: "2000-03-01" }],
+      ["00-0000002", { pffId: null, birthDate: "1999-01-02" }],
+    ]);
+    expect(parseCrosswalkIds("name\nx").size).toBe(0);
   });
 });
 

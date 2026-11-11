@@ -21,10 +21,12 @@ import { nflTeamId } from "../nflDraft";
 import { REGULAR_SHARE, type NflRoomsResponse, type NflTeamRoom, type PositionBar, type RoomPos } from "../nflRooms";
 import { PRIME_END_AGE } from "./dynastyScore";
 import { roleInfo, type RoleKey } from "./roleFit";
+import type { ContractPathHint } from "../contractSituation";
 
 export type OffenseLean = "pass" | "balanced" | "run";
 export type PathCall = "opens" | "same" | "closes";
-export type InputSource = "yours" | "pff";
+/** Whose input it is: the user's entry, a suggestion from the saved PFF room, or one from his team's contracts. */
+export type InputSource = "yours" | "pff" | "contracts";
 
 /** A veteran in his room, as saved. */
 export interface SnapPlayer {
@@ -68,6 +70,9 @@ export interface LandingSaved {
   qbGrade?: number | null;
   offense?: OffenseLean | null;
   path?: PathCall | null;
+  /** The contracts' read on his year 2 (lib/contractSituation.ts contractPathHint), saved from the Post-Draft tab
+   *  (contracts plan stage 7). A suggestion like the PFF room's; the user's own path entry beats it. */
+  contract?: ContractPathHint | null;
 }
 
 export const OFFENSE_LEANS: readonly OffenseLean[] = ["pass", "balanced", "run"];
@@ -237,6 +242,14 @@ export function savedEntries(saved: LandingSaved | null | undefined): { vetsAhea
   };
 }
 
+/** A saved contract hint, when it's well formed and for his year 2 (a hint for another season is ignored). */
+export function contractHint(raw: unknown, classYear: number): ContractPathHint | null {
+  const h = raw as Partial<ContractPathHint> | null | undefined;
+  if (!h || typeof h !== "object") return null;
+  if (h.season !== classYear + 1 || (h.call !== "opens" && h.call !== "closes" && h.call !== "same")) return null;
+  return { season: h.season, call: h.call, why: typeof h.why === "string" ? h.why : "", asOf: typeof h.asOf === "string" ? h.asOf : "" };
+}
+
 /** His saved inputs with a patch: null entries dropped, and null overall when nothing is left. */
 export function patchedLandingInputs(saved: LandingSaved | null | undefined, patch: Partial<LandingSaved>): LandingSaved | null {
   const next: Record<string, unknown> = { ...(saved ?? {}), ...patch };
@@ -302,9 +315,17 @@ export function resolveTeamLanding(p: TeamLandingProspect, role: RoleKey | null 
     ? { lean: mine.offense, source: "yours" as const, passOe: snap?.passOe ?? null }
     : pffLean ? { lean: pffLean, source: "pff" as const, passOe: snap!.passOe } : null;
 
+  // The path: the user's entry; else a way that opens (the contracts first: a vet ahead cut or leaving, then the
+  // saved room's age / bridge / weak-starter reads); else the contracts' "closes" (his team is among the likeliest
+  // to add competition at his position); else the room's "same".
+  const hint = contractHint(saved?.contract, p.draft_class_year);
+  const fromRoom = snap ? { ...suggestedPath(pos, p.draft_class_year, snap, ahead), source: "pff" as const } : null;
+  const fromContracts = hint ? { call: hint.call, source: "contracts" as const, why: hint.why } : null;
   const path = mine.path != null
     ? { call: mine.path, source: "yours" as const, why: null }
-    : snap ? { ...suggestedPath(pos, p.draft_class_year, snap, ahead), source: "pff" as const } : null;
+    : fromContracts?.call === "opens" ? fromContracts
+    : fromRoom?.call === "opens" ? fromRoom
+    : fromContracts ?? fromRoom;
 
   return {
     pos,
@@ -334,7 +355,7 @@ export function teamLandingTotal(t: TeamLanding | null | undefined, w: { landing
 // ── Words ──────────────────────────────────────────────────────────────────
 const sgn2 = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}`;
 const pct1 = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v * 100).toFixed(1)}%`;
-const src = (s: InputSource) => (s === "yours" ? "yours" : "suggested");
+const src = (s: InputSource) => (s === "yours" ? "yours" : s === "contracts" ? "suggested by contracts" : "suggested");
 const NOT_LOADED = "not set (save the rooms on the Post-Draft tab, or enter it)";
 
 /** "2+" for the last option of the vets-ahead picker. */

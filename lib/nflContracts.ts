@@ -246,6 +246,30 @@ export function parsePlayerIdsCsv(csv: string): Map<string, string> {
   return out;
 }
 
+/** gsis_id → PFF id and birth date (YYYY-MM-DD) from the same crosswalk, for the contracts outlook (stage 7).
+ *  A row with neither is left out; "NA" is missing. */
+export function parseCrosswalkIds(csv: string): Map<string, { pffId: number | null; birthDate: string | null }> {
+  const rows = parseCsv(csv);
+  const out = new Map<string, { pffId: number | null; birthDate: string | null }>();
+  const header = rows[0] ?? [];
+  const gi = header.indexOf("gsis_id");
+  const pi = header.indexOf("pff_id");
+  const bi = header.indexOf("birthdate");
+  if (gi < 0) return out;
+  for (const r of rows.slice(1)) {
+    const g = r[gi]?.trim();
+    if (!g || g === "NA" || out.has(g)) continue;
+    const pff = pi >= 0 ? Number(r[pi]) : NaN;
+    const birth = bi >= 0 ? r[bi]?.trim() ?? "" : "";
+    const ids = {
+      pffId: Number.isInteger(pff) && pff > 0 ? pff : null,
+      birthDate: /^\d{4}-\d{2}-\d{2}$/.test(birth) ? birth : null,
+    };
+    if (ids.pffId != null || ids.birthDate != null) out.set(g, ids);
+  }
+  return out;
+}
+
 /** nflverse's timestamp.json `last_updated` ("2026-11-10 10:31:04 EST") as an ISO string, or null. */
 export function parseNflverseTimestamp(lastUpdated: unknown): string | null {
   const m = typeof lastUpdated === "string"

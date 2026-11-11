@@ -10,6 +10,7 @@ import { leagueAdjustRatio, valueAtLeastDaysAgo, MIN_TREND_AGE_DAYS } from "../.
 import { injuryBadge, injuryRiskBadge, ageColor } from "../../../components/DataHub/dataHubHelpers";
 import { ChartCard, ChartTooltip, chartGridProps, chartAxisProps, chartTickStyle } from "../../../components/charts/ChartCard";
 import { CHART_CATEGORICAL } from "../../../lib/chartTheme";
+import { ContractChips, ContractSituationCard } from "../../../components/contracts/ContractSituation";
 
 const shortDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
@@ -196,6 +197,8 @@ export function PlayerProfilePanel({
             {practiceDesc && <p className="text-xs text-gray-500 mt-1">{practiceDesc}</p>}
           </div>
 
+          <ContractSituationCard sleeperId={playerProfileId} position={p.position} />
+
           {depthGroup.length > 0 && (
             <div className="bg-gray-900 rounded-xl p-3 border border-gray-800">
               <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
@@ -223,6 +226,7 @@ export function PlayerProfilePanel({
                         {injuryBadge(dp.injury_status)}
                         {injuryRiskBadge(dp.age, dp.position, dp.injury_status)}
                         {idx === 0 && <span className="text-[9px] font-bold px-1 rounded bg-gray-700 text-gray-200 shrink-0">Starter</span>}
+                        <ContractChips sleeperId={dp.player_id} />
                         {isOwned && <span className="text-[9px] font-bold text-blue-400 shrink-0" title="On a roster you own">●</span>}
                       </div>
                       <span className={`text-[10px] shrink-0 ${ageColor(dp.age ?? undefined, dp.position)}`}>

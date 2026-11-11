@@ -6,6 +6,7 @@ import { useValues } from "../../lib/ValuesContext";
 import type { SleeperPlayer } from "../../lib/types";
 import { injuryBadge, injuryRiskBadge, ageColor } from "./dataHubHelpers";
 import EmptyState from "../ui/EmptyState";
+import { ContractChips, RoomLine } from "../contracts/ContractSituation";
 
 function DepthChartsTab() {
   const players = usePlayers();
@@ -151,6 +152,7 @@ function DepthChartsTab() {
                 <span className="text-sm font-bold text-white">{team}</span>
                 {hasOwned && <span className="text-[9px] font-bold text-blue-400 uppercase tracking-wide">You own</span>}
               </div>
+              <RoomLine teamAbbr={team} pos={depthPos} />
               {/* Player rows */}
               <div className="divide-y divide-slate-800/40">
                 {posGroup.slice(0, depthPos === "WR" ? 5 : 4).map((p, rowIdx) => {
@@ -177,6 +179,7 @@ function DepthChartsTab() {
                         {injuryRiskBadge(p.age, p.position, p.injury_status)}
                         {role === "STARTER"  && <span className="text-[9px] font-bold px-1 rounded bg-slate-700 text-slate-200 shrink-0">Starter</span>}
                         {role === "HANDCUFF" && <span className="text-[9px] font-bold px-1 rounded bg-amber-900/60 text-amber-300 shrink-0">HC</span>}
+                        <ContractChips sleeperId={p.player_id} />
                       </div>
                       {/* Age */}
                       <span className={`text-[10px] shrink-0 ${ageColor(p.age ?? undefined, p.position)}`}>

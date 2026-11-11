@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { NflRoomsResponse, NflTeamRoom, RoomPlayer } from "@/lib/nflRooms";
 import {
   ONE_STARTER, OFFENSE_VALUE, PATH_VALUE, PECKING_VALUE, PROE_EDGE, QB_CAP, ROLE_PASS_SHARE,
-  ageOnSept1, isEstablished, passShare, patchedLandingInputs, peckingValue, qbValue, resolveTeamLanding, roomStarters, savedEntries,
+  ageOnSept1, contractHint, isEstablished, passShare, patchedLandingInputs, peckingValue, qbValue, resolveTeamLanding, roomStarters, savedEntries,
   suggestedOffense, suggestedPath, suggestedVetsAhead, teamLandingLines, teamLandingTotal, teamSnapshotFor, vetsAheadLabel,
   type SnapPlayer, type TeamSnapshot,
 } from "@/lib/scouting/teamLanding";
@@ -156,6 +156,33 @@ describe("resolveTeamLanding", () => {
     expect(t.offense).toMatchObject({ lean: "run", source: "yours" });
     expect(t.path).toEqual({ call: "closes", source: "yours", why: null });
     expect(t.values).toEqual({ pecking: 0.2, path: -0.1, qb: expect.closeTo(-0.12, 12), offense: -0.1 });
+  });
+
+  describe("the contracts' path hint (stage 7)", () => {
+    const hint = (call: "opens" | "closes", season = 2028) => ({ season, call, why: `contracts ${call}`, asOf: "2028-05-02T00:00:00.000Z" });
+    const young = [vet("Star", 90, 0.88, "2000-01-01")]; // no age-based opening
+
+    it("an opening from contracts beats the room's 'same'", () => {
+      expect(wr({ pff: snap({ room: young }), contract: hint("opens") })!.path).toEqual({ call: "opens", source: "contracts", why: "contracts opens" });
+    });
+
+    it("a closing from contracts beats the room's 'same', but not the room's opening", () => {
+      expect(wr({ pff: snap({ room: young }), contract: hint("closes") })!.path).toMatchObject({ call: "closes", source: "contracts" });
+      expect(wr({ pff: snap({ room }), contract: hint("closes") })!.path).toEqual({ call: "opens", why: "Two is 31 in 2028", source: "pff" });
+    });
+
+    it("the user's entry beats both, a hint for another season is ignored, and a hint alone works without a room", () => {
+      expect(wr({ pff: snap({ room: young }), contract: hint("opens"), path: "same" })!.path).toEqual({ call: "same", source: "yours", why: null });
+      expect(wr({ pff: snap({ room: young }), contract: hint("opens", 2029) })!.path).toMatchObject({ call: "same", source: "pff" });
+      expect(wr({ contract: hint("closes") })!.path).toMatchObject({ call: "closes", source: "contracts" });
+      expect(contractHint({ season: 2028, call: "sideways" }, 2027)).toBeNull();
+      expect(contractHint(null, 2027)).toBeNull();
+    });
+
+    it("says where the path came from", () => {
+      const t = wr({ pff: snap({ room: young }), contract: hint("opens") })!;
+      expect(teamLandingLines(t, { landing: 1, offense: 1 })[1]).toBe("Path by year 2: opens, suggested by contracts (contracts opens) → +0.10");
+    });
   });
 
   it("counts nothing without a room or an entry, and ignores a room saved for another team", () => {

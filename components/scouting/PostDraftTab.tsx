@@ -33,6 +33,7 @@ import {
 } from "../../lib/scouting/teamLanding";
 import type { Prospect } from "../../lib/types";
 import { WillPlayPostSelect } from "./shared/RoleFields";
+import { ContractOutlookSection } from "./ContractOutlookSection";
 
 const log = logger("PostDraftTab");
 const SKILL = new Set(["QB", "RB", "WR", "TE"]);
@@ -231,6 +232,15 @@ export default function PostDraftTab({
     else setStatus(`${what}: ${rows.length} saved.`);
   }
 
+  async function savePatches(rows: readonly { p: Prospect; patch: Partial<LandingSaved> }[], what: string) {
+    if (!onSaveLandingInputs || rows.length === 0) return;
+    setBusy(true); setError(null);
+    const failed = await onSaveLandingInputs(rows.map(({ p, patch }) => ({ id: p.id, next: patchedLandingInputs(p.landing_inputs, patch) })));
+    setBusy(false);
+    if (failed) setError(`${failed} of ${rows.length} didn't save; is migration 091 applied?`);
+    else setStatus(`${what}: ${rows.length} saved.`);
+  }
+
   async function saveEntry(p: Prospect, patch: Partial<LandingSaved>) {
     if (!onSaveLandingInputs) return;
     setError(null);
@@ -359,6 +369,11 @@ export default function PostDraftTab({
             <p className="text-xs text-slate-500 mt-1">No room (no NFL team set, or its depth chart wasn&apos;t read): {roomRows.noTeam.map((p) => p.name).join(", ")}</p>
           )}
         </section>
+      )}
+
+      {drafted.length > 0 && (
+        <ContractOutlookSection classYear={shown} drafted={drafted} team={team} busy={busy}
+          onSave={onSaveLandingInputs ? (rows, what) => { void savePatches(rows, what); } : undefined} />
       )}
 
       <section aria-labelledby="pd-drafted">
