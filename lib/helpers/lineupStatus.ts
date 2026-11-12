@@ -6,10 +6,16 @@
 // inputs (that league's scoring, the lock/bye rules, availability) and calls
 // this once per league.
 // ============================================================
-import { computeSuggestedLineup, getEarlyLockStake, isInjuryExcludedFromLineup, type SuggestedLineupInput } from "./lineup";
+import {
+  computeSuggestedLineup,
+  getEarlyLockStake,
+  getFlexSlotMoves,
+  isInjuryExcludedFromLineup,
+  type SuggestedLineupInput,
+} from "./lineup";
 import { getLatePivotRisks } from "./lineupAvailability";
 import { EARLY_LOCK_DAYS, getEarlyLockDay } from "./gameday";
-import type { LeagueLineupStatus, LineupStatusEmptySlot, SleeperPlayer } from "../types";
+import type { LeagueLineupStatus, LineupStatusEmptySlot, LineupStatusFlexMove, SleeperPlayer } from "../types";
 
 export interface LeagueLineupStatusInput {
   /** The Lineup Coach's input for this league, built the way the Starters tab builds it. */
@@ -32,7 +38,8 @@ const playerName = (p: SleeperPlayer) =>
 export function buildLeagueLineupStatus(input: LeagueLineupStatusInput, now: number = Date.now()): LeagueLineupStatus {
   const lineupInput = input.lineup;
   const playerIds = lineupInput.playerIds ?? [];
-  const { lineup, swaps, currentLineupScore, suggestedLineupScore } = computeSuggestedLineup(lineupInput, now);
+  const coach = computeSuggestedLineup(lineupInput, now);
+  const { lineup, swaps, currentLineupScore, suggestedLineupScore } = coach;
 
   // The Thursday/Friday/Saturday game a player is in, if it hasn't kicked off. The T/F/S flags
   // price what the suggestion loses if that day's games lock before the lineup changes.
@@ -44,6 +51,25 @@ export function buildLeagueLineupStatus(input: LeagueLineupStatusInput, now: num
     const stake = getEarlyLockStake(lineupInput, (id) => earlyLockDayOf(id) === day, now);
     return stake.points > 0 ? [{ day, stake: stake.points, moves: stake.moves.map(playerName) }] : [];
   });
+
+  // A Thursday/Friday/Saturday starter in FLEX locks the flex at his kickoff — worth no points
+  // now, but it costs the late swap, so it's a move of its own (user, 11/12).
+  const flexMoves = getFlexSlotMoves(coach, (id) => earlyLockDayOf(id) != null).flatMap(
+    (move): LineupStatusFlexMove[] => {
+      const id = move.player.player_id;
+      const lockAt = input.upcomingKickoffFn(id);
+      const day = earlyLockDayOf(id);
+      if (lockAt == null || day == null) return [];
+      return [{
+        playerId: id,
+        fromSlot: move.fromSlot,
+        toSlot: move.toSlot,
+        swapWithId: move.swapWith?.player_id ?? null,
+        lockAt,
+        day,
+      }];
+    }
+  );
 
   // Only the risky starters with no way out once inactives land — one with a later-game bench
   // player to swap in is handled by the Starters tab's note, not flagged.
@@ -105,6 +131,7 @@ export function buildLeagueLineupStatus(input: LeagueLineupStatusInput, now: num
       swapBy: risk.swapBy,
     })),
     emptySlots,
+    flexMoves,
     asOf: input.asOf,
   };
 }

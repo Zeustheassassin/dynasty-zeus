@@ -85,6 +85,41 @@ describe("buildLeagueLineupStatus — swaps", () => {
   });
 });
 
+describe("buildLeagueLineupStatus — early-game starters in FLEX", () => {
+  // User, 11/12: Cam Skattebo plays Thursday from FLEX → the To-Do should say move him to RB.
+  const players = { rbThu: mk("rbThu", "RB"), rbSnf: mk("rbSnf", "RB"), wrSun: mk("wrSun", "WR") };
+  const kickoffs = { rbThu: THU, rbSnf: SUN_LATE, wrSun: SUN_EARLY };
+  const flexInput = (starters: string[], over: Partial<SuggestedLineupInput> = {}) => input(
+    players,
+    {
+      rosterPositions: ["RB", "WR", "FLEX"], starters, playerIds: ["rbThu", "rbSnf", "wrSun"],
+      kickoffFn: (id) => kickoffs[id as keyof typeof kickoffs] ?? null, hasKickoffData: true, ...over,
+    },
+    { scores: { rbSnf: 15, rbThu: 10, wrSun: 9 }, kickoffs }
+  );
+
+  it("lists the move with his kickoff and day, and leaves the dot green (no points in it)", () => {
+    const status = buildLeagueLineupStatus(flexInput(["rbSnf", "wrSun", "rbThu"]), NOW);
+    expect(status.flexMoves).toEqual([
+      { playerId: "rbThu", fromSlot: "FLEX", toSlot: "RB", swapWithId: "rbSnf", lockAt: THU, day: "Thu" },
+    ]);
+    expect(status).toMatchObject({ isOptimal: true, swapCount: 0, delta: 0, earlyLocks: [] });
+  });
+
+  it("lists nothing once he's at RB", () => {
+    const status = buildLeagueLineupStatus(flexInput(["rbThu", "wrSun", "rbSnf"]), NOW);
+    expect(status.flexMoves).toEqual([]);
+  });
+
+  it("lists nothing once his game has kicked off", () => {
+    const status = buildLeagueLineupStatus(
+      flexInput(["rbSnf", "wrSun", "rbThu"], { isLockedFn: (id) => id === "rbThu" }),
+      THU + 60_000
+    );
+    expect(status.flexMoves).toEqual([]);
+  });
+});
+
 describe("buildLeagueLineupStatus — slots only a pickup can fill", () => {
   const players = {
     qbBye: mk("qbBye", "QB"),

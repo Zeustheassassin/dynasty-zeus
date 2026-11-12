@@ -8,6 +8,7 @@ import {
   rebalanceLineupForKickoffWindows,
   computeSuggestedLineup,
   getEarlyLockStake,
+  getFlexSlotMoves,
 } from "@/lib/helpers/lineup";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -722,5 +723,88 @@ describe("getEarlyLockStake", () => {
       isThursday
     );
     expect(stake).toEqual({ points: 0, moves: [] });
+  });
+});
+
+describe("getFlexSlotMoves", () => {
+  // User, 11/12: a Thursday starter in FLEX should move to his position so the flex holds a later
+  // game ("Change Cam Skattebo to a RB spot"). Kickoffs are plain numbers: Thu < Sun 1pm < SNF.
+  const THU = 100;
+  const SUN_EARLY = 200;
+  const SUN_LATE = 300;
+  const players: Record<string, SleeperPlayer> = {
+    thuRb: mkPlayer("thuRb", "RB"),
+    sunRb: mkPlayer("sunRb", "RB"),
+    snfRb: mkPlayer("snfRb", "RB"),
+    sunWr: mkPlayer("sunWr", "WR"),
+    thuQb: mkPlayer("thuQb", "QB"),
+    sunQb: mkPlayer("sunQb", "QB"),
+  };
+  const kickoffs: Record<string, number> = {
+    thuRb: THU, sunRb: SUN_EARLY, snfRb: SUN_LATE, sunWr: SUN_EARLY, thuQb: THU, sunQb: SUN_EARLY,
+  };
+  const scores: Record<string, number> = { snfRb: 20, sunRb: 18, thuRb: 12, sunWr: 10, sunQb: 22, thuQb: 20 };
+  const isThursday = (id: string) => kickoffs[id] === THU;
+  const run = (rosterPositions: string[], starters: string[], playerIds = starters) =>
+    computeSuggestedLineup({
+      rosterPositions, starters, playerIds, players,
+      scoreFn: (id) => scores[id] ?? 0,
+      kickoffFn: (id) => kickoffs[id] ?? null,
+      hasKickoffData: true,
+      isLockedFn: () => false,
+    });
+
+  it("moves a Thursday RB out of FLEX into the RB slot, swapping with the later-game RB", () => {
+    const result = run(["RB", "WR", "FLEX"], ["sunRb", "sunWr", "thuRb"]);
+    expect(result.swaps).toEqual([]); // same starters, no points in it
+    const moves = getFlexSlotMoves(result, isThursday);
+    expect(moves.map((m) => ({ id: m.player.player_id, from: m.fromSlot, to: m.toSlot, with: m.swapWith?.player_id })))
+      .toEqual([{ id: "thuRb", from: "FLEX", to: "RB", with: "sunRb" }]);
+  });
+
+  it("swaps with the latest-game RB so the flex ends up holding the last kickoff", () => {
+    const result = run(["RB", "RB", "FLEX"], ["sunRb", "snfRb", "thuRb"]);
+    const moves = getFlexSlotMoves(result, isThursday);
+    expect(moves).toHaveLength(1);
+    expect(moves[0].swapWith?.player_id).toBe("snfRb");
+    expect(result.lineup.find((r) => r.slot === "FLEX")?.player?.player_id).toBe("snfRb");
+  });
+
+  it("moves a Thursday QB out of SUPER_FLEX into the QB slot", () => {
+    const result = run(["QB", "SUPER_FLEX"], ["sunQb", "thuQb"]);
+    const moves = getFlexSlotMoves(result, isThursday);
+    expect(moves.map((m) => [m.player.player_id, m.fromSlot, m.toSlot, m.swapWith?.player_id]))
+      .toEqual([["thuQb", "SUPER_FLEX", "QB", "sunQb"]]);
+  });
+
+  it("leaves him in FLEX when no positional slot he fits has a later game", () => {
+    // Only a WR slot to trade with — a Thursday RB can't play it.
+    const result = run(["WR", "FLEX"], ["sunWr", "thuRb"]);
+    expect(getFlexSlotMoves(result, isThursday)).toEqual([]);
+  });
+
+  it("only flags the early games it's asked about", () => {
+    // A Sunday 1pm RB in FLEX behind an SNF RB: the coach still reorders, but it isn't an early game.
+    const result = run(["RB", "FLEX"], ["snfRb", "sunRb"]);
+    expect(result.lineup.find((r) => r.slot === "FLEX")?.player?.player_id).toBe("snfRb");
+    expect(getFlexSlotMoves(result, isThursday)).toEqual([]);
+  });
+
+  it("finds nothing without kickoff data (the coach can't tell who plays first)", () => {
+    const result = computeSuggestedLineup({
+      rosterPositions: ["RB", "FLEX"], starters: ["sunRb", "thuRb"], playerIds: ["sunRb", "thuRb"], players,
+      scoreFn: (id) => scores[id] ?? 0, hasKickoffData: false,
+    });
+    expect(getFlexSlotMoves(result, isThursday)).toEqual([]);
+  });
+
+  it("leaves a player alone once his game has started (Sleeper has locked him)", () => {
+    const result = computeSuggestedLineup({
+      rosterPositions: ["RB", "FLEX"], starters: ["sunRb", "thuRb"], playerIds: ["sunRb", "thuRb"], players,
+      scoreFn: (id) => scores[id] ?? 0, kickoffFn: (id) => kickoffs[id] ?? null, hasKickoffData: true,
+      isLockedFn: (id) => id === "thuRb",
+    });
+    expect(result.lineup.find((r) => r.slot === "FLEX")?.player?.player_id).toBe("thuRb");
+    expect(getFlexSlotMoves(result, isThursday)).toEqual([]);
   });
 });

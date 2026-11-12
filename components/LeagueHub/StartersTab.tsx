@@ -12,6 +12,8 @@ import {
   getLineupAvailabilityChecks,
   getLatePivotRisks,
   getLineupSlotEligiblePositions,
+  getFlexSlotMoves,
+  getEarlyLockDay,
   formatDayTime,
   type LineupAvailability,
   type InjuryNewsFlag,
@@ -35,6 +37,8 @@ interface StartersTabProps {
    *  same object, so the two can't disagree). */
   availability: LineupAvailability;
 }
+
+const DAY_LETTER = { Thu: "T", Fri: "F", Sat: "S" } as const;
 
 const NEWS_LEAN_LABEL: Record<InjuryNewsFlag["lean"], string> = {
   "likely-out": "Likely out",
@@ -156,24 +160,37 @@ function StartersTab({ projectionData, nflState, scheduleByTeam, availability }:
   // Out/In calls and ESPN news reads only mean anything for a real week.
   const { isExcludedFn, isRiskFn, isUnavailableFn } = getLineupAvailabilityChecks(availability);
 
-  const { lineup, swaps, currentLineupScore, suggestedLineupScore } = computeSuggestedLineup({
+  // Real kickoff from the schedule (projection timestamps are unreliable).
+  const scheduledKickoff = (id: string) =>
+    resolveGameState(players[id]?.team, scheduleByTeam, playerKickoffAt(id)).kickoffAt;
+  // Same as the League Overview dot / To-Do run: schedule kickoffs, so the coach's FLEX shuffle
+  // knows who plays first.
+  const hasScheduleKickoffs = isInSeason && (Object.keys(scheduleByTeam).length > 0 || hasKickoffData);
+
+  const coach = computeSuggestedLineup({
     rosterPositions: positions,
     starters: roster.starters,
     playerIds: eligiblePlayerIds,
     players,
     scoreFn: playerScore,
     rankScoreFn: playerRankScore,
-    kickoffFn: playerKickoffAt,
-    hasKickoffData: isInSeason && hasKickoffData,
+    kickoffFn: isInSeason ? scheduledKickoff : playerKickoffAt,
+    hasKickoffData: hasScheduleKickoffs,
     isLockedFn: playerIsLocked,
     isExcludedFn: isInSeason ? isExcludedFn : undefined,
     isByeFn: playerIsOnBye,
   });
+  const { lineup, swaps, currentLineupScore, suggestedLineupScore } = coach;
   const lineupDelta = suggestedLineupScore - currentLineupScore;
 
-  // Real kickoff from the schedule (projection timestamps are unreliable).
-  const scheduledKickoff = (id: string) =>
-    resolveGameState(players[id]?.team, scheduleByTeam, playerKickoffAt(id)).kickoffAt;
+  // A Thursday/Friday/Saturday starter sitting in FLEX: the flex locks with him at kickoff. Same
+  // moves the To-Do hub lists (lineupStatus.ts).
+  const earlyLockDayOf = (id: string) => {
+    if (!isInSeason || playerIsLocked(id)) return null;
+    const kickoffAt = scheduledKickoff(id);
+    return kickoffAt == null ? null : getEarlyLockDay(kickoffAt);
+  };
+  const flexMoves = hasScheduleKickoffs ? getFlexSlotMoves(coach, (id) => earlyLockDayOf(id) != null) : [];
 
   // Questionable-type starters whose inactive call is still to come, with the
   // bench players who'd still be swappable when it lands.
@@ -516,9 +533,16 @@ function StartersTab({ projectionData, nflState, scheduleByTeam, availability }:
           <div className="min-w-0">
             <div className="text-[11px] uppercase tracking-wide text-slate-500">Lineup Coach</div>
             <div className="mt-0.5 text-xs text-slate-200">
-              {lineupCoachNotes.length === 0
+              {lineupCoachNotes.length === 0 && flexMoves.length === 0
                 ? "Your current lineup already matches the coach recommendation."
-                : `The coach would make ${lineupCoachNotes.length} swap${lineupCoachNotes.length === 1 ? "" : "s"}${lineupDelta > 0 ? ` for roughly +${lineupDelta.toFixed(1)}` : ""}.`}
+                : [
+                    lineupCoachNotes.length > 0
+                      ? `The coach would make ${lineupCoachNotes.length} swap${lineupCoachNotes.length === 1 ? "" : "s"}${lineupDelta > 0 ? ` for roughly +${lineupDelta.toFixed(1)}` : ""}`
+                      : "The coach would",
+                    flexMoves.length > 0
+                      ? `${lineupCoachNotes.length > 0 ? "and " : ""}move ${flexMoves.length} early-game player${flexMoves.length === 1 ? "" : "s"} out of the flex`
+                      : null,
+                  ].filter(Boolean).join(" ") + "."}
             </div>
           </div>
           <div className="grid grid-cols-2 gap-x-4 text-right whitespace-nowrap">
@@ -534,8 +558,29 @@ function StartersTab({ projectionData, nflState, scheduleByTeam, availability }:
             </div>
           </div>
         </div>
-        {lineupCoachNotes.length > 0 && (
+        {(lineupCoachNotes.length > 0 || flexMoves.length > 0) && (
           <div className="space-y-2">
+            {flexMoves.map((move) => {
+              const day = earlyLockDayOf(move.player.player_id);
+              const from = move.fromSlot.replace("_", " ");
+              return (
+                <div key={`flex-${move.player.player_id}`} className="text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] uppercase tracking-wide text-slate-500 w-16 shrink-0">{from}</span>
+                    <span className="text-slate-200 font-medium">{move.player.full_name}</span>
+                    <span className="text-slate-600">→</span>
+                    <span className="text-slate-200 font-medium">{move.toSlot.replace("_", " ")}</span>
+                    {day && <span className="text-[10px] font-bold text-sky-400">{DAY_LETTER[day]}</span>}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-slate-500 pl-[4.5rem]">
+                    Plays {formatDayTime(scheduledKickoff(move.player.player_id))}, and Sleeper locks the {from} with him in it
+                    {move.swapWith
+                      ? ` • swap him with ${move.swapWith.full_name} so the ${from} holds a later game`
+                      : ` • keep the ${from} for a later game`}
+                  </div>
+                </div>
+              );
+            })}
             {lineupCoachNotes.map((note) => (
               <div key={`${note.slot}-${note.suggested.player_id}-${note.current?.player_id || "empty"}`} className="text-xs">
                 <div className="flex flex-wrap items-center gap-2">

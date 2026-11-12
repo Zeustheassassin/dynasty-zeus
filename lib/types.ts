@@ -566,6 +566,10 @@ export interface LeagueLineupStatus {
   /** Starting slots the suggestion can only fill with a player on bye or ruled out, or with no
    *  one at all — only a pickup fixes them. */
   emptySlots: LineupStatusEmptySlot[];
+  /** Thursday / Friday / Saturday starters sitting in a flex slot the suggestion moves to a
+   *  positional slot, so the flex holds a later game (getFlexSlotMoves). Worth no points, so not
+   *  in swaps / delta / isOptimal — the To-Do hub lists them. */
+  flexMoves: LineupStatusFlexMove[];
   /** Earliest moment in Sleeper the roster behind this status can reflect (see
    *  LeagueOverviewEntry.rostersAsOf); null when unknown. */
   asOf: number | null;
@@ -598,6 +602,18 @@ export interface LineupStatusEmptySlot {
   /** The player the suggestion is left with, or null when no one on the roster fits the slot. */
   playerId: string | null;
   reason: "none" | "bye" | "out";
+}
+
+export interface LineupStatusFlexMove {
+  playerId: string;
+  /** FLEX or SUPER_FLEX. */
+  fromSlot: string;
+  toSlot: string;
+  /** The starter to trade places with (he takes the flex); null when it isn't one swap. */
+  swapWithId: string | null;
+  /** His kickoff — the flex locks with him in it after this. */
+  lockAt: number;
+  day: EarlyLockDay;
 }
 
 /** Thursday, Friday or Saturday, US Eastern: game days that lock before the Sunday slate. */

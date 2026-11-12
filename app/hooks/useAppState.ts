@@ -2152,10 +2152,8 @@ const saveSnapshotNow = async () => {
     ) return status;
 
     const projectionBySleeperId = new Map(projectionData.map((row) => [String(row.sleeperId), row]));
-    // Same hasKickoffData/kickoffFn StartersTab.tsx computes — not league-
-    // specific (it's just "did any projection source return a kickoff
-    // timestamp"), so it applies identically to every league below.
-    const hasKickoffData = projectionData.some((row) => getProjectionKickoffAt(row));
+    // A projection row's own kickoff, if its source sent one — only the fallback for a team
+    // missing from a partial schedule (resolveGameState); the schedule's kickoff wins below.
     const kickoffFn = (id: string) => {
       const row = projectionBySleeperId.get(String(id));
       return row ? getProjectionKickoffAt(row) : null;
@@ -2207,8 +2205,10 @@ const saveSnapshotNow = async () => {
           playerIds: eligiblePlayerIds,
           players: lineupPlayers,
           scoreFn,
-          kickoffFn,
-          hasKickoffData,
+          // The real schedule's kickoffs (projection feeds don't carry them), so the coach's
+          // FLEX shuffle can see who plays first and the To-Do's flex moves come out of it.
+          kickoffFn: scheduledKickoff,
+          hasKickoffData: true,
           isLockedFn,
           isExcludedFn,
           isByeFn,

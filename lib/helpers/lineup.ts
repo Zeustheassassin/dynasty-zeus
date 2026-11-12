@@ -344,6 +344,57 @@ export function computeSuggestedLineup(
   return { currentStarterRows, lineup, swaps, currentLineupScore, suggestedLineupScore };
 }
 
+const isFlexSlot = (slot: string) => slot === "FLEX" || slot === "SUPER_FLEX";
+
+/** An early-game starter sitting in FLEX / SUPER_FLEX who belongs in a positional slot. */
+export interface FlexSlotMove {
+  player: SleeperPlayer;
+  /** FLEX or SUPER_FLEX: where he starts now. */
+  fromSlot: string;
+  /** The positional slot to put him in. */
+  toSlot: string;
+  /** The starter to trade places with in Sleeper: he holds `toSlot` now, plays later, and takes
+   *  the flex. Null when the coach fills the flex another way (from the bench, or a chain of
+   *  moves) — the Starters tab's Suggested Lineup shows the full layout. */
+  swapWith: SleeperPlayer | null;
+}
+
+/** Starters in an early game (`isEarlyFn`, e.g. Thursday night, not yet kicked off) who sit in
+ *  FLEX / SUPER_FLEX while the suggested lineup has them in a positional slot and a later-game
+ *  starter in that flex. Sleeper locks the flex at his kickoff, so leaving him there throws away
+ *  the late swap the flex is for. Reads one coach run as is (rebalanceLineupForKickoffWindows does
+ *  the moving; it needs real kickoffs on the rows) — no points change, so no swap or delta. */
+export function getFlexSlotMoves(
+  result: Pick<SuggestedLineupResult, "currentStarterRows" | "lineup">,
+  isEarlyFn: (id: string) => boolean
+): FlexSlotMove[] {
+  const { currentStarterRows, lineup } = result;
+  const moves: FlexSlotMove[] = [];
+  currentStarterRows.forEach((row, index) => {
+    const player = row.player;
+    if (!player || !isFlexSlot(row.slot) || !isEarlyFn(player.player_id)) return;
+    const suggestedAt = lineup.findIndex((r) => r.player?.player_id === player.player_id);
+    // Benched by the suggestion (a swap of its own), or still in a flex.
+    if (suggestedAt < 0 || isFlexSlot(lineup[suggestedAt].slot)) return;
+    // Rows line up by roster position, so lineup[index] is who the coach puts in his flex.
+    const nextFlex = lineup[index];
+    if (!nextFlex?.player || nextFlex.kickoffAt == null || row.kickoffAt == null) return;
+    if (nextFlex.kickoffAt <= row.kickoffAt) return;
+
+    // One tap-and-swap in Sleeper when the new flex player is starting now in a slot he can take.
+    const partnerRow = currentStarterRows.find((r) => r.player?.player_id === nextFlex.player?.player_id);
+    const direct = !!partnerRow && !isFlexSlot(partnerRow.slot)
+      && getLineupSlotEligiblePositions(partnerRow.slot).includes(player.position);
+    moves.push({
+      player,
+      fromSlot: row.slot,
+      toSlot: direct ? partnerRow.slot : lineup[suggestedAt].slot,
+      swapWith: direct ? nextFlex.player : null,
+    });
+  });
+  return moves;
+}
+
 export interface EarlyLockStake {
   /** Points the suggested lineup loses if the early game kicks off with no change made. */
   points: number;

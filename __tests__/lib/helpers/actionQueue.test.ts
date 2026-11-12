@@ -61,7 +61,7 @@ function entry(l: SleeperLeague, r: SleeperRoster, rostersAsOf?: number): League
 function status(over: Partial<LeagueLineupStatus>): LeagueLineupStatus {
   return {
     isOptimal: false, swapCount: 0, delta: 0, pivotRiskCount: 0, earlyLocks: [],
-    swaps: [], pivotRisks: [], emptySlots: [], asOf: 100, ...over,
+    swaps: [], pivotRisks: [], emptySlots: [], flexMoves: [], asOf: 100, ...over,
   };
 }
 
@@ -115,6 +115,38 @@ describe("buildActionQueue — lineup items", () => {
   it("hides lineup changes under the dot's 0.5-point floor", () => {
     const keys = buildActionQueue(INPUT).map((i) => i.key);
     expect(keys.some((k) => k.startsWith("lineup:B"))).toBe(false);
+  });
+
+  it("lists a Thursday starter in FLEX as a move to his position, with no points needed", () => {
+    // User, 11/12: Cam Skattebo plays Thursday in FLEX → "Change Cam Skattebo to a RB spot".
+    const flexOnly = {
+      ...LINEUP,
+      B: status({
+        isOptimal: true, asOf: 300,
+        flexMoves: [{ playerId: "outB", fromSlot: "FLEX", toSlot: "RB", swapWithId: "p1", lockAt: THU, day: "Thu" as const }],
+      }),
+    };
+    const item = byKey(buildActionQueue({ ...INPUT, lineupStatus: flexOnly })).get("flexMove:B:outB:RB");
+    expect(item).toMatchObject({
+      kind: "lineup", leagueId: "B", playerIds: ["outB", "p1"],
+      title: "Move Player outB from FLEX to RB",
+      detail: "Plays Thursday · swap him with Player p1 so FLEX holds a later game",
+      deadline: THU, deadlineLabel: "Locks", expiresAt: THU, earlyLockDay: "Thu", appTab: "STARTERS", asOf: 300,
+    });
+  });
+
+  it("words a flex move with no one-tap partner as keeping the flex open", () => {
+    const flexOnly = {
+      ...LINEUP,
+      B: status({
+        isOptimal: true,
+        flexMoves: [{ playerId: "outB", fromSlot: "SUPER_FLEX", toSlot: "QB", swapWithId: null, lockAt: THU, day: "Thu" as const }],
+      }),
+    };
+    const item = byKey(buildActionQueue({ ...INPUT, lineupStatus: flexOnly })).get("flexMove:B:outB:QB");
+    expect(item).toMatchObject({
+      playerIds: ["outB"], title: "Move Player outB from SFLEX to QB", detail: "Plays Thursday · keep SFLEX for a later game",
+    });
   });
 
   it("badges T/F/S only when the League Overview flags that day", () => {

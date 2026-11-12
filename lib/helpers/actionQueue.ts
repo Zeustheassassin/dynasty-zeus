@@ -89,6 +89,7 @@ const KIND_ORDER: Record<ActionKind, number> = {
 export const sleeperLeagueUrl = (leagueId: string) => `https://sleeper.com/leagues/${encodeURIComponent(leagueId)}`;
 
 const slotLabel = (slot: string) => (slot === "SUPER_FLEX" ? "SFLEX" : slot);
+const DAY_NAME: Record<EarlyLockDay, string> = { Thu: "Thursday", Fri: "Friday", Sat: "Saturday" };
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Every open move across the user's leagues, most urgent first within each league (see
@@ -136,6 +137,27 @@ export function buildActionQueue(input: ActionQueueInput): ActionItem[] {
             asOf: status.asOf,
           });
         }
+      }
+      // An early-game starter in FLEX: no points in it, so no delta floor — the flex just has to
+      // be clear of him before his game locks it (user, 11/12: "Change Cam Skattebo to a RB spot").
+      for (const move of status.flexMoves) {
+        const from = slotLabel(move.fromSlot);
+        items.push({
+          ...base,
+          key: `flexMove:${leagueId}:${move.playerId}:${move.toSlot}`,
+          kind: "lineup",
+          playerIds: move.swapWithId ? [move.playerId, move.swapWithId] : [move.playerId],
+          title: `Move ${name(move.playerId)} from ${from} to ${slotLabel(move.toSlot)}`,
+          detail: move.swapWithId
+            ? `Plays ${DAY_NAME[move.day]} · swap him with ${name(move.swapWithId)} so ${from} holds a later game`
+            : `Plays ${DAY_NAME[move.day]} · keep ${from} for a later game`,
+          deadline: move.lockAt,
+          deadlineLabel: "Locks",
+          expiresAt: move.lockAt,
+          earlyLockDay: move.day,
+          appTab: "STARTERS",
+          asOf: status.asOf,
+        });
       }
       for (const risk of status.pivotRisks) {
         const word = statusOf(lineupPlayers, risk.playerId) || "Risky";
