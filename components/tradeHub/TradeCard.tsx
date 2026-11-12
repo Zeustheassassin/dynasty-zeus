@@ -18,6 +18,7 @@ import type { TradeResult } from "./finderTypes";
 import { ordinalSuffix, buildTradeFingerprint } from "./shared";
 import { computeFinderAdjustedNet, EVEN_NET_THRESHOLD } from "./calculatorUtils";
 import { Card } from "../ui/Card";
+import { ContractChips, TradeContractNote } from "../contracts/ContractSituation";
 import { fairnessTier, type TradeFairness, type TradeSimImpact } from "./FinderScoring";
 
 const FAIRNESS_TIER_STYLE = [
@@ -482,6 +483,7 @@ export default function TradeCard({
                     {marketSignalMap.get(p.player_id) === "LIQUID" && (
                       <span className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-sky-700 bg-sky-950/40 text-sky-300 shrink-0">Active</span>
                     )}
+                    <span className="hidden sm:inline-flex items-center gap-1"><ContractChips sleeperId={p.player_id} /></span>
                   </div>
                   <div className="mt-0.5 flex items-center justify-between gap-1.5">
                     <span className="text-[10px] text-slate-500 truncate">{p.position}{p.team ? ` · ${p.team}` : ""}{p.age ? ` · Age ${p.age}` : ""}</span>
@@ -530,6 +532,7 @@ export default function TradeCard({
                   {marketSignalMap.get(p.player_id) === "LIQUID" && (
                     <span className="hidden sm:inline-flex text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-sky-700 bg-sky-950/40 text-sky-300 shrink-0">Active</span>
                   )}
+                  <span className="hidden sm:inline-flex items-center gap-1"><ContractChips sleeperId={p.player_id} /></span>
                   {leagueId !== null && (
                     <span className="ml-auto">
                       <NoInterestPicker
@@ -573,6 +576,7 @@ export default function TradeCard({
           </div>
         </div>
       </div>
+      <TradeContractNote give={trade.give.map((p) => p.player_id)} receive={trade.receive.map((p) => p.player_id)} />
       {/* Trade Reasoning expander */}
       {scoreFactors.length > 0 && (
         <details className="mt-3 group">

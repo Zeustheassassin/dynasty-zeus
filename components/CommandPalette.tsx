@@ -11,7 +11,7 @@ import type { LeagueStepTarget } from "../app/hooks/useLeagueStepper";
 // DataHub, DraftHub, useHubRouting) keeps its own copy rather than a shared type.
 // TodoView is the exception: useHubRouting exports it and the To-Do hub imports it too.
 type TradeHubSection = "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS";
-type DataHubTab = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE";
+type DataHubTab = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "CONTRACTS" | "MY_SHARES" | "COMPARE";
 type DraftHubSection = "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL";
 
 export interface CommandPaletteProps {
@@ -45,6 +45,7 @@ const DATA_HUB_LABELS: Record<DataHubTab, string> = {
   STAT_PROJECTIONS: "Stat Detail",
   LEAGUEMATES: "League Mates",
   DEPTH_CHARTS: "Depth Charts",
+  CONTRACTS: "NFL Contracts",
   MY_SHARES: "My Shares",
   COMPARE: "Compare Players",
 };

@@ -8,7 +8,7 @@ const setOverride = vi.fn();
 let hookState: Record<string, unknown> = {};
 vi.mock("@/hooks/useContractSituation", () => ({ useContractSituation: () => hookState }));
 
-import { ContractChips, ContractSituationCard, RoomLine } from "@/components/contracts/ContractSituation";
+import { ContractChips, ContractSituationCard, RoomLine, TradeContractNote } from "@/components/contracts/ContractSituation";
 
 const player = (extra: Partial<PlayerSituation>): PlayerSituation => ({
   otcId: 1, sleeperId: "s1", name: "Josh Jacobs", pos: "RB", teamId: 9, kind: "veteran", endYear: 2027, freeAgency: "UFA",
@@ -64,6 +64,32 @@ describe("ContractSituationCard", () => {
     render(<ContractSituationCard sleeperId="s1" position="RB" />);
     expect(screen.getByText(/HTTP 502/)).toBeTruthy();
     const { container } = render(<ContractSituationCard sleeperId="s1" position="K" />);
+    expect(container.innerHTML).toBe("");
+  });
+});
+
+describe("ContractChips compact", () => {
+  it("drops the guarantee from the deal chip", () => {
+    hookState = { ...hookState, situation: { ...situation, players: { 1: player({ endYear: 2029, guaranteedThrough: 2027, cut: null }) } } };
+    render(<div><ContractChips sleeperId="s1" compact /><ContractChips sleeperId="s1" /></div>);
+    expect(screen.getByText("thru '29")).toBeTruthy();
+    expect(screen.getByText("thru '29 · gtd '27")).toBeTruthy();
+  });
+});
+
+describe("TradeContractNote", () => {
+  it("notes the warnings on each side of a trade, nothing when there are none", () => {
+    render(<TradeContractNote give={[]} receive={["s1", "nobody"]} />);
+    expect(screen.getByText("You'd get:")).toBeTruthy();
+    expect(screen.getByText("Jacobs: likely cut before 2027")).toBeTruthy();
+    expect(screen.queryByText("You'd give:")).toBeNull();
+    const { container } = render(<TradeContractNote give={["nobody"]} receive={[]} />);
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("drops a player the user says stays", () => {
+    hookState = { ...hookState, overrides: { "1": { call: "stays", season: 2027 } } };
+    const { container } = render(<TradeContractNote give={["s1"]} receive={[]} />);
     expect(container.innerHTML).toBe("");
   });
 });

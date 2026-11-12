@@ -6,6 +6,7 @@ import { CURRENT_YEAR, rankAgainstLeague } from "../../lib/helpers";
 import { OPPONENT_DISPOSITIONS, pickDispositionKey, opponentAssetKey } from "../../lib/helpers/dispositions";
 import { DispositionPicker } from "../shared/DispositionPicker";
 import { NoInterestPicker } from "../shared/NoInterestPicker";
+import { ContractChips } from "../contracts/ContractSituation";
 import type { SleeperUser, SleeperTradedPick, SleeperPlayer, AssetDisposition, LeagueAssetDispositions, LeagueExpiringBlocks } from "../../lib/types";
 
 const ROLE_PRIORITY: Record<string, number> = { starter: 0, bench: 1, taxi: 2 };
@@ -176,7 +177,10 @@ function OppRostersTab({
                           <span className="text-emerald-400 font-medium whitespace-nowrap">{(p.value || 0).toLocaleString()}</span>
                         </div>
                         <div className="mt-0.5 flex items-center justify-between gap-2">
-                          <span className="text-[10px] text-slate-500">{ROLE_LABEL[p.role] ?? ""}</span>
+                          <span className="text-[10px] text-slate-500 flex flex-wrap items-center gap-1 min-w-0">
+                            {ROLE_LABEL[p.role] ?? ""}
+                            <ContractChips sleeperId={p.player_id} compact />
+                          </span>
                           <div className="flex items-center gap-1">
                             <NoInterestPicker
                               expiresAt={leagueNoInterest[p.player_id]}

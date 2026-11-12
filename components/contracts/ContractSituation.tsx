@@ -7,7 +7,7 @@
 import React from "react";
 import { useContractSituation } from "../../hooks/useContractSituation";
 import {
-  callFor, contractChip, overrideFor, roomOpenWith,
+  callFor, contractChip, contractNote, overrideFor, roomOpenWith,
   type CallTone, type ContractSituationResponse, type OverrideCall, type PlayerSituation, type RoomSituation,
 } from "../../lib/contractSituation";
 import { STARTING_SPOTS } from "../../lib/contractRooms";
@@ -31,13 +31,15 @@ function playerFor(s: ContractSituationResponse | null, sleeperId: string): Play
   return otc != null ? s?.players[otc] ?? null : null;
 }
 
-/** "thru '29 · gtd '27" plus the coming season's call, for one Sleeper player. Renders nothing without a deal. */
-export function ContractChips({ sleeperId }: { sleeperId: string }) {
+/** "thru '29 · gtd '27" plus the coming season's call, for one Sleeper player. Renders nothing without a deal.
+ *  `compact` drops the guarantee from the deal chip (it stays in the tooltip) for narrow roster cards. */
+export function ContractChips({ sleeperId, compact = false }: { sleeperId: string; compact?: boolean }) {
   const { situation, overrides } = useContractSituation();
   const p = playerFor(situation, sleeperId);
   if (!situation || !p) return null;
   const call = callFor(p, overrideFor(overrides, p.otcId, situation.season));
-  const deal = contractChip(p, situation.season);
+  const full = contractChip(p, situation.season);
+  const deal = compact ? full.replace(/ · gtd '\d\d$/, "") : full;
   return (
     <>
       <span className={`${CHIP} ${TONE.neutral}`} title={dealTitle(p, situation.season)}>{deal}</span>
@@ -139,6 +141,41 @@ function teamLine(team: ContractSituationResponse["teams"][number], season: numb
   const cap = team.cap[0];
   const space = cap?.space != null ? `${season} cap space ~${money(cap.space)}` : "";
   return [picks, space].filter(Boolean).join(" · ");
+}
+
+/** Trade Finder cards and the calculator: the contract warnings on both sides of a trade, always visible (the
+ *  user, 2026-11-11: noted, not scored, "so I am aware while making trades"). Renders nothing when there's none. */
+export function TradeContractNote({ give, receive }: { give: readonly string[]; receive: readonly string[] }) {
+  const { situation, overrides } = useContractSituation();
+  if (!situation) return null;
+  const notes = (ids: readonly string[]) => ids.flatMap((id) => {
+    const p = playerFor(situation, id);
+    const note = p ? contractNote(p, overrideFor(overrides, p.otcId, situation.season), situation.season) : null;
+    return p && note ? [{ p, note }] : [];
+  });
+  const sides = [
+    { label: "You'd get", items: notes(receive) },
+    { label: "You'd give", items: notes(give) },
+  ].filter((s) => s.items.length);
+  if (!sides.length) return null;
+  return (
+    <div className="mt-2 text-[10px] text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="font-semibold uppercase tracking-wider text-slate-500">Contracts</span>
+      {sides.map((s) => (
+        <span key={s.label} className="flex flex-wrap items-center gap-1">
+          <span className="text-slate-500">{s.label}:</span>
+          {s.items.map(({ p, note }) => {
+            const why = callFor(p, overrideFor(overrides, p.otcId, situation.season))?.reasons ?? [];
+            return (
+              <span key={p.otcId} className={`${CHIP} ${TONE[note.tone]}`} title={why.join("\n")}>
+                {p.name.split(" ").slice(-1)[0]}: {note.text}
+              </span>
+            );
+          })}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 /** Data Hub → Depth Charts: one line under a team's header for the shown position. */

@@ -1046,6 +1046,15 @@ useEffect(() => {
   }
 }, [mainTab, selectedLeague, loadCalcValues]);
 
+// Data Hub → Contracts filters and sorts every NFL player by FantasyCalc value, and Depth Charts shows it
+// beside each name; neither had a trigger, so both read empty values unless another hub had loaded them.
+// League-independent like the Draft Hub's (getLeagueNumQbs defaults to superflex without a league).
+useEffect(() => {
+  if (mainTab === "DATA_HUB" && (dataHubTab === "CONTRACTS" || dataHubTab === "DEPTH_CHARTS")) {
+    loadCalcValues(getLeagueNumQbs(selectedLeague));
+  }
+}, [mainTab, dataHubTab, selectedLeague, loadCalcValues]);
+
 useEffect(() => {
   if (mainTab === "DATA_HUB" && dataHubTab === "RANKINGS") {
     loadRedraftValues();

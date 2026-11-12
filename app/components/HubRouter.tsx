@@ -63,7 +63,7 @@ const ScoutingHub = dynamic(() => import("../../components/ScoutingHub"), { ssr:
 const UserScoutHub = dynamic(() => import("../../components/UserScoutHub"), { ssr: false, loading: HubSkeleton });
 
 // ── Local types ──────────────────────────────────────────────────────────────
-type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "ROSTER_CHECK" | "COMPARE";
+type DataHubTabId = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "CONTRACTS" | "MY_SHARES" | "ROSTER_CHECK" | "COMPARE";
 
 // ── Props ────────────────────────────────────────────────────────────────────
 interface HubRouterProps {
@@ -408,7 +408,7 @@ export function HubRouter({
       <div className={
         isWideHub(mainTab)
           ? ""
-          : (mainTab === "DATA_HUB" && dataHubTab === "DEPTH_CHARTS")
+          : (mainTab === "DATA_HUB" && (dataHubTab === "DEPTH_CHARTS" || dataHubTab === "CONTRACTS"))
             ? "w-full px-6 py-6"
             : "max-w-3xl mx-auto p-6"
       }>

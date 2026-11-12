@@ -329,6 +329,38 @@ export function callFor(p: PlayerSituation, call: OverrideCall | null): CallLabe
   return null;
 }
 
+/** A trade-time warning about him, or null when there's nothing to flag (the user said he stays, he's signed
+ *  and safe, or he's expected back). Trade Finder cards and the calculator show these so the user is aware. */
+export function contractNote(p: PlayerSituation, call: OverrideCall | null, season: number): { text: string; tone: CallTone } | null {
+  if (call === "stays") return null;
+  if (call === "goes") return { text: `your call: gone in ${season}`, tone: "bad" };
+  if (p.cut?.level === "likely") return { text: `likely cut before ${season}`, tone: "bad" };
+  if (p.cut?.level === "possible") return { text: `cut risk for ${season}`, tone: "warn" };
+  if (p.stay && p.endYear != null) {
+    if (p.stay.call === "leaves") return { text: `deal ends after ${p.endYear}, likely leaves`, tone: "bad" };
+    if (p.stay.call === "toss-up") return { text: `deal ends after ${p.endYear}, toss-up to re-sign`, tone: "warn" };
+  }
+  return null;
+}
+
+/** The Contracts tab's sections. */
+export type ContractGroup = "leaves" | "toss-up" | "back" | "likely-cut" | "cut-risk" | "goes" | "kept";
+
+/** Which section of the Contracts tab he belongs in (null: signed and safe, nothing to list). Expiring players go
+ *  to leaves / toss-up / back, signed ones at risk to likely-cut / cut-risk; the user's call moves him to back or
+ *  leaves (expiring) or kept / goes (signed). */
+export function contractGroup(p: PlayerSituation, call: OverrideCall | null): ContractGroup | null {
+  if (p.stay) {
+    if (call) return call === "stays" ? "back" : "leaves";
+    return p.stay.call === "stays" ? "back" : p.stay.call === "leaves" ? "leaves" : "toss-up";
+  }
+  if (p.cut) {
+    if (call) return call === "stays" ? "kept" : "goes";
+    return p.cut.level === "likely" ? "likely-cut" : p.cut.level === "possible" ? "cut-risk" : null;
+  }
+  return null;
+}
+
 const yy = (y: number) => `'${String(y).slice(-2)}`;
 
 /** The short contract chip: "Exp '26 RFA", "thru '29 · gtd '27", "FA". */

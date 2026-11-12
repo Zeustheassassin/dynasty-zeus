@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
-  buildContractSituation, callFor, contractChip, contractPathHint, coreWith, latestNflSeason, overrideFor, pressureRank,
+  buildContractSituation, callFor, contractChip, contractGroup, contractNote, contractPathHint, coreWith, latestNflSeason, overrideFor, pressureRank,
   roomOpenWith, sameName, situationSeason, standingsFromEspn, CLOSES_RANK,
   type ContractSituationResponse, type PlayerSituation, type SituationInput, type TeamSituation,
 } from "@/lib/contractSituation";
@@ -145,6 +145,38 @@ describe("the user's calls", () => {
     expect(callFor(s.players[expiring.otc_id], null)).toMatchObject({ label: "Likely back", tone: "good" });
     expect(callFor(s.players[star.otc_id], null)).toBeNull();
     expect(callFor(s.players[old.otc_id], "stays")).toMatchObject({ label: "Stays", source: "yours" });
+  });
+});
+
+describe("contractNote / contractGroup", () => {
+  const s = buildContractSituation(input());
+  const P = (r: NflContractRow) => s.players[r.otc_id];
+  const tossUp: PlayerSituation = { ...P(expiring), stay: { call: "toss-up", score: 0, reasons: [] } };
+  const leaving: PlayerSituation = { ...P(expiring), stay: { call: "leaves", score: -1, reasons: [] } };
+  const risky: PlayerSituation = { ...P(old), cut: { ...P(old).cut!, level: "possible" } };
+
+  it("flags what a trader should know, nothing for a safe or returning player or the user's 'stays'", () => {
+    expect(contractNote(P(old), null, 2027)).toEqual({ text: "likely cut before 2027", tone: "bad" });
+    expect(contractNote(risky, null, 2027)).toEqual({ text: "cut risk for 2027", tone: "warn" });
+    expect(contractNote(leaving, null, 2027)).toEqual({ text: "deal ends after 2026, likely leaves", tone: "bad" });
+    expect(contractNote(tossUp, null, 2027)).toEqual({ text: "deal ends after 2026, toss-up to re-sign", tone: "warn" });
+    expect(contractNote(P(expiring), null, 2027)).toBeNull();
+    expect(contractNote(P(star), null, 2027)).toBeNull();
+    expect(contractNote(P(old), "stays", 2027)).toBeNull();
+    expect(contractNote(P(star), "goes", 2027)).toEqual({ text: "your call: gone in 2027", tone: "bad" });
+  });
+
+  it("sorts players into the Contracts tab's sections, the user's call moving them", () => {
+    expect(contractGroup(leaving, null)).toBe("leaves");
+    expect(contractGroup(tossUp, null)).toBe("toss-up");
+    expect(contractGroup(P(expiring), null)).toBe("back");
+    expect(contractGroup(tossUp, "stays")).toBe("back");
+    expect(contractGroup(P(expiring), "goes")).toBe("leaves");
+    expect(contractGroup(P(old), null)).toBe("likely-cut");
+    expect(contractGroup(risky, null)).toBe("cut-risk");
+    expect(contractGroup(P(old), "stays")).toBe("kept");
+    expect(contractGroup(P(star), "goes")).toBe("goes");
+    expect(contractGroup(P(star), null)).toBeNull();
   });
 });
 

@@ -26,7 +26,7 @@ interface MainLayoutProps {
   players: Record<string, SleeperPlayer>;
   setTradeHubSection: (s: "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS") => void;
   setLeagueHubTab: (t: LeagueHubTab) => void;
-  setDataHubTab: (t: "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "MY_SHARES" | "COMPARE") => void;
+  setDataHubTab: (t: "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "CONTRACTS" | "MY_SHARES" | "COMPARE") => void;
   setDraftHubSection: (s: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL") => void;
   setPlayerProfileId: (id: string | null) => void;
   setTodoView: (view: TodoView) => void;

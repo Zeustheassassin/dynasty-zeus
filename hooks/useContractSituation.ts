@@ -84,10 +84,12 @@ async function loadOverrides() {
   try {
     const { data: { session } } = await (await db()).auth.getSession();
     if (!session?.user) return;
-    const { data, error } = await (await db()).from("nfl_contract_overrides").select("overrides").eq("user_id", session.user.id).maybeSingle();
+    // A plain one-row read (not maybeSingle, whose "no row yet" answer is a 406 the browser logs as an error).
+    const { data, error } = await (await db()).from("nfl_contract_overrides").select("overrides").eq("user_id", session.user.id).limit(1);
     if (error) { log.warn("nfl_contract_overrides load failed (is migration 097 applied?)", { err: error.message }); return; }
-    if (data) {
-      const overrides = cleanOverrides((data as { overrides?: unknown }).overrides);
+    const row = (data as { overrides?: unknown }[] | null)?.[0];
+    if (row) {
+      const overrides = cleanOverrides(row.overrides);
       setLocalStorageItem(CONTRACT_OVERRIDES_KEY, overrides);
       set({ overrides });
     }

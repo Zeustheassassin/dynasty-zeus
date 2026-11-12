@@ -15,6 +15,7 @@ import { useValues } from "../../lib/ValuesContext";
 import { useMyRoster } from "../../lib/RosterContext";
 import { MY_DISPOSITIONS, pickDispositionKey } from "../../lib/helpers/dispositions";
 import { DispositionPicker } from "../shared/DispositionPicker";
+import { ContractChips } from "../contracts/ContractSituation";
 import { ShareLinkButton } from "../shared/ShareLinkButton";
 import { buildConsensusOrder, reconcilePersonalOrdering } from "../../lib/helpers/personalRankings";
 import type { SleeperLeague, SleeperUser, SleeperTradedPick, SleeperPlayer, AssetDisposition, LeagueAssetDispositions } from "../../lib/types";
@@ -270,7 +271,10 @@ function RostersTab({
                             <span className="text-emerald-400 font-medium whitespace-nowrap">{adjVal(p).toLocaleString()}</span>
                           </div>
                           <div className="mt-0.5 flex items-center justify-between gap-2">
-                            <span className="text-[10px] text-slate-500">{ROLE_LABEL[p.role] ?? ""}</span>
+                            <span className="text-[10px] text-slate-500 flex flex-wrap items-center gap-1 min-w-0">
+                              {ROLE_LABEL[p.role] ?? ""}
+                              <ContractChips sleeperId={p.player_id} compact />
+                            </span>
                             <DispositionPicker
                               value={leagueTags[p.player_id]}
                               options={MY_DISPOSITIONS}
@@ -337,6 +341,7 @@ function RostersTab({
                       <div className="flex-1 min-w-0 flex items-center gap-1">
                         <span className="text-[10px] text-slate-500 uppercase">{p.position}</span>
                         <span className="truncate text-slate-200">{p.full_name}</span>
+                        <ContractChips sleeperId={p.player_id} compact />
                       </div>
                       <span className="text-emerald-400 font-medium whitespace-nowrap">{adjVal(p).toLocaleString()}</span>
                     </div>

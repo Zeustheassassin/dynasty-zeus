@@ -12,6 +12,7 @@ import { buildTradeFingerprint } from "./shared";
 import { computePosTotals, computeLeagueRank } from "./calculatorUtils";
 import { CHART_CHROME, CHART_DIVERGING } from "../../lib/chartTheme";
 import { Card } from "../ui/Card";
+import { ContractChips, TradeContractNote } from "../contracts/ContractSituation";
 
 interface CalculatorResultProps {
   calcGive: string[];
@@ -152,9 +153,13 @@ function CalculatorResult({
     setSimPreviewSignatureRun(simPreviewSignature);
   };
 
-  const tradeRow = (rowKey: string, label: string, value: number, onRemove: () => void) => (
+  // `playerId` adds the player's contract chips (contracts plan stage 7); picks pass none.
+  const tradeRow = (rowKey: string, label: string, value: number, onRemove: () => void, playerId?: string) => (
     <div key={rowKey} className="flex items-center justify-between px-3 py-1.5 bg-slate-800 rounded-lg">
-      <span className="text-sm truncate">{label}</span>
+      <span className="flex items-center gap-1 min-w-0">
+        <span className="text-sm truncate">{label}</span>
+        {playerId && <span className="hidden sm:inline-flex items-center gap-1"><ContractChips sleeperId={playerId} compact /></span>}
+      </span>
       <div className="flex items-center gap-2 shrink-0 ml-2">
         <span className="text-xs text-blue-300 font-mono">{value > 0 ? value.toLocaleString() : "—"}</span>
         <button onClick={onRemove} className="text-slate-600 hover:text-red-400 text-xs">✕</button>
@@ -180,7 +185,8 @@ function CalculatorResult({
                   id,
                   `${p?.full_name ?? id} (${p?.position})`,
                   calcVal(id),
-                  () => setCalcGive((prev) => prev.filter((x) => x !== id))
+                  () => setCalcGive((prev) => prev.filter((x) => x !== id)),
+                  id,
                 );
               })}
               {calcGivePicks.map((k: string) => {
@@ -221,7 +227,8 @@ function CalculatorResult({
                   id,
                   `${p?.full_name ?? id} (${p?.position})`,
                   calcVal(id),
-                  () => setCalcReceive((prev) => prev.filter((x) => x !== id))
+                  () => setCalcReceive((prev) => prev.filter((x) => x !== id)),
+                  id,
                 );
               })}
               {calcReceivePicks.map((k: string) => {
@@ -249,6 +256,8 @@ function CalculatorResult({
             </div>
           </div>
         </div>
+
+        <TradeContractNote give={calcGive} receive={calcReceive} />
 
         {/* Verdict */}
         {(calcGive.length > 0 || calcGivePicks.length > 0 || calcReceive.length > 0 || calcReceivePicks.length > 0) && (
