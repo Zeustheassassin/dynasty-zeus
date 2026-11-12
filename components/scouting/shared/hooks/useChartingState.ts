@@ -4,6 +4,7 @@ import { supabase } from "../../../../lib/supabaseclient";
 import { logger } from "../../../../lib/logger";
 import { BASE_YEAR } from "../../../../lib/helpers/season";
 import type { Prospect, ScoutingGame } from "../../../../lib/types";
+import { preGradeIsMirrored } from "../../../../lib/scouting/preGradeMirror";
 import { useDeferredDataChanged } from "./useDeferredDataChanged";
 
 const log = logger("scouting/shared/useChartingState");
@@ -146,9 +147,13 @@ export function useChartingState(prospect: Prospect, options: Options) {
   async function saveBio() {
     setSavingBio(true);
     setGameError(null);
+    // A Pre grade that mirrors the Dynasty Score is the Big Board's to write:
+    // left out, so a Bio save can't put back an older value.
+    const fields: Partial<Prospect> = { ...bio };
+    if (preGradeIsMirrored(prospect, new Date())) delete fields.pre_draft_grade;
     const { error } = await supabase
       .from("prospects")
-      .update({ ...bio, updated_at: new Date().toISOString() })
+      .update({ ...fields, updated_at: new Date().toISOString() })
       .eq("id", prospect.id);
     setSavingBio(false);
     if (error) {

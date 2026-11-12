@@ -37,6 +37,7 @@ import type { OverviewData } from "./scouting/overview/ProspectOverview";
 import { useDraftPicks } from "./scouting/shared/hooks/useDraftPicks";
 import type { DraftResultUpdate } from "../lib/nflDraft";
 import type { LandingSaved } from "../lib/scouting/teamLanding";
+import type { RankUpdate } from "../lib/scouting/realignRanks";
 
 const log = logger("ScoutingHub");
 
@@ -669,6 +670,39 @@ export default function ScoutingHub() {
     }
   }
 
+  // Many prospects' OVR / position ranks in one all-or-nothing call (migration
+  // 098's set_prospect_ranks): the Big Board's Realign ranks buttons and their
+  // Undo. A field left out of an update keeps its value. The board repaints at
+  // once; a failed call puts the old ranks back. False on a failed write.
+  async function handleSetRanks(updates: ReadonlyMap<string, RankUpdate>): Promise<boolean> {
+    if (updates.size === 0) return true;
+    const before = new Map(prospects.filter((p) => updates.has(p.id))
+      .map((p) => [p.id, { overall_rank: p.overall_rank, personal_rank: p.personal_rank }]));
+    setProspects((prev) => prev.map((p) => (updates.has(p.id) ? { ...p, ...updates.get(p.id) } : p)));
+    const { error } = await supabase.rpc("set_prospect_ranks", { p_ranks: Object.fromEntries(updates) });
+    if (error) {
+      log.error("set prospect ranks (needs migration 098)", { msg: error.message, code: error.code });
+      setProspects((prev) => prev.map((p) => (before.has(p.id) ? { ...p, ...before.get(p.id) } : p)));
+      return false;
+    }
+    return true;
+  }
+
+  // Pre-draft grades that mirror the Dynasty Score (lib/scouting/preGradeMirror.ts),
+  // from the Big Board, many in one call (migration 098's
+  // save_prospect_pre_grades). Put into state once written, so the report and
+  // the charting pages show them; a failed write changes nothing. Stable, like
+  // handleSaveBoardScores.
+  const handleSavePreGrades = useCallback(async (grades: ReadonlyMap<string, number>): Promise<boolean> => {
+    const { error } = await supabase.rpc("save_prospect_pre_grades", { p_grades: Object.fromEntries(grades) });
+    if (error) {
+      log.error("save mirrored pre-draft grades (needs migration 098)", { msg: error.message, code: error.code });
+      return false;
+    }
+    setProspects((prev) => prev.map((p) => (grades.has(p.id) ? { ...p, pre_draft_grade: grades.get(p.id)! } : p)));
+    return true;
+  }, []);
+
   // The draft board's scores (prospects.board_scores, migration 068), many
   // prospects in one call. Not mirrored into state: nothing on this hub reads
   // them, and the Big Board tracks what it saved. False on a failed write.
@@ -869,6 +903,8 @@ export default function ScoutingHub() {
             onLockAEScore={handleLockAEScore}
             inputsComplete={inputsComplete}
             onSaveBoardScores={handleSaveBoardScores}
+            onSavePreGrades={handleSavePreGrades}
+            onSetRanks={handleSetRanks}
             pffTotals={pffTotals}
             gradingData={gradingData}
             draftPicks={draftPicks}

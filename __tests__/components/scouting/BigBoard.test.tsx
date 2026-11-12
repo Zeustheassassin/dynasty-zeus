@@ -11,6 +11,7 @@ import { EMPTY_GRADING_DATA } from "@/lib/scouting/aeComponents";
 import type { ProspectWithStats, AEScoreLock, BoardScores } from "@/lib/types";
 import type { RoleFit } from "@/lib/scouting/roleFit";
 import { totalsFor } from "@/lib/pff/totals";
+import { gradeFromDynasty } from "@/lib/scouting/prospectGrade";
 import { GAME_STAT_KEYS, SEASON_STAT_KEYS, type PffGameRow, type PffSeasonRow } from "@/lib/pff/stats";
 
 // The Big Board's Above Exp group: one column per metric (AAE, SRAE, SAE, cSAE,
@@ -922,5 +923,172 @@ describe("BigBoard Post-Draft tab", () => {
     expect((screen.getByRole("textbox", { name: "QB grade for Wide One" }) as HTMLInputElement).placeholder).toBe("82.0");
     fireEvent.change(vets, { target: { value: "3" } });
     await vi.waitFor(() => expect(save).toHaveBeenCalledWith([{ id: "wr1", next: { pff, vetsAhead: 3 } }]));
+  });
+});
+
+describe("BigBoard Pre grade mirrors the Dynasty Score", () => {
+  const POOL = Array.from({ length: 10 }, (_, i) => prospect(`pq${i}`, `Pool QB ${i}`, "QB", 10 + i));
+  const BOARD = [...PROSPECTS.map((p) => (p.id === "qb1" ? { ...p, pre_draft_grade: 60 } : p)), ...POOL];
+  const preCell = (name: string) => within(rowFor(name)).getAllByRole("cell")[headerLabels().indexOf("Pre")];
+  type SaveFn = (grades: ReadonlyMap<string, number>) => Promise<boolean>;
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(new Date("2026-11-12T12:00:00Z"));
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("shows the Dynasty Score on the curve, read only, while the class is still to be drafted", () => {
+    renderBoard(BOARD);
+    const dyn = Number(cell("Quarter One", "Dynasty"));
+    const pre = Number(cell("Quarter One", "Pre"));
+    expect(pre).not.toBe(60);
+    expect(Math.abs(pre - gradeFromDynasty(dyn))).toBeLessThanOrEqual(0.2); // the cell's Dynasty is rounded to 2 dp
+    expect(preCell("Quarter One").getAttribute("title")).toMatch(/^Mirrors Dynasty [+-]\d\.\d\d on the curve \(−10 → 0 · −2\.25 → 50/);
+    fireEvent.click(preCell("Quarter One"));
+    expect(screen.queryByRole("textbox", { name: /Pre-draft grade for Quarter One/ })).toBeNull();
+  });
+
+  it("keeps the typed grade, editable, without a Dynasty Score or in a drafted class", () => {
+    const board = BOARD.map((p) => (p.id === "pq3" ? { ...p, draft_class_year: 2026, pre_draft_grade: 77.7 } : p));
+    renderBoard(board);
+    expect(cell("Running One", "Dynasty")).toBe("—");
+    expect(cell("Running One", "Pre")).toBe("—");
+    expect(cell("Pool QB 3", "Pre")).toBe("77.7");
+    fireEvent.click(within(preCell("Pool QB 3")).getByText("77.7"));
+    expect(screen.getByRole("textbox", { name: /Pre-draft grade for Pool QB 3/ })).toBeTruthy();
+  });
+
+  it("sorts by the grade it shows", () => {
+    renderBoard(BOARD);
+    fireEvent.click(screen.getByRole("columnheader", { name: "Pre" }));
+    const shown = names().map((n) => Number(cell(n!, "Pre")) || 0).filter((g) => g > 0);
+    expect(shown.length).toBeGreaterThan(5);
+    expect(shown).toEqual([...shown].sort((a, b) => a - b));
+  });
+
+  it("saves the mirrored grades in one call once everything has loaded", async () => {
+    const save = vi.fn<SaveFn>(async () => true);
+    renderBoard(BOARD, undefined, { scoresReady: true, onSavePreGrades: save });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(save).toHaveBeenCalledTimes(1);
+    const grades = save.mock.calls[0][0];
+    expect(grades.get("qb1")).toBe(Number(cell("Quarter One", "Pre")));
+    expect(grades.has("rb1")).toBe(false); // no Dynasty Score
+    expect(grades.has("wr1")).toBe(false);
+  });
+
+  it("writes only the grades that differ from the stored ones", async () => {
+    const first = vi.fn<SaveFn>(async () => true);
+    const a = renderBoard(BOARD, undefined, { scoresReady: true, onSavePreGrades: first });
+    await vi.advanceTimersByTimeAsync(1000);
+    a.unmount();
+    const saved = first.mock.calls[0][0];
+    const reloaded = BOARD.map((p) => (saved.has(p.id) && p.id !== "pq4" ? { ...p, pre_draft_grade: saved.get(p.id)! } : p));
+    const second = vi.fn<SaveFn>(async () => true);
+    renderBoard(reloaded, undefined, { scoresReady: true, onSavePreGrades: second });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect([...second.mock.calls[0][0].keys()]).toEqual(["pq4"]);
+  });
+
+  it("waits for every input before saving", async () => {
+    const save = vi.fn<SaveFn>(async () => true);
+    renderBoard(BOARD, undefined, { scoresReady: false, onSavePreGrades: save });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("doesn't send a failed grade again until it changes", async () => {
+    const save = vi.fn<SaveFn>(async () => false);
+    const props = {
+      loading: false, onSelectProspect: vi.fn(), onUpdateRank: vi.fn(), onUpdateOverallRank: vi.fn(), onUpdateGrade: vi.fn(),
+      onUpdateDraftRound: vi.fn(async () => true), draftYearFilter: null, setDraftYearFilter: vi.fn(),
+      games: [], rbPlays: [], qbPlays: [], tePlays: [], loadPositionPlays: vi.fn(), scoresReady: true, onSavePreGrades: save,
+    };
+    // A birthday, so the Age slider moves his Dynasty Score.
+    const board = BOARD.map((p) => (p.id === "qb1" ? { ...p, birthday: "2006-06-01" } : p));
+    const { rerender } = render(<BigBoard prospects={board} {...props} />);
+    await vi.advanceTimersByTimeAsync(1000);
+    rerender(<BigBoard prospects={[...board]} {...props} />);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(save).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByRole("slider", { name: "Age weight" }), { target: { value: "2" } });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect([...save.mock.calls[1][0].keys()]).toEqual(["qb1"]);
+  });
+});
+
+describe("BigBoard Realign ranks", () => {
+  const POOL = Array.from({ length: 10 }, (_, i) => prospect(`pq${i}`, `Pool QB ${i}`, "QB", 10 + i));
+  const BOARD = [...PROSPECTS, ...POOL];
+  type SetFn = (updates: ReadonlyMap<string, Record<string, number | null>>) => Promise<boolean>;
+  const button = (label: string) =>
+    within(screen.getByRole("group", { name: "Realign ranks" })).getByRole("button", { name: label });
+  const confirm = vi.fn((_message?: string) => true);
+  beforeEach(() => {
+    confirm.mockReset();
+    confirm.mockReturnValue(true);
+    window.confirm = confirm;
+  });
+
+  it("ranks the class by Dynasty, best first, after asking, then offers Undo", async () => {
+    const set = vi.fn<SetFn>(async () => true);
+    renderBoard(BOARD, undefined, { onSetRanks: set });
+    fireEvent.click(button("By Dynasty"));
+    expect(confirm.mock.calls[0][0]).toMatch(
+      /^Realign the 2027 class by Dynasty\?\n\nOVR and every position's rank\.\nThe 11 with a Dynasty score go first, best first; the 5 ranked without one follow in their current order\./,
+    );
+    await vi.waitFor(() => expect(set).toHaveBeenCalledTimes(1));
+    const updates = set.mock.calls[0][0];
+    // Pool QB 9 has the best QB AE: OVR 1 and QB 1.
+    expect(updates.get("pq9")).toEqual({ overall_rank: 1, personal_rank: 1 });
+    // The unscored WR / RB / TE follow the 11 scored, in their old order.
+    expect(updates.get("wr1")).toEqual({ overall_rank: 12 });
+    await vi.waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/^Realigned the 2027 class by Dynasty: \d+ prospects moved\./));
+    fireEvent.click(within(screen.getByRole("status")).getByRole("button", { name: "Undo" }));
+    await vi.waitFor(() => expect(set).toHaveBeenCalledTimes(2));
+    expect(set.mock.calls[1][0].get("pq9")).toEqual({ overall_rank: 19, personal_rank: 19 });
+    expect(set.mock.calls[1][0].get("wr1")).toEqual({ overall_rank: 1 });
+    await vi.waitFor(() => expect(screen.getByRole("status").textContent).toContain("Undone"));
+  });
+
+  it("does nothing when the confirm is cancelled", () => {
+    confirm.mockReturnValue(false);
+    const set = vi.fn<SetFn>(async () => true);
+    renderBoard(BOARD, undefined, { onSetRanks: set });
+    fireEvent.click(button("By Dynasty"));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it("says so when the save fails", async () => {
+    const set = vi.fn<SetFn>(async () => false);
+    renderBoard(BOARD, undefined, { onSetRanks: set });
+    fireEvent.click(button("By Dynasty"));
+    await vi.waitFor(() => expect(screen.getByRole("status").textContent).toContain("is migration 098 applied?"));
+  });
+
+  it("re-ranks only the position on a position tab", async () => {
+    const set = vi.fn<SetFn>(async () => true);
+    renderBoard(BOARD, undefined, { onSetRanks: set });
+    fireEvent.click(screen.getByRole("button", { name: /^QB/ }));
+    fireEvent.click(button("By Dynasty"));
+    expect(confirm.mock.calls[0][0]).toMatch(/^Realign the 2027 QBs by Dynasty\?\n\nPosition rank only: OVR stays as it is\./);
+    await vi.waitFor(() => expect(set).toHaveBeenCalledTimes(1));
+    for (const u of set.mock.calls[0][0].values()) expect(Object.keys(u)).toEqual(["personal_rank"]);
+  });
+
+  it("keeps Dynasty+ off until a draft round gives someone one", () => {
+    renderBoard(BOARD, undefined, { onSetRanks: vi.fn<SetFn>(async () => true) });
+    expect((button("By Dynasty+") as HTMLButtonElement).disabled).toBe(true);
+    expect(button("By Dynasty+").getAttribute("title")).toBe("No Dynasty+ in the 2027 class yet: it needs the NFL draft round");
+    cleanup();
+    renderBoard(BOARD.map((p) => (p.id === "qb1" ? { ...p, draft_round: 1 } : p)), undefined, { onSetRanks: vi.fn<SetFn>(async () => true) });
+    expect((button("By Dynasty+") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("hides the buttons without a save", () => {
+    renderBoard(BOARD);
+    expect(screen.queryByRole("group", { name: "Realign ranks" })).toBeNull();
   });
 });

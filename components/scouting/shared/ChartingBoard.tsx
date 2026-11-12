@@ -3,7 +3,8 @@ import { useState } from "react";
 import type { Prospect, ScoutingGame, ChartingDecision } from "../../../lib/types";
 import { GAME_TYPES, CHARTING_DECISIONS } from "./chartingConstants";
 import { BASE_YEAR, FILM_YEARS, classYearOptionsWith } from "../../../lib/helpers/season";
-import { parseGrade, formatGrade, gradeColor, GRADE_MIN, GRADE_MAX } from "../../../lib/scouting/prospectGrade";
+import { parseGrade, formatGrade, gradeColor, dynastyGradeCurveText, GRADE_MIN, GRADE_MAX } from "../../../lib/scouting/prospectGrade";
+import { preGradeIsMirrored } from "../../../lib/scouting/preGradeMirror";
 import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftRoundLabel } from "../../../lib/draftRound";
 import ProspectOverview, { type OverviewData } from "../overview/ProspectOverview";
 import ProspectScorePieces from "../overview/ProspectScorePieces";
@@ -267,8 +268,21 @@ export default function ChartingBoard({
           </div>
           {/* Scout grades — 1.0–100.0, one decimal (e.g. 88.6). Blank = ungraded. */}
           <div className="grid grid-cols-2 gap-3 mb-3">
-            <GradeInput label="Pre-Draft Grade" value={bio.pre_draft_grade ?? null} focusBorder={a.focusBorder}
-              onChange={(g) => onBioChange({ pre_draft_grade: g })} />
+            {preGradeIsMirrored(prospect, new Date()) ? (
+              // Mirrors the Dynasty Score until the class is drafted (the Big
+              // Board writes it): shown, not typed over.
+              <div>
+                <span className="block text-xs text-slate-500 mb-1">Pre-Draft Grade</span>
+                <div className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 rounded text-sm"
+                  title={`Mirrors the Dynasty Score on a curve (${dynastyGradeCurveText()}) until the class is drafted; the Big Board keeps it up to date`}>
+                  <span className={`font-semibold ${gradeColor(prospect.pre_draft_grade)}`}>{formatGrade(prospect.pre_draft_grade)}</span>
+                  <span className="text-xs text-slate-500"> · mirrors Dynasty</span>
+                </div>
+              </div>
+            ) : (
+              <GradeInput label="Pre-Draft Grade" value={bio.pre_draft_grade ?? null} focusBorder={a.focusBorder}
+                onChange={(g) => onBioChange({ pre_draft_grade: g })} />
+            )}
             <GradeInput label="Post-Draft Grade" value={bio.post_draft_grade ?? null} focusBorder={a.focusBorder}
               onChange={(g) => onBioChange({ post_draft_grade: g })} />
           </div>

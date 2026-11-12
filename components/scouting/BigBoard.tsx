@@ -24,9 +24,11 @@ import { SEASON_DECAY } from "../../lib/scouting/seasonWeight";
 import { POS_COLOR } from "../../lib/uiTheme";
 import { levelRuleText, matchFor, noLevelReached, roleFitTooltip, roleLabel, roleTagRuleText, standAloneRuleText, versatileLeadText, versatileRuleText, type RoleFit } from "../../lib/scouting/roleFit";
 import {
-  parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange,
+  parseGrade, formatGrade, gradeColor, gradeDelta, gradeTier, gradeTierRange, dynastyGradeCurveText,
   GRADE_MIN, GRADE_MAX, GRADE_TIERS, type GradeField,
 } from "../../lib/scouting/prospectGrade";
+import { changedPreGrades, mirroredPreGrade } from "../../lib/scouting/preGradeMirror";
+import { realignRanks, type RankUpdate } from "../../lib/scouting/realignRanks";
 import { fmtVal, type ColDef } from "./stats/StatsTableShell";
 import { pffCols, PFF_ALL_TAB_KEY, PFF_BOARD_KEYS, QB_STYLE_BOARD_COLS } from "./stats/pffCols";
 import type { PffTotals, PffValues } from "../../lib/pff/totals";
@@ -90,6 +92,10 @@ const SCORE_VIEW_KEY = "bigBoardScoreView";
 // How long the Dynasty sliders must sit still before the draft board's scores save.
 const BOARD_SCORES_DELAY_MS = 1000;
 
+// The scores the Realign ranks buttons order by.
+type RealignBy = "dynasty" | "plus";
+const REALIGN_LABEL: Record<RealignBy, string> = { dynasty: "Dynasty", plus: "Dynasty+" };
+
 const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }[] = [
   { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
   { key: "size",  label: "Size",  hint: "How much size counts: RBs and WRs carrying more weight for their height gain, lean and very light ones lose" },
@@ -108,6 +114,8 @@ interface SortContext {
   roles: Map<string, RoleFit>;
   pff: Map<string, PffValues>;
   samples: Map<string, SampleSize>;
+  /** Pre grades that mirror the Dynasty Score (preGradeMirror.ts); the stored grade elsewhere. */
+  preGrades: Map<string, number>;
 }
 
 type SortKey =
@@ -172,6 +180,13 @@ interface Props {
   /** Save prospects' draft-board scores (prospects.board_scores, migration 068)
    *  in one call; false if the write failed. */
   onSaveBoardScores?: (scores: Record<string, BoardScores>) => Promise<boolean>;
+  /** Save the Pre grades that mirror the Dynasty Score (migration 098) in one
+   *  call; false if the write failed. */
+  onSavePreGrades?: (grades: ReadonlyMap<string, number>) => Promise<boolean>;
+  /** Set many prospects' OVR / position ranks in one call (migration 098), for
+   *  Realign ranks and its Undo; false if the write failed. Without it the
+   *  buttons don't show. */
+  onSetRanks?: (updates: ReadonlyMap<string, RankUpdate>) => Promise<boolean>;
   /** PFF over each prospect's charted games (ScoutingHub). */
   pffTotals?: Map<string, PffTotals>;
   /** PFF game rows and the migration-064 views, for the AE Score's per-player
@@ -187,10 +202,12 @@ function getSortValue(
 ): number | string | null {
   const BIG = 99999;
   // Ungraded sorts to the bottom in both directions' natural reading: -BIG keeps
-  // it off the top of a descending (best-first) grade sort.
-  if (key === "pre_draft_grade") return p.pre_draft_grade ?? -BIG;
+  // it off the top of a descending (best-first) grade sort. Pre reads the
+  // Dynasty mirror where there is one, as the cell shows.
+  const pre = ctx.preGrades.get(p.id) ?? p.pre_draft_grade;
+  if (key === "pre_draft_grade") return pre ?? -BIG;
   if (key === "post_draft_grade") return p.post_draft_grade ?? -BIG;
-  if (key === "grade_delta") return gradeDelta(p.pre_draft_grade, p.post_draft_grade) ?? -BIG;
+  if (key === "grade_delta") return gradeDelta(pre, p.post_draft_grade) ?? -BIG;
   if (key === "personal_rank") return p.personal_rank ?? BIG;
   if (key === "overall_rank") return p.overall_rank ?? BIG;
   if (key === "name") return p.name;
@@ -280,6 +297,8 @@ export default function BigBoard({
   onLockAEScore,
   inputsComplete = true,
   onSaveBoardScores,
+  onSavePreGrades,
+  onSetRanks,
   pffTotals,
   gradingData = EMPTY_GRADING_DATA,
   draftPicks,
@@ -456,9 +475,41 @@ export default function BigBoard({
   }, [canSaveScores, prospects, boardScores, onSaveBoardScores]);
   useEffect(() => () => flushScoresRef.current(), []);
 
+  // The Pre grade mirrors the live Dynasty Score on the curve while the class
+  // is still to be drafted (preGradeMirror.ts). Prospects without a Dynasty
+  // Score, and drafted classes, aren't in here: their stored grade shows.
+  const mirroredPre = useMemo(() => {
+    const now = new Date();
+    const m = new Map<string, number>();
+    for (const p of prospects) {
+      const g = mirroredPreGrade(p, savedDynasty.get(p.id)?.dynasty, now);
+      if (g != null) m.set(p.id, g);
+    }
+    return m;
+  }, [prospects, savedDynasty]);
+  const preGradeOf = (p: ProspectWithStats) => mirroredPre.get(p.id) ?? p.pre_draft_grade;
+
+  // Save the mirrored grades to prospects.pre_draft_grade (migration 098), so
+  // the report and the charting pages show them too: behind the same gate as
+  // the draft board's scores, once the sliders settle, changed rows only, in
+  // one call. A grade this visit already tried isn't sent again until it
+  // changes, so a failed write doesn't retry on every render.
+  const canSavePre = scoresReady && inputsComplete && recruitsReady && onSavePreGrades != null;
+  const triedPreRef = useRef(new Map<string, number>());
+  useEffect(() => {
+    if (!canSavePre || !onSavePreGrades) return;
+    const changed = changedPreGrades(prospects, mirroredPre, triedPreRef.current);
+    if (!changed.size) return;
+    const timer = setTimeout(() => {
+      for (const [id, g] of changed) triedPreRef.current.set(id, g);
+      void onSavePreGrades(changed);
+    }, BOARD_SCORES_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [canSavePre, prospects, mirroredPre, onSavePreGrades]);
+
   const sortCtx = useMemo<SortContext>(
-    () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits, pff: pffVals, samples }),
-    [scoreViews, dynasty, ages, roleFits, pffVals, samples],
+    () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits, pff: pffVals, samples, preGrades: mirroredPre }),
+    [scoreViews, dynasty, ages, roleFits, pffVals, samples, mirroredPre],
   );
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -502,6 +553,84 @@ export default function BigBoard({
     ro.observe(table);
     return () => ro.disconnect();
   }, [sorted]);
+
+  // ── Realign ranks (realignRanks.ts) ──────────────────────────
+  // Puts the classes on screen (the Class filter, every class on All) in
+  // Dynasty or Dynasty+ order, as the board shows them: on the All tab OVR and
+  // every position's rank, on a position tab that position's rank only. Asks
+  // first, writes in one all-or-nothing call, and offers Undo until the next
+  // rank change. The search box doesn't narrow it.
+  const [realignNote, setRealignNote] = useState<{ text: string; undo: Map<string, RankUpdate> | null; failed?: boolean } | null>(null);
+  const [realigning, setRealigning] = useState(false);
+  const realignScope = useMemo(() => ({
+    classes: draftYearFilter ? [draftYearFilter] : years,
+    position: boardTab === "all" || boardTab === "post" ? null : boardTab,
+  }), [draftYearFilter, years, boardTab]);
+  // How many in scope have each score: a button with none is off.
+  const realignScored = useMemo(() => {
+    const classes = new Set(realignScope.classes);
+    const n = { dynasty: 0, plus: 0 };
+    for (const p of prospects) {
+      if (!classes.has(p.draft_class_year) || (realignScope.position && p.position !== realignScope.position)) continue;
+      const d = dynasty.get(p.id);
+      if (d?.dynasty != null) n.dynasty++;
+      if (d?.plus != null) n.plus++;
+    }
+    return n;
+  }, [prospects, dynasty, realignScope]);
+  const realignWhat = (() => {
+    const c = realignScope.classes;
+    const yrs = c.length <= 1 ? `${c[0] ?? ""}` : `${c.slice(0, -1).join(", ")} and ${c[c.length - 1]}`;
+    return realignScope.position ? `the ${yrs} ${realignScope.position}s` : `the ${yrs} class${c.length > 1 ? "es" : ""}`;
+  })();
+
+  async function realign(by: RealignBy) {
+    if (!onSetRanks) return;
+    const label = REALIGN_LABEL[by];
+    const plan = realignRanks(
+      prospects,
+      (id) => (by === "dynasty" ? dynasty.get(id)?.dynasty : dynasty.get(id)?.plus),
+      realignScope,
+    );
+    if (plan.updates.size === 0) {
+      setRealignNote({ text: `${realignWhat[0].toUpperCase()}${realignWhat.slice(1)} already rank in ${label} order.`, undo: null });
+      return;
+    }
+    const n = plan.updates.size;
+    const message = [
+      `Realign ${realignWhat} by ${label}?`,
+      "",
+      realignScope.position
+        ? "Position rank only: OVR stays as it is."
+        : `OVR and every position's rank${realignScope.classes.length > 1 ? ", each class on its own" : ""}.`,
+      `The ${plan.scored} with a ${label} score go first, best first` +
+        (plan.unscoredRanked ? `; the ${plan.unscoredRanked} ranked without one follow in their current order.` : "."),
+      `${n} prospect${n === 1 ? " gets a new rank" : "s get new ranks"}. You can undo it right after.`,
+    ].join("\n");
+    if (!window.confirm(message)) return;
+    setRealigning(true);
+    const ok = await onSetRanks(plan.updates);
+    setRealigning(false);
+    if (!ok) {
+      setRealignNote({ text: "Couldn't save the new ranks (is migration 098 applied?). Nothing changed.", undo: null, failed: true });
+      return;
+    }
+    setRealignNote({ text: `Realigned ${realignWhat} by ${label}: ${n} prospect${n === 1 ? "" : "s"} moved.`, undo: plan.before });
+    // Show the new order.
+    setSortKey(realignScope.position ? "personal_rank" : "overall_rank");
+    setSortDir("asc");
+  }
+
+  async function undoRealign() {
+    const undo = realignNote?.undo;
+    if (!onSetRanks || !undo) return;
+    setRealigning(true);
+    const ok = await onSetRanks(undo);
+    setRealigning(false);
+    setRealignNote(ok
+      ? { text: "Undone: the ranks are back as they were.", undo: null }
+      : { text: "Couldn't undo (the save failed). Try again.", undo, failed: true });
+  }
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -740,6 +869,10 @@ export default function BigBoard({
     "Dynasty Score: the AE Score plus a career-window adjustment for age (prime seasons left at rookie " +
     `age vs a typical ${REFERENCE_ROOKIE_AGE}-year-old rookie; primes end RB ${PRIME_END_AGE.RB}, WR ${PRIME_END_AGE.WR}, ` +
     `TE ${PRIME_END_AGE.TE}, QB ${PRIME_END_AGE.QB}) and size (RB and WR pounds per inch of height vs the position's typical, plus WRs under 175 lb). Weighted by the sliders.`;
+  const preGradeTooltip =
+    `Pre-draft grade: mirrors the Dynasty Score on a curve (${dynastyGradeCurveText()}, straight lines between) ` +
+    "until the class is drafted, then stays as it stood. Read only while it mirrors. " +
+    "A prospect without a Dynasty Score, and every drafted class, keeps the grade you type.";
   const dynastyPlusTooltip =
     "Dynasty Score Plus: the Dynasty Score plus draft capital (initial opportunity), from 1st round +2.0 " +
     "to Undrafted −2.0 at the default 2× weight. Shows once the NFL draft round is set. " +
@@ -822,6 +955,7 @@ export default function BigBoard({
   async function commitRank(id: string) {
     const nr = parseInt(rankInput, 10);
     if (!rankInput || isNaN(nr) || nr < 1) { setEditingRankId(null); return; }
+    setRealignNote(null); // an Undo now would undo this edit too
     setSavingRankId(id);
     await rankUpdater(id, nr);
     setSavingRankId(null);
@@ -844,6 +978,21 @@ export default function BigBoard({
   }
 
   function gradeCell(p: ProspectWithStats, field: GradeField) {
+    // Pre mirrors the Dynasty Score until the class is drafted: read only.
+    const mirrored = field === "pre_draft_grade" ? mirroredPre.get(p.id) : undefined;
+    if (mirrored != null) {
+      const d = savedDynasty.get(p.id)!.dynasty;
+      const t = gradeTier(mirrored)!;
+      return (
+        <td
+          className={`${tdBase} border-r border-slate-800`}
+          onClick={(e) => e.stopPropagation()}
+          title={`Mirrors Dynasty ${signed(d, 2)} on the curve (${dynastyGradeCurveText()}) until the class is drafted\n${t.label} (${gradeTierRange(t)})`}
+        >
+          <span className={`px-1 font-semibold ${gradeColor(mirrored)}`}>{formatGrade(mirrored)}</span>
+        </td>
+      );
+    }
     const value = p[field];
     const isEditing = editingGrade?.id === p.id && editingGrade.field === field;
     const label = field === "pre_draft_grade" ? "Pre-draft" : "Post-draft";
@@ -889,7 +1038,7 @@ export default function BigBoard({
 
   // How far the landing spot moved him: post - pre, blank until both exist.
   function gradeDeltaCell(p: ProspectWithStats) {
-    const d = gradeDelta(p.pre_draft_grade, p.post_draft_grade);
+    const d = gradeDelta(preGradeOf(p), p.post_draft_grade);
     if (d == null) return <td className={`${tdBase} text-slate-600 border-r border-slate-800`}>—</td>;
     const color = d > 0 ? "text-emerald-400" : d < 0 ? "text-red-400" : "text-slate-400";
     return (
@@ -933,6 +1082,7 @@ export default function BigBoard({
     const draggedP = prospects.find((p) => p.id === draggingId);
     const targetP = prospects.find((p) => p.id === targetId);
     if (!draggedP || !targetP) return;
+    setRealignNote(null); // an Undo now would undo this move too
     setSavingRankId(draggingId);
     // Fall back to the TARGET row's own on-screen position (not the dragged
     // item's rank) when the target is unranked — using the dragged item's own
@@ -1079,7 +1229,7 @@ export default function BigBoard({
             {stickyTh(primaryLabel, primaryKey, 24, 44)}
             {stickyTh("Smp", "sample", 68, 40, sampleTooltip, "px-0.5")}
             {stickyTh("Name", "name", 108, 140)}
-            {th("Pre", "pre_draft_grade", "border-l border-slate-800 text-amber-700")}
+            {th("Pre", "pre_draft_grade", "border-l border-slate-800 text-amber-700", preGradeTooltip)}
             {th("Post", "post_draft_grade", "text-amber-700")}
             {th("Δ", "grade_delta", "border-r border-slate-800 text-amber-700")}
             <th className="px-1.5 py-1.5 text-center text-indigo-700 whitespace-nowrap text-xs border-r border-slate-800 select-none">Round</th>
@@ -1206,7 +1356,37 @@ export default function BigBoard({
           >{y}</button>
         ))}
         <span className="text-xs text-slate-500">{sorted.length} prospects</span>
+        {onSetRanks && (
+          <div role="group" aria-label="Realign ranks" className="flex items-center gap-1">
+            <span className="text-sm text-slate-400">Realign ranks:</span>
+            {(["dynasty", "plus"] as const).map((by) => {
+              const label = REALIGN_LABEL[by];
+              const none = realignScored[by] === 0;
+              return (
+                <button
+                  key={by}
+                  disabled={realigning || none}
+                  onClick={() => { void realign(by); }}
+                  title={none
+                    ? (by === "plus" ? `No Dynasty+ in ${realignWhat} yet: it needs the NFL draft round` : `No Dynasty Score in ${realignWhat} yet`)
+                    : `Rank ${realignWhat} by ${label}, best first (${boardTab === "all" ? "OVR and position ranks" : "position rank only"}). Asks first; Undo after.`}
+                  className="px-3 py-1 rounded text-xs font-medium transition bg-slate-800 text-teal-300 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >By {label}</button>
+              );
+            })}
+          </div>
+        )}
       </div>
+      {realignNote && (
+        <p role="status" className={`text-xs mb-2 text-center ${realignNote.failed ? "text-red-400" : "text-teal-300"}`}>
+          {realignNote.text}
+          {realignNote.undo && (
+            <button onClick={() => { void undoRealign(); }} disabled={realigning}
+              className="ml-2 underline hover:text-white disabled:opacity-40">Undo</button>
+          )}
+          <button onClick={() => setRealignNote(null)} aria-label="Dismiss" className="ml-2 text-slate-500 hover:text-white">×</button>
+        </p>
+      )}
       {/* Grade tier legend — the colours the Pre / Post grade cells use. */}
       <ul aria-label="Grade tiers" className="flex flex-wrap justify-center gap-x-4 gap-y-1 mb-2 text-xs">
         {GRADE_TIERS.map((t) => (
@@ -1227,7 +1407,7 @@ export default function BigBoard({
           </li>
         ))}
       </ul>
-      <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank or a grade to edit (1.0–100.0) · Click any column header to sort</p>
+      <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank or a grade to edit (1.0–100.0; Pre mirrors Dynasty until the draft) · Click any column header to sort</p>
       <p className="text-xs text-slate-600 mb-2 text-center">AE Score true spread: {compositeStatus}</p>
       <p className="text-xs text-slate-600 mb-2 text-center">
         Opponent strength (scores only): {opponentStatus}

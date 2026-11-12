@@ -11,7 +11,46 @@ import {
   GRADE_MIN,
   GRADE_MAX,
   GRADE_TIERS,
+  gradeFromDynasty,
+  dynastyGradeCurveText,
 } from "@/lib/scouting/prospectGrade";
+
+describe("gradeFromDynasty (the Pre grade's Dynasty curve)", () => {
+  it("hits the user's points exactly", () => {
+    expect(gradeFromDynasty(2.25)).toBe(95);
+    expect(gradeFromDynasty(-2.25)).toBe(50);
+    expect(gradeFromDynasty(0)).toBe(75);
+    expect(gradeFromDynasty(4)).toBe(100);
+  });
+
+  it("runs a straight line between them, to one decimal", () => {
+    expect(gradeFromDynasty(1.125)).toBe(85); // halfway 0 → 2.25
+    expect(gradeFromDynasty(-1.125)).toBe(62.5); // halfway −2.25 → 0
+    expect(gradeFromDynasty(3.125)).toBe(97.5); // halfway 2.25 → 4
+    expect(gradeFromDynasty(-6.125)).toBe(25); // halfway −10 → −2.25
+    expect(gradeFromDynasty(1)).toBe(83.9); // 75 + 20 × 1 / 2.25 = 83.89
+  });
+
+  it("holds the ends past them, with the column's 1.0 floor where the curve says 0", () => {
+    expect(gradeFromDynasty(6)).toBe(100);
+    expect(gradeFromDynasty(-10)).toBe(GRADE_MIN);
+    expect(gradeFromDynasty(-14)).toBe(GRADE_MIN);
+    expect(gradeFromDynasty(-9.8)).toBe(1.3); // 50 × 0.2 / 7.75 = 1.29
+  });
+
+  it("only goes up", () => {
+    let last = -Infinity;
+    for (let d = -11; d <= 5; d += 0.05) {
+      const g = gradeFromDynasty(d);
+      expect(g).toBeGreaterThanOrEqual(last);
+      last = g;
+    }
+  });
+
+  it("reads the curve for tooltips", () => {
+    expect(dynastyGradeCurveText()).toBe("−10 → 0 · −2.25 → 50 · 0 → 75 · +2.25 → 95 · +4 → 100");
+  });
+});
 
 describe("parseGrade", () => {
   it("keeps a one-decimal grade exactly as typed (the 88.6 case)", () => {
