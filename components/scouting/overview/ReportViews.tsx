@@ -8,6 +8,7 @@ import { landingLines } from "../../../lib/scouting/landingSpot";
 import { teamLandingTotal } from "../../../lib/scouting/teamLanding";
 import { formatGrade } from "../../../lib/scouting/prospectGrade";
 import { roleFitTooltip, roleInfo, roleLabel } from "../../../lib/scouting/roleFit";
+import { poolRankText } from "../../../lib/scouting/roleStanding";
 import { aeScoreMissingReason, dynastyScores, scorePieces, type AEKey } from "../../../lib/scouting/prospectScores";
 import type { OverviewPage } from "../../../lib/scouting/overviewStats";
 import { COLLEGE_ZONE_ACCURACY, COLLEGE_ZONE_SHARE, type QBFullSeasons } from "../../../lib/scouting/qbStyle";
@@ -162,6 +163,53 @@ function ScoreStrip({ p, pos, report }: { p: ProspectWithStats; pos: CompositePo
   return <div className={`px-6 pb-6 grid gap-3 break-inside-avoid ${t.layout.strip}`}>{tiles}</div>;
 }
 
+// ── Dynasty by role (WR) ─────────────────────────────────────
+
+/**
+ * His Dynasty Score if he played X, Z or Slot (roleDynasty.ts): his separation
+ * read the way each role weighs it. A pre-draft read apart from Dynasty and
+ * Dynasty+; nothing ranks or sorts on it.
+ */
+function RoleDynastyRow({ p, report }: { p: ProspectWithStats; report: UseProspectReportReturn }) {
+  const t = useReportTheme();
+  const rd = report.roleDynasty.get(p.id);
+  if (!rd || rd.roles.length === 0) return null;
+  const fit = report.scores.roleFits.get(p.id);
+  return (
+    <section className={`px-6 pb-6 pt-5 flex flex-col gap-3 border-t break-inside-avoid ${t.divider}`}>
+      <SectionTitle title="Dynasty by role · if he played it" />
+      <div className={`text-xs ${t.muted}`}>
+        His Dynasty Score ({signed(rd.dynasty, 2)}) with his separation read the way each role weighs it. Target data, alignment,
+        age and size stay the same. Separate from Dynasty and Dynasty+: nothing ranks or sorts on it.
+      </div>
+      <div className={`grid gap-3 ${t.layout.strip}`}>
+        {rd.roles.map((e) => {
+          const label = roleInfo(e.role).label;
+          const tags = [
+            fit?.best === e.role ? "projects here" : null,
+            fit?.usedAs === e.role ? "used here in college" : null,
+            e.pendingWhy ? "thin sample" : null,
+          ].filter(Boolean);
+          const lines = [
+            `${poolRankText(e.inClass)} · ${p.draft_class_year} WRs`,
+            `${label} skill ${e.skill} (avg ${Math.round(e.poolSkill)})`,
+            ...(tags.length ? [tags.join(" · ")] : []),
+          ];
+          const title = [
+            `As ${label}: ${signed(e.score, 2)}`,
+            `Dynasty ${signed(rd.dynasty, 2)}, minus his separation (${signed(rd.ownSeparation, 2)}), plus his separation at ${label} (${signed(e.separation, 2)})`,
+            `${label} skill ${e.skill} vs the ${rd.pool}-WR pool's ${Math.round(e.poolSkill)}: ${signed(e.z, 2)} SDs`,
+            ...e.drivers,
+            ...(e.sizeNote ? [`Size: ${e.sizeNote}`] : []),
+            ...(e.pendingWhy ? [`Thin sample: ${e.pendingWhy}`] : []),
+          ].join("\n");
+          return <ScoreTile key={e.role} label={`AS ${label.toUpperCase()}`} value={signed(e.score, 2)} tone={toneOf(e.score)} lines={lines} title={title} />;
+        })}
+      </div>
+    </section>
+  );
+}
+
 // ── QB: where he throws ──────────────────────────────────────
 
 const FIELD_ROWS = [
@@ -247,6 +295,7 @@ export function OverviewView({ report, actions }: { report: UseProspectReportRet
     <ReportCard label={`${p.name} player report`}>
       <ReportHeader kicker="PLAYER REPORT" p={p} facts={bioFacts(p, report, page.meta)} actions={actions} report={report} />
       <ScoreStrip p={p} pos={pos} report={report} />
+      <RoleDynastyRow p={p} report={report} />
       {page.main.map((s) => <MainSection key={s.key} section={s} ranks={ranks} id={p.id} />)}
       {pos === "QB" && report.scores.qbFull.get(p.id) && <FieldUsage full={report.scores.qbFull.get(p.id)!} />}
       {page.columns.length > 0 && (

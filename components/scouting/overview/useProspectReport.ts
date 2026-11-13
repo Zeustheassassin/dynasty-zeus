@@ -6,7 +6,8 @@ import type { DraftPickRow } from "../../../lib/nflDraft";
 import { pffPos } from "../../../lib/pff/stats";
 import type { CompositePos } from "../../../lib/scouting/aeComposite";
 import type { DynastyWeights } from "../../../lib/scouting/dynastyScore";
-import { isCompositePos, scoreViewsFrom, type ProspectScoresInput, type ScoreView } from "../../../lib/scouting/prospectScores";
+import { dynastyScores, isCompositePos, scoreViewsFrom, type ProspectScoresInput, type ScoreView } from "../../../lib/scouting/prospectScores";
+import { roleDynastyScores, type RoleDynasty } from "../../../lib/scouting/roleDynasty";
 import { overviewPagesFor, percentileRanks, type OverviewPage } from "../../../lib/scouting/overviewStats";
 import { useDynastyWeights, useProspectScores, type UseProspectScoresReturn } from "../shared/hooks/useProspectScores";
 import { productionPage } from "./production";
@@ -40,6 +41,8 @@ export interface UseProspectReportReturn {
   /** Production page (PFF numbers) per prospect at his position, and their percentiles. */
   production: Map<string, OverviewPage>;
   productionRanks: Map<string, Map<string, number>>;
+  /** Dynasty by role (WR X / Z / Slot) per prospect: a pre-draft read, never ranked or sorted on. */
+  roleDynasty: Map<string, RoleDynasty>;
   /** The hub's data, every position's plays included, has loaded. */
   ready: boolean;
   /** The hub's list of every prospect. */
@@ -71,6 +74,12 @@ export function useProspectReport(prospectId: string, data: OverviewData): UsePr
     [prospects, scores.liveScores],
   );
 
+  // Dynasty by role reads every scored WR's Dynasty at the saved weights (the pool's spread).
+  const roleDynasty = useMemo(() => {
+    const dynasty = dynastyScores(prospects, views, scores.hsClass, weights);
+    return roleDynastyScores(prospects, views, dynasty, scores.roleFits, scores.composite);
+  }, [prospects, views, scores.hsClass, weights, scores.roleFits, scores.composite]);
+
   const pffVals = scores.pffVals;
   const pffGames = useMemo(
     () => new Map([...(pffTotals ?? new Map<string, PffTotals>())].map(([id, t]) => [id, t.games])),
@@ -92,5 +101,5 @@ export function useProspectReport(prospectId: string, data: OverviewData): UsePr
   }, [position, prospects, pffVals]);
   const productionRanks = useMemo(() => percentileRanks(production), [production]);
 
-  return { p, pos, scores, views, weights, pages, ranks, production, productionRanks, ready: scoresReady, prospects };
+  return { p, pos, scores, views, weights, pages, ranks, production, productionRanks, roleDynasty, ready: scoresReady, prospects };
 }
