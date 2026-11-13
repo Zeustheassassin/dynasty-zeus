@@ -52,16 +52,18 @@ export function roundGrade(n: number): number {
 
 /**
  * The pre-draft grade mirrors the Dynasty Score on this curve (the user's
- * points, 2026-11-12): straight lines between them, the end grade held past
- * either end. The column's 1.0 floor still applies, so a Dynasty of about
+ * points, 2026-11-12; the top retuned 2026-11-13 so +2.0 to +2.3 is 90–94.9
+ * and +2.3 to +3.0 is 95–100): straight lines between them, the end grade held
+ * past either end. The column's 1.0 floor still applies, so a Dynasty of about
  * −9.85 or lower stores 1.0, not 0. preGradeMirror.ts says when it applies.
  */
 export const DYNASTY_GRADE_CURVE: readonly (readonly [dynasty: number, grade: number])[] = [
   [-10, 0],
   [-2.25, 50],
   [0, 75],
-  [2.25, 95],
-  [4, 100],
+  [2, 90],
+  [2.3, 95],
+  [3, 100],
 ];
 
 /** The grade a Dynasty Score maps to on DYNASTY_GRADE_CURVE, one decimal, 1.0–100.0. */
@@ -81,7 +83,7 @@ export function gradeFromDynasty(dynasty: number): number {
   return roundGrade(clampGrade(g));
 }
 
-/** The curve for tooltips: "−10 → 0 · −2.25 → 50 · 0 → 75 · +2.25 → 95 · +4 → 100". */
+/** The curve for tooltips: "−10 → 0 · −2.25 → 50 · 0 → 75 · +2 → 90 · +2.3 → 95 · +3 → 100". */
 export function dynastyGradeCurveText(): string {
   const num = (d: number) => (d > 0 ? `+${d}` : d < 0 ? `−${-d}` : "0");
   return DYNASTY_GRADE_CURVE.map(([d, g]) => `${num(d)} → ${g}`).join(" · ");

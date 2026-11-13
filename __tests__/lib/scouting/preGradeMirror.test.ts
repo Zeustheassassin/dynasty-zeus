@@ -7,14 +7,14 @@ const scores = (dynasty: number | null) => ({ dynasty }) as BoardScores;
 
 describe("mirroredPreGrade", () => {
   it("maps the Dynasty Score while the class is still to be drafted", () => {
-    expect(mirroredPreGrade({ draft_class_year: 2027 }, 2.25, NOV_2026)).toBe(95);
+    expect(mirroredPreGrade({ draft_class_year: 2027 }, 2.3, NOV_2026)).toBe(95);
     expect(mirroredPreGrade({ draft_class_year: 2028 }, 0, NOV_2026)).toBe(75);
   });
 
   it("stops at the draft (May 1 of the class year): the stored grade stands", () => {
-    expect(mirroredPreGrade({ draft_class_year: 2026 }, 2.25, NOV_2026)).toBeNull();
-    expect(mirroredPreGrade({ draft_class_year: 2027 }, 2.25, new Date("2027-04-30T23:59:00Z"))).toBe(95);
-    expect(mirroredPreGrade({ draft_class_year: 2027 }, 2.25, new Date("2027-05-01T00:00:00Z"))).toBeNull();
+    expect(mirroredPreGrade({ draft_class_year: 2026 }, 2.3, NOV_2026)).toBeNull();
+    expect(mirroredPreGrade({ draft_class_year: 2027 }, 2.3, new Date("2027-04-30T23:59:00Z"))).toBe(95);
+    expect(mirroredPreGrade({ draft_class_year: 2027 }, 2.3, new Date("2027-05-01T00:00:00Z"))).toBeNull();
   });
 
   it("leaves a prospect without a Dynasty Score alone", () => {
