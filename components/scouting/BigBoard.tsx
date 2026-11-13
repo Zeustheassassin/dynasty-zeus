@@ -40,6 +40,7 @@ import {
 } from "../../lib/scouting/prospectScores";
 import { useProspectScores, useDynastyWeights } from "./shared/hooks/useProspectScores";
 import { SAMPLE_FULL, SAMPLE_TIERS, sampleSizes, sampleText, type SampleSize } from "../../lib/scouting/sampleSize";
+import { CHARTED_PLAYS, chartedCounts, isChartedPos, type ChartedCounts } from "../../lib/scouting/chartedCounts";
 import { boardScoresKey, buildBoardScores, changedBoardScores, type BoardScoresValue } from "../../lib/scouting/boardScores";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
@@ -114,13 +115,15 @@ interface SortContext {
   roles: Map<string, RoleFit>;
   pff: Map<string, PffValues>;
   samples: Map<string, SampleSize>;
+  /** Charted games / snaps / throws-runs-routes (chartedCounts.ts). */
+  counts: Map<string, ChartedCounts>;
   /** Pre grades that mirror the Dynasty Score (preGradeMirror.ts); the stored grade elsewhere. */
   preGrades: Map<string, number>;
 }
 
 type SortKey =
   | "pre_draft_grade" | "post_draft_grade" | "grade_delta"
-  | "personal_rank" | "overall_rank" | "sample" | "ae_score" | "dynasty" | "dynasty_plus" | "role" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
+  | "personal_rank" | "overall_rank" | "sample" | "charted_games" | "charted_snaps" | "charted_plays" | "ae_score" | "dynasty" | "dynasty_plus" | "role" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
   | "total_routes" | "total_games" | "targets" | "catches" | "drops"
   | "success_rate" | "target_rate" | "adj_success_above_exp" | `ae_${AEKey}`
   | "pct_left" | "pct_right" | "pct_slot" | "pct_backfield"
@@ -213,6 +216,10 @@ function getSortValue(
   if (key === "name") return p.name;
   // Share of a full sample; a position without one (none charted) sinks both ways.
   if (key === "sample") return ctx.samples.get(p.id)?.share ?? null;
+  // Charted counts; still loading (or a position without them) sinks both ways.
+  if (key === "charted_games") return ctx.counts.get(p.id)?.games ?? null;
+  if (key === "charted_snaps") return ctx.counts.get(p.id)?.snaps ?? null;
+  if (key === "charted_plays") return ctx.counts.get(p.id)?.plays ?? null;
   // Unscored (under the floor, or a position not in the score yet) sinks both ways.
   if (key === "ae_score") return ctx.aeScores.get(p.id)?.score ?? null;
   if (key === "dynasty") return ctx.dynasty.get(p.id)?.dynasty ?? null;
@@ -422,6 +429,13 @@ export default function BigBoard({
   // (sampleSize.ts): the dot beside the rank. Always live, in either score view.
   const samples = useMemo(() => sampleSizes(prospects, compositeInputs), [prospects, compositeInputs]);
 
+  // Charted games, snaps and throws / runs / routes (chartedCounts.ts), counted
+  // as the Analysis tables count them. QB / RB / TE wait for their plays.
+  const counts = useMemo(
+    () => chartedCounts(prospects, games, { qb: qbPlays, rb: rbPlays, te: tePlays }, scoresReady),
+    [prospects, games, qbPlays, rbPlays, tePlays, scoresReady],
+  );
+
   // The draft board's scores (prospects.board_scores, migration 068;
   // boardScores.ts): Dynasty, Dynasty+ and the sample dot as of this visit.
   // Always live, whatever this screen shows, at the
@@ -508,8 +522,8 @@ export default function BigBoard({
   }, [canSavePre, prospects, mirroredPre, onSavePreGrades]);
 
   const sortCtx = useMemo<SortContext>(
-    () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits, pff: pffVals, samples, preGrades: mirroredPre }),
-    [scoreViews, dynasty, ages, roleFits, pffVals, samples, mirroredPre],
+    () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits, pff: pffVals, samples, counts, preGrades: mirroredPre }),
+    [scoreViews, dynasty, ages, roleFits, pffVals, samples, counts, mirroredPre],
   );
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -634,12 +648,14 @@ export default function BigBoard({
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    // AE, PFF and the Composite scores open best-first; every other column
-    // opens ascending. (A PFF column where lower is better, e.g. TWP%, opens ascending.)
+    // AE, PFF, the Composite scores, the sample dot and the charted counts open
+    // best-first (most tape first); every other column opens ascending. (A PFF
+    // column where lower is better, e.g. TWP%, opens ascending.)
     else {
       setSortKey(k);
       const pffLowerBetter = k.startsWith("pff_") && pffColumnDefs.find((c) => c.key === k)?.colorDir === -1;
-      setSortDir(pffLowerBetter ? "asc" : k === "sample" || k.startsWith("ae_") || k.startsWith("dynasty") || k.startsWith("pff_") ? "desc" : "asc");
+      const bestFirst = k === "sample" || k.startsWith("charted_") || k.startsWith("ae_") || k.startsWith("dynasty") || k.startsWith("pff_");
+      setSortDir(pffLowerBetter ? "asc" : bestFirst ? "desc" : "asc");
     }
   }
 
@@ -851,6 +867,37 @@ export default function BigBoard({
       </td>
     );
   }
+  // ── Charted counts ────────────────────────────────────────────
+  // Games, snaps and the position's own plays (chartedCounts.ts). "…" while a
+  // QB / RB / TE's plays are still loading; blank for a position without them.
+  function countCells(p: ProspectWithStats) {
+    const c = counts.get(p.id);
+    const last = "border-r border-slate-800";
+    if (!c || !isChartedPos(p.position)) {
+      return (<><td className={tdBase} /><td className={tdBase} /><td className={`${tdBase} ${last}`} /></>);
+    }
+    const what = CHARTED_PLAYS[p.position];
+    const num = (v: number | null, cls: string, title?: string) =>
+      v == null
+        ? <td className={`${tdBase} text-slate-600 ${cls}`} title={`Loading the ${p.position} plays…`}>…</td>
+        : <td className={`${tdBase} tabular-nums ${v === 0 ? "text-slate-600" : "text-slate-300"} ${cls}`} title={title}>{v}</td>;
+    return (
+      <>
+        {num(c.games, "", `${c.games} game${c.games === 1 ? "" : "s"} charted`)}
+        {num(c.snaps, "", c.snaps != null ? `${c.snaps} snap${c.snaps === 1 ? "" : "s"} charted` : undefined)}
+        {num(c.plays, last, c.plays != null ? `${c.plays} ${what.unit}` : undefined)}
+      </>
+    );
+  }
+  const chartedPlaysHeader = (() => {
+    if (boardTab !== "all" && isChartedPos(boardTab)) return { label: CHARTED_PLAYS[boardTab].label, tooltip: CHARTED_PLAYS[boardTab].tooltip };
+    return {
+      label: "Thr/Run/Rt",
+      tooltip: "Each position's own plays: QB throws, RB runs, WR and TE routes. " +
+        (["QB", "RB", "WR", "TE"] as const).map((pos) => `${pos}: ${CHARTED_PLAYS[pos].tooltip}`).join(" "),
+    };
+  })();
+
   const sampleTooltip =
     "Sample: how much of a full sample you've charted. Full: " +
     COMPOSITE_POS.map((pos) => `${pos} ${SAMPLE_FULL[pos].full} ${SAMPLE_UNIT[SAMPLE_FULL[pos].key] ?? "plays"}`).join(" · ") +
@@ -1208,6 +1255,7 @@ export default function BigBoard({
             <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-slate-950" />
             <th style={{ left: 68, minWidth: 40 }} className="sticky z-20 bg-slate-950" />
             <th style={{ left: 108, minWidth: 140 }} className="sticky z-20 bg-slate-950 border-r border-slate-800" />
+            <th colSpan={3} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">Charted</th>
             <th colSpan={3} className="px-2 py-1 text-center text-amber-900 font-medium border-r border-slate-800">Grade</th>
             <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-slate-800">NFL Draft</th>
             <th colSpan={1} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">{secondaryGroup}</th>
@@ -1229,7 +1277,10 @@ export default function BigBoard({
             {stickyTh(primaryLabel, primaryKey, 24, 44)}
             {stickyTh("Smp", "sample", 68, 40, sampleTooltip, "px-0.5")}
             {stickyTh("Name", "name", 108, 140)}
-            {th("Pre", "pre_draft_grade", "border-l border-slate-800 text-amber-700", preGradeTooltip)}
+            {th("Games", "charted_games", "", "Games charted")}
+            {th("Snaps", "charted_snaps", "", "Every play charted for him, whatever he did on it (runs, blocks, sacks and decoys included)")}
+            {th(chartedPlaysHeader.label, "charted_plays", "border-r border-slate-800", chartedPlaysHeader.tooltip)}
+            {th("Pre","pre_draft_grade", "border-l border-slate-800 text-amber-700", preGradeTooltip)}
             {th("Post", "post_draft_grade", "text-amber-700")}
             {th("Δ", "grade_delta", "border-r border-slate-800 text-amber-700")}
             <th className="px-1.5 py-1.5 text-center text-indigo-700 whitespace-nowrap text-xs border-r border-slate-800 select-none">Round</th>
@@ -1256,6 +1307,7 @@ export default function BigBoard({
             return (
               <tr key={p.id} {...rowProps(p, i)}>
                 {stickyRowCells(p)}
+                {countCells(p)}
                 {gradeCell(p, "pre_draft_grade")}
                 {gradeCell(p, "post_draft_grade")}
                 {gradeDeltaCell(p)}

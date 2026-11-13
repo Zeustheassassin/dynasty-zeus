@@ -10,6 +10,7 @@ import { tagCols, tagRow, tagValuesFor } from "./tagCols";
 import { contextCols } from "./contextCols";
 import type { TagStatValue } from "../../../lib/scouting/tagStats";
 import type { PffTotals } from "../../../lib/pff/totals";
+import { isQBThrow } from "../../../lib/scouting/chartedCounts";
 
 interface Props {
   prospects: Prospect[];
@@ -181,9 +182,8 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
         // Match the QB Overview panel's denominator math: thrown plays exclude
         // sack/scramble/throw-away (no graded ball), and gradedThrows further
         // exclude tipped balls (intended trajectory unknowable post-deflection).
-        const thrownPlays = passRpoPlays.filter((pl) =>
-          pl.timing !== "scramble" && pl.timing !== "sack" && pl.timing !== "throw_away"
-        );
+        // isQBThrow is shared with the Big Board's Throws column.
+        const thrownPlays = passRpoPlays.filter(isQBThrow);
         const gradedThrows = thrownPlays.filter((pl) => pl.accuracy !== "tipped_ball" && pl.accuracy != null);
         const ratedN = gradedThrows.length;
 

@@ -10,6 +10,7 @@ import { tagCols, tagRow, tagValuesFor } from "./tagCols";
 import { contextCols } from "./contextCols";
 import type { TagStatValue } from "../../../lib/scouting/tagStats";
 import type { PffTotals } from "../../../lib/pff/totals";
+import { isTERoute } from "../../../lib/scouting/chartedCounts";
 
 interface Props {
   prospects: Prospect[];
@@ -174,7 +175,8 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
       .filter((p) => p.position === "TE")
       .map((p) => {
         const pPlays = playsByProspect.get(p.id) ?? [];
-        const routePlays = pPlays.filter((pl) => pl.play_type === "route_run");
+        // isTERoute is shared with the Big Board's Routes column.
+        const routePlays = pPlays.filter(isTERoute);
         const blockPlays = pPlays.filter((pl) => pl.play_type === "run_block" || pl.play_type === "pass_block");
         const decoyPlays = pPlays.filter((pl) => pl.play_type === "decoy");
         const ratedRoutes = routePlays.filter((pl) => pl.was_open !== null);

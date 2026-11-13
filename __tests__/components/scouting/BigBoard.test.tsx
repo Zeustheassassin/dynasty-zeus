@@ -398,6 +398,65 @@ describe("BigBoard sample dot", () => {
   });
 });
 
+describe("BigBoard charted counts", () => {
+  const COUNTED = [
+    prospect("wr1", "Wide One", "WR", 1, { total_snaps: 90, total_routes: 75 }),
+    prospect("qb1", "Quarter One", "QB", 2),
+    prospect("rb1", "Running One", "RB", 3),
+    prospect("te1", "Tight One", "TE", 4),
+  ];
+  const games = [
+    { id: "gw", prospect_id: "wr1" }, { id: "gq1", prospect_id: "qb1" }, { id: "gq2", prospect_id: "qb1" },
+    { id: "gr", prospect_id: "rb1" }, { id: "gt", prospect_id: "te1" },
+  ] as ComponentProps<typeof BigBoard>["games"];
+  const plays = {
+    qbPlays: [
+      { game_id: "gq1", play_type: "pass", timing: "first_option" }, { game_id: "gq1", play_type: "pass", timing: "sack" },
+      { game_id: "gq2", play_type: "run", timing: null },
+    ] as ComponentProps<typeof BigBoard>["qbPlays"],
+    rbPlays: [
+      { game_id: "gr", run_type: "inside_zone" }, { game_id: "gr", run_type: "outside_zone" },
+      { game_id: "gr", run_type: "pass_block" },
+    ] as ComponentProps<typeof BigBoard>["rbPlays"],
+    tePlays: [{ game_id: "gt", play_type: "route_run" }, { game_id: "gt", play_type: "run_block" }] as ComponentProps<typeof BigBoard>["tePlays"],
+  };
+  const counts = (name: string) => ["Games", "Snaps", "Thr/Run/Rt"].map((l) => cell(name, l));
+
+  it("sits between the name and the Pre grade on every tab, under its own band", () => {
+    renderBoard();
+    expect(headerLabels().slice(3, 8)).toEqual(["Name", "Games", "Snaps", "Thr/Run/Rt", "Pre"]);
+    expect(within(screen.getAllByRole("row")[0]).getAllByRole("columnheader").map((h) => h.textContent)).toContain("Charted");
+    for (const [tab, label] of [["QB", "Throws"], ["RB", "Runs"], ["WR", "Routes"], ["TE", "Routes"]]) {
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${tab}`) }));
+      expect(headerLabels().slice(3, 8)).toEqual(["Name", "Games", "Snaps", label, "Pre"]);
+    }
+  });
+
+  it("counts each position's own plays: QB throws, RB runs, WR / TE routes", () => {
+    renderBoard(COUNTED, undefined, { games, ...plays, scoresReady: true });
+    expect(counts("Wide One")).toEqual(["1", "90", "75"]);
+    expect(counts("Quarter One")).toEqual(["2", "3", "1"]);
+    expect(counts("Running One")).toEqual(["1", "3", "2"]);
+    expect(counts("Tight One")).toEqual(["1", "2", "1"]);
+    const plays3 = within(rowFor("Running One")).getAllByRole("cell")[headerLabels().indexOf("Thr/Run/Rt")];
+    expect(plays3.getAttribute("title")).toBe("2 runs");
+  });
+
+  it("waits for the QB / RB / TE plays before counting their snaps", () => {
+    renderBoard(COUNTED, undefined, { games, ...plays, scoresReady: false });
+    expect(counts("Quarter One")).toEqual(["2", "…", "…"]);
+    expect(counts("Wide One")).toEqual(["1", "90", "75"]);
+  });
+
+  it("sorts most first on the first click", () => {
+    renderBoard(COUNTED, undefined, { games, ...plays, scoresReady: true });
+    fireEvent.click(screen.getByRole("columnheader", { name: "Snaps" }));
+    expect(names()).toEqual(["Wide One", "Quarter One", "Running One", "Tight One"]);
+    fireEvent.click(screen.getByRole("columnheader", { name: /^Snaps/ }));
+    expect(names()[0]).toBe("Tight One");
+  });
+});
+
 describe("BigBoard NFL draft round", () => {
   const roundSelect = (name: string) => screen.getByRole("combobox", { name: `NFL draft round for ${name}` }) as HTMLSelectElement;
 

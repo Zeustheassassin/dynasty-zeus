@@ -3,7 +3,8 @@ import { useMemo } from "react";
 import StatsTableShell, { StatRow, ColDef, MinFilterDef } from "./StatsTableShell";
 import { computeRBAboveExpected, computeRBRunSliceSRAE } from "../../../lib/scouting/aboveExpected";
 import { computeRBRoleFits } from "../../../lib/scouting/roleFitRB";
-import type { Prospect, ScoutingGame, RBPlay, RBRunType } from "../../../lib/types";
+import type { Prospect, ScoutingGame, RBPlay } from "../../../lib/types";
+import { isRBRun } from "../../../lib/scouting/chartedCounts";
 import { roleFitCols, roleFitRow } from "./roleFitCols";
 import { pffCols, pffRow } from "./pffCols";
 import { tagCols, tagRow, tagValuesFor } from "./tagCols";
@@ -24,7 +25,6 @@ interface Props {
   contextExtras?: Map<string, Record<string, number | null>>;
 }
 
-const RUN_TYPES: RBRunType[] = ["outside_zone", "inside_zone", "outside_man_gap", "inside_man_gap"];
 
 export const RB_STAT_COLS: ColDef[] = [
   // Identity
@@ -137,7 +137,8 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
       .filter((p) => p.position === "RB")
       .map((p) => {
         const pPlays = playsByProspect.get(p.id) ?? [];
-        const runPlays = pPlays.filter((pl) => RUN_TYPES.includes(pl.run_type as RBRunType));
+        // isRBRun is shared with the Big Board's Runs column.
+        const runPlays = pPlays.filter(isRBRun);
         const routePlays = pPlays.filter((pl) => pl.run_type === "route");
 
         const srae = sraeMap.get(p.id) ?? null;
