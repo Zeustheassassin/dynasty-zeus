@@ -10,6 +10,9 @@ import { FOCUS_TAGS, focusSortValue, parseFocusTag } from "../../lib/scouting/fo
 import { formatWatchScore, watchSortValue } from "../../lib/scouting/watchRank";
 import PffBioFillPanel from "./pff/PffBioFillPanel";
 import { usePffBioFill } from "./pff/usePffBioFill";
+import FortyFillPanel from "./forty/FortyFillPanel";
+import { useFortyFill } from "./forty/useFortyFill";
+import { fortyDisplay } from "../../lib/scouting/speedFloor";
 import type { RoleFit, RolePos } from "../../lib/scouting/roleFit";
 import type { OverviewData } from "./overview/useProspectReport";
 import { usePositionRoleFits } from "./shared/hooks/usePositionRoleFits";
@@ -165,6 +168,16 @@ function RosterRow({ p, fit, fitsReady, sizes, rank, onRankCommit }: RosterRowPr
           onBlur={() => saveFields({ weight: local.weight })} />
       </td>
 
+      {/* 40: read only (Edit Bio or Fill 40s); a projection greyed with ~ */}
+      {(() => {
+        const f = fortyDisplay(p);
+        return (
+          <td className={`${tdShrink} text-xs ${f?.projected ? "text-slate-600 italic" : "text-slate-300"}`} title={f?.title}>
+            {f?.text ?? <span className="text-slate-700">—</span>}
+          </td>
+        );
+      })()}
+
       <td className={tdShrink}>
         <input type="date" className={inp} value={local.birthday ?? ""}
           onChange={(e) => {
@@ -278,6 +291,8 @@ export default function ProspectRosterSheet({ prospects, rolePos, overviewData, 
   const [rankError, setRankError] = useState<string | null>(null);
   const fill = usePffBioFill(onDataChanged);
   const fillBusy = fill.phase === "linking" || fill.phase === "importing" || fill.phase === "reading" || fill.phase === "saving";
+  const forty = useFortyFill(onDataChanged);
+  const fortyBusy = forty.phase === "reading" || forty.phase === "saving";
 
   // When a real data reload arrives (onDataChanged → the hub re-fetches and the
   // `prospects` prop identity changes), the optimistic overrides are obsolete:
@@ -462,6 +477,14 @@ export default function ProspectRosterSheet({ prospects, rolePos, overviewData, 
           {fillBusy ? "Filling…" : "Fill from PFF"}
         </button>
         <button
+          onClick={() => forty.start(filteredSorted, rolePos)}
+          disabled={fortyBusy || filteredSorted.length === 0}
+          className="px-3 py-1 rounded text-xs font-medium bg-teal-700 hover:bg-teal-600 disabled:opacity-50 text-white transition"
+          title={`40 times for the ${filteredSorted.length} ${rolePos}(s) shown: the combine's official times and weigh-ins once that class's combine is out (early March of its draft year; they count in the RB speed floor), and WalterFootball's projections for the players it ranks (shown only, never counted). You review every change before it's saved.`}
+        >
+          {fortyBusy ? "Reading 40s…" : "Fill 40s"}
+        </button>
+        <button
           onClick={autofillConferences}
           disabled={bulkSaving}
           className="px-3 py-1 rounded text-xs font-medium bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white transition"
@@ -472,6 +495,7 @@ export default function ProspectRosterSheet({ prospects, rolePos, overviewData, 
       </div>
 
       <PffBioFillPanel fill={fill} />
+      <FortyFillPanel fill={forty} />
 
       {rankError && (
         <p className="text-red-400 text-xs mb-3" role="alert">{rankError}</p>
@@ -496,6 +520,8 @@ export default function ProspectRosterSheet({ prospects, rolePos, overviewData, 
               <th className={thShrink} style={shrinkStyle}>Conf</th>
               <th className={thShrink} style={shrinkStyle}>Height</th>
               <th className={thShrink} style={shrinkStyle}>Weight</th>
+              <th className={thShrink} style={shrinkStyle}
+                title="40-yard dash, read only: type it in Edit Bio, or Fill 40s. PD = pro day. ~ = projected, shown only (the speed floor counts real 40s)">40</th>
               <th className={thShrink} style={shrinkStyle}>Birthday</th>
               <th className={thShrink} style={shrinkStyle}>
                 <button

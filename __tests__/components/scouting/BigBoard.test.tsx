@@ -530,6 +530,20 @@ describe("BigBoard 40 column", () => {
     expect(names()).toEqual(["Combine Fast", "Pro Day", "Combine Slow", "No Time"]);
   });
 
+  it("shows a projection greyed with ~ where there's no real 40, and sorts it in", () => {
+    renderBoard([
+      prospect("a", "Real Time", "RB", 1, { forty_time: 4.55, forty_source: "combine", forty_projected: 4.4, forty_projected_from: "WalterFootball" }),
+      prospect("b", "Projected Only", "RB", 2, { forty_projected: 4.5, forty_projected_from: "WalterFootball" }),
+    ]);
+    expect(cell("Real Time", "40")).toBe("4.55");
+    expect(cell("Projected Only", "40")).toBe("~4.50");
+    const projected = within(rowFor("Projected Only")).getAllByRole("cell")[headerLabels().indexOf("40")];
+    expect(projected.getAttribute("title")).toMatch(/^Projected by WalterFootball: shown only/);
+    expect(projected.className).toMatch(/italic/);
+    fireEvent.click(screen.getByRole("columnheader", { name: "40" }));
+    expect(names()).toEqual(["Projected Only", "Real Time"]);
+  });
+
   it("has a Speed slider beside the others", () => {
     renderBoard();
     expect(screen.getByRole("slider", { name: "Speed weight" })).toBeTruthy();

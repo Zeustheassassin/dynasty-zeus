@@ -86,6 +86,43 @@ export function fortyDetail(time: number, source: FortySource | null | undefined
   return weighIn != null ? `${where} · weighed ${weighIn} lb` : where;
 }
 
+export interface FortyFields {
+  forty_time?: number | string | null;
+  forty_source?: FortySource | null;
+  forty_weight?: number | null;
+  forty_projected?: number | string | null;
+  forty_projected_from?: string | null;
+}
+
+export interface FortyDisplay {
+  /** "4.52", "4.48 PD", or "~4.55" for a projection. */
+  text: string;
+  title: string;
+  projected: boolean;
+  /** On the combine's scale (a pro day +0.05); a projection as it is. */
+  sortValue: number;
+}
+
+/**
+ * A 40 cell: his real 40 when there is one, else a projection (Fill 40s),
+ * greyed and marked ~, which never counts in the speed floor. Null for neither.
+ * numeric columns can arrive as strings.
+ */
+export function fortyDisplay(p: FortyFields): FortyDisplay | null {
+  if (p.forty_time != null) {
+    const t = Number(p.forty_time);
+    return { text: formatForty(t, p.forty_source), title: fortyDetail(t, p.forty_source, p.forty_weight), projected: false, sortValue: combineEquivalent(t, p.forty_source ?? "combine") };
+  }
+  if (p.forty_projected != null) {
+    const t = Number(p.forty_projected);
+    return {
+      text: `~${t.toFixed(2)}`, projected: true, sortValue: t,
+      title: `Projected${p.forty_projected_from ? ` by ${p.forty_projected_from}` : ""}: shown only. The speed floor counts a real 40 (combine or pro day), not a projection.`,
+    };
+  }
+  return null;
+}
+
 /**
  * A typed 40: a number of seconds rounded to hundredths, null for blank, or
  * undefined while it isn't a valid time yet ("4.", "45", "abc").

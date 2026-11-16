@@ -91,7 +91,9 @@ function bioFacts(p: ProspectWithStats, report: UseProspectReportReturn, more: s
   return [
     String(p.draft_class_year), p.position, p.school,
     p.height || null, p.weight ? `${p.weight} lb` : null,
-    p.forty_time != null ? `${Number(p.forty_time).toFixed(2)} 40${p.forty_source === "pro_day" ? " (pro day)" : ""}` : null,
+    p.forty_time != null
+      ? `${Number(p.forty_time).toFixed(2)} 40${p.forty_source === "pro_day" ? " (pro day)" : ""}`
+      : p.forty_projected != null ? `~${Number(p.forty_projected).toFixed(2)} 40 (projected)` : null,
     age ? `Age ${age.estimated ? "~" : ""}${age.years.toFixed(1)}` : null,
     ...more,
   ].filter((x): x is string => !!x);

@@ -1152,6 +1152,11 @@ export interface Prospect {
   forty_time?: number | null;
   forty_source?: FortySource | null;
   forty_weight?: number | null;
+  /** A projected 40 from a public draft site and the site's name (migration
+   *  100; Fill 40s). DISPLAY ONLY: the speed floor reads only forty_time.
+   *  Optional: absent before the migration, and never sent on insert. */
+  forty_projected?: number | null;
+  forty_projected_from?: string | null;
   birthday: string | null;
   personal_rank: number | null;
   overall_rank: number | null;

@@ -135,8 +135,10 @@ function GradeInput({ label, value, focusBorder, onChange }: {
  * The 40-yard dash box. Same local-raw-state reason as GradeInput: a
  * half-typed "4." mustn't be written upward or eaten. Blur shows what saves.
  */
-function FortyInput({ value, focusBorder, onChange }: {
+function FortyInput({ value, projected, focusBorder, onChange }: {
   value: number | null;
+  /** A projection on file (Fill 40s), shown as the placeholder; it never counts. */
+  projected: number | null;
   focusBorder: string;
   onChange: (t: number | null) => void;
 }) {
@@ -145,7 +147,8 @@ function FortyInput({ value, focusBorder, onChange }: {
   return (
     <div>
       <label className="block text-xs text-slate-500 mb-1">40 Time</label>
-      <input type="text" inputMode="decimal" placeholder="e.g. 4.52"
+      <input type="text" inputMode="decimal" placeholder={projected != null ? `proj ${Number(projected).toFixed(2)}` : "e.g. 4.52"}
+        title={projected != null ? "The placeholder is a projection (Fill 40s): it doesn't count. Type his real 40 here." : undefined}
         aria-label={`40 Time in seconds (${FORTY_MIN.toFixed(2)}-${FORTY_MAX.toFixed(2)})`}
         className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none ${focusBorder}`}
         value={shown}
@@ -260,7 +263,7 @@ export default function ChartingBoard({
                 />
               </div>
             ))}
-            <FortyInput value={bio.forty_time ?? null} focusBorder={a.focusBorder}
+            <FortyInput value={bio.forty_time ?? null} projected={prospect.forty_projected ?? null} focusBorder={a.focusBorder}
               onChange={(t) => onBioChange(t == null
                 ? { forty_time: null, forty_source: null, forty_weight: null }
                 : { forty_time: t, forty_source: bio.forty_source ?? "combine" })} />

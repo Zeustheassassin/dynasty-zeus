@@ -16,7 +16,7 @@ import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftCapitalLabel, draftRoundLabe
 import type { DraftPickRow, DraftResultUpdate } from "../../lib/nflDraft";
 import type { LandingSaved } from "../../lib/scouting/teamLanding";
 import { landingLines } from "../../lib/scouting/landingSpot";
-import { PRO_DAY_ADJUST, RB_SPEED_FLOOR, combineEquivalent, fortyDetail, formatForty } from "../../lib/scouting/speedFloor";
+import { PRO_DAY_ADJUST, RB_SPEED_FLOOR, fortyDisplay } from "../../lib/scouting/speedFloor";
 import PostDraftTab from "./PostDraftTab";
 import { classDraftedBy, makeLock } from "../../lib/scouting/scoreLock";
 import type { ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
@@ -239,8 +239,9 @@ function getSortValue(
   if (key === "draft_class_year") return p.draft_class_year;
   if (key === "height") return p.height || "ZZZ";
   if (key === "weight") return p.weight ?? BIG;
-  // On the combine's scale (a pro day +0.05), fastest first; no time sinks both ways.
-  if (key === "forty") return p.forty_time != null ? combineEquivalent(Number(p.forty_time), p.forty_source ?? "combine") : null;
+  // On the combine's scale (a pro day +0.05), a projection where there's no
+  // real 40, fastest first; neither sinks both ways.
+  if (key === "forty") return fortyDisplay(p)?.sortValue ?? null;
   if (key === "age") return ctx.ages.get(p.id)?.years ?? BIG;
   if (key === "total_routes") return p.total_routes;
   if (key === "total_games") return p.total_games;
@@ -801,6 +802,17 @@ export default function BigBoard({
     );
   }
 
+  // ── 40 cell ───────────────────────────────────────────────────
+  // His real 40, else a projection greyed with ~ (shown only, never scored).
+  function fortyCell(p: ProspectWithStats) {
+    const f = fortyDisplay(p);
+    return (
+      <td className={`${tdBase} border-r border-slate-800 ${f?.projected ? "text-slate-600 italic" : "text-slate-400"}`} title={f?.title}>
+        {f?.text ?? "—"}
+      </td>
+    );
+  }
+
   // ── Dynasty / Dynasty Plus cells ──────────────────────────────
   // "—" without an AE Score (the skill base), or for Plus before a round is
   // set. The tooltip walks through each piece at the current slider weights.
@@ -826,7 +838,11 @@ export default function BigBoard({
     if (d.flags.length) for (const f of d.flags) lines.push(`Size: ${f.label} → ${signed(weights.size * f.value, 2)}`);
     else lines.push("Size: no flag → +0.00");
     if (d.speed) lines.push(`Speed: ${d.speed.label} → ${signed(weights.speed * d.speed.value, 2)}`);
-    else if (pos === "RB") lines.push("Speed: no 40 time → +0.00");
+    else if (pos === "RB") {
+      const proj = p.forty_projected != null
+        ? ` (${p.forty_projected_from ?? "projected"} projects ${Number(p.forty_projected).toFixed(2)}; projections don't count)` : "";
+      lines.push(`Speed: no 40 time yet${proj} → +0.00`);
+    }
     if (d.rushing) lines.push(`Rushing: ${d.rushing.label} → ${signed(weights.rushing * d.rushing.value, 2)}`);
     lines.push(`= Dynasty ${signed(d.dynasty, 2)}`);
     if (plus && d.draftCapital != null) {
@@ -1298,7 +1314,7 @@ export default function BigBoard({
             {th("Age", "age")}
             {th("Ht", "height")}
             {th("Wt", "weight")}
-            {th("40", "forty", "border-r border-slate-800", `40-yard dash (Edit Bio). PD = a pro day, hand-timed: it sorts as +${PRO_DAY_ADJUST.toFixed(2)} on the combine's scale. Only an RB's counts, in the Dynasty Score (the Speed slider)`)}
+            {th("40", "forty", "border-r border-slate-800", `40-yard dash (Edit Bio, or Fill 40s on Prospect Data). PD = a pro day, hand-timed: it sorts as +${PRO_DAY_ADJUST.toFixed(2)} on the combine's scale. ~ = projected, greyed: shown only. Only an RB's real 40 counts, in the Dynasty Score (the Speed slider)`)}
             {th("AE Score", "ae_score", "border-l border-slate-800 text-teal-600", compositeTooltip)}
             {th("Dynasty", "dynasty", "text-teal-600", dynastyTooltip)}
             {th("Dynasty+", "dynasty_plus", "border-r border-slate-800 text-teal-600", dynastyPlusTooltip)}
@@ -1331,10 +1347,7 @@ export default function BigBoard({
                 </td>
                 <td className={`${tdBase} text-slate-400`}>{p.height || "—"}</td>
                 <td className={`${tdBase} text-slate-400`}>{p.weight ?? "—"}</td>
-                <td className={`${tdBase} text-slate-400 border-r border-slate-800`}
-                  title={p.forty_time != null ? fortyDetail(Number(p.forty_time), p.forty_source, p.forty_weight) : undefined}>
-                  {p.forty_time != null ? formatForty(Number(p.forty_time), p.forty_source) : "—"}
-                </td>
+                {fortyCell(p)}
                 {scoreCell(p)}
                 {dynastyCell(p, false)}
                 {dynastyCell(p, true)}

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  combineEquivalent, fortyDetail, formatForty, parseFortyTime, speedFlag, speedScore,
+  combineEquivalent, fortyDetail, fortyDisplay, formatForty, parseFortyTime, speedFlag, speedScore,
   FORTY_MAX, FORTY_MIN, PRO_DAY_ADJUST, RB_SPEED_FLOOR,
 } from "@/lib/scouting/speedFloor";
 
@@ -26,6 +26,15 @@ describe("combineEquivalent / formatForty", () => {
     expect(formatForty(4.5, "combine")).toBe("4.50");
     expect(formatForty(4.48, "pro_day")).toBe("4.48 PD");
     expect(formatForty(4.48, null)).toBe("4.48");
+  });
+
+  it("shows a real 40 first, else a projection marked ~ that says it doesn't count", () => {
+    expect(fortyDisplay({ forty_time: "4.47", forty_source: "pro_day", forty_projected: 4.4 }))
+      .toEqual({ text: "4.47 PD", title: "Pro day (hand-timed): 4.52 on the combine's scale", projected: false, sortValue: 4.47 + 0.05 });
+    const proj = fortyDisplay({ forty_projected: "4.5", forty_projected_from: "WalterFootball" })!;
+    expect(proj).toMatchObject({ text: "~4.50", projected: true, sortValue: 4.5 });
+    expect(proj.title).toMatch(/^Projected by WalterFootball: shown only. The speed floor counts a real 40/);
+    expect(fortyDisplay({})).toBeNull();
   });
 
   it("describes where he ran it and his weigh-in", () => {
