@@ -74,6 +74,8 @@ describe("computeAEScores", () => {
   });
 });
 
+const BEFORE_2027_DRAFT = new Date(Date.UTC(2026, 10, 15, 12));
+
 describe("dynastyScores", () => {
   it("scores only prospects with an AE Score at a scored position", () => {
     const ps = [prospect("a", "WR", { draft_round: 1 }), prospect("b", "RB"), prospect("k", "K")];
@@ -92,7 +94,7 @@ describe("dynastyScores", () => {
       prospect("none", "RB", { weight: 214 }),
     ];
     const views = new Map(ps.map((p) => [p.id, live(1)]));
-    const m = dynastyScores(ps, views, new Map(), DEFAULT_DYNASTY_WEIGHTS);
+    const m = dynastyScores(ps, views, new Map(), DEFAULT_DYNASTY_WEIGHTS, undefined, undefined, BEFORE_2027_DRAFT);
     // Same AE Score and frame; only the 40 differs.
     const none = m.get("none")!.dynasty;
     expect(m.get("none")!.speed).toBeNull();
@@ -100,6 +102,27 @@ describe("dynastyScores", () => {
     expect(m.get("slow")!.dynasty - none).toBeCloseTo(-0.7, 9); // Speed Score 84.1: all of it
     expect(m.get("pd")!.speed!.label).toContain("at his pro day (+0.05 hand-timed = 4.67) weighing 210");
     expect(m.get("pd")!.dynasty).toBeLessThan(none);
+  });
+
+  it("switches the speed floor off per class once that class is drafted (May 1 of its draft year)", () => {
+    const slow = { weight: 214, forty_time: 4.75 };
+    const ps = [
+      prospect("slow26", "RB", { ...slow, draft_class_year: 2026 }),
+      prospect("none26", "RB", { weight: 214, draft_class_year: 2026 }),
+      prospect("slow27", "RB", { ...slow, draft_class_year: 2027 }),
+      prospect("none27", "RB", { weight: 214, draft_class_year: 2027 }),
+    ];
+    const views = new Map(ps.map((p) => [p.id, live(1)]));
+    const at = (now: Date) => dynastyScores(ps, views, new Map(), DEFAULT_DYNASTY_WEIGHTS, undefined, undefined, now);
+    const gap = (m: ReturnType<typeof at>, cls: number) => m.get(`slow${cls - 2000}`)!.dynasty - m.get(`none${cls - 2000}`)!.dynasty;
+    // November 2026: the 2026 class is drafted (off), 2027 isn't (on).
+    const nov = at(BEFORE_2027_DRAFT);
+    expect(gap(nov, 2026)).toBeCloseTo(0, 12);
+    expect(nov.get("slow26")!.speed!.value).toBe(0);
+    expect(gap(nov, 2027)).toBeCloseTo(-0.7, 9);
+    // April 30, 2027 still counts it; May 1 turns 2027's off too.
+    expect(gap(at(new Date(Date.UTC(2027, 3, 30, 12))), 2027)).toBeCloseTo(-0.7, 9);
+    expect(gap(at(new Date(Date.UTC(2027, 4, 1))), 2027)).toBeCloseTo(0, 12);
   });
 });
 

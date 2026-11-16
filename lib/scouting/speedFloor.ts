@@ -43,6 +43,16 @@
 // Henry 205 vs 196: 98.2 vs 93.9). Without any weight there's no penalty
 // (never a penalty on a guess). Game MPH isn't used: top speed in a game only
 // errs slow (it needs a long run to show), so it can't prove a player is slow.
+//
+// Off once his class is drafted (scoreLock.ts classDraftedBy, May 1 of the
+// draft year), per class: the user's call (2026-11-15), "when the NFL draft
+// occurs i will want the 40 time penalties switched off since the NFL Draft
+// will have taken into account the 40 times ... it would just be doubling up
+// at that point". So the floor shapes the pre-draft board (Dynasty, and the
+// Pre grade that mirrors it), and from the draft on, draft capital carries a
+// drafted back's speed. (The study above found the RB gap held even beyond
+// the pick; the user weighed that and chose this.) The Speed Score still
+// shows in the label.
 
 import type { FortySource } from "../types";
 import type { CompositePos } from "./aeComposite";
@@ -143,12 +153,23 @@ export interface SpeedFlag {
   speedScore: number | null;
 }
 
+/** What the label adds once his class is drafted and the floor is off. */
+export const SPEED_FLOOR_OFF_DRAFTED = "off: his class is drafted, and draft capital prices his speed in";
+
 /**
  * An RB's speed-floor piece, on his weigh-in (else `bioWeightLb`). Null for
  * other positions and without a 40. With a 40 but no weight at all it's 0,
- * with the reason in the label.
+ * with the reason in the label. 0 once his class is drafted (`classDrafted`),
+ * the Speed Score still in the label.
  */
-export function speedFlag(pos: CompositePos, forty: FortyRun | null | undefined, bioWeightLb: number | null): SpeedFlag | null {
+export function speedFlag(
+  pos: CompositePos, forty: FortyRun | null | undefined, bioWeightLb: number | null, classDrafted = false,
+): SpeedFlag | null {
+  const flag = floorFlag(pos, forty, bioWeightLb);
+  return flag && classDrafted ? { ...flag, label: `${flag.label}; ${SPEED_FLOOR_OFF_DRAFTED}`, value: 0 } : flag;
+}
+
+function floorFlag(pos: CompositePos, forty: FortyRun | null | undefined, bioWeightLb: number | null): SpeedFlag | null {
   if (pos !== "RB" || !forty) return null;
   const adjusted = combineEquivalent(forty.time, forty.source);
   const timeText = forty.source === "pro_day"

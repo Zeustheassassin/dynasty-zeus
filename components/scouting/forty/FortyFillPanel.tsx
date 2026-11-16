@@ -63,7 +63,7 @@ function Sources({ s }: { s: FortyFillSummary }) {
         </details>
       )}
       <p className="text-slate-500">
-        Official combine times count in the RB speed floor. Projected times only show (greyed, with ~) until a real 40 is in.
+        Official combine times count in the RB speed floor until the class is drafted. Projected times only show (greyed, with ~) until a real 40 is in.
       </p>
     </div>
   );

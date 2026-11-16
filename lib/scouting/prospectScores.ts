@@ -26,7 +26,7 @@ import { scoreDynasty, type DynastyBreakdown, type DynastyWeights, type LandingI
 import { rookieSeasonAge, parseHeightInches } from "./prospectAge";
 import type { OpponentTier } from "./opponentTier";
 import { applyOpponentStrength, type OpponentAdjusted } from "./opponentAdjust";
-import { activeLock } from "./scoreLock";
+import { activeLock, classDraftedBy } from "./scoreLock";
 import { alignmentPenalty } from "./alignmentPenalty";
 import { middleAdjustment, type MiddleUsage } from "./middleUsage";
 import type { RushingBonus } from "./qbRushing";
@@ -312,7 +312,8 @@ export function scoreViewsFrom(
 /**
  * Dynasty Score (+ Plus) for every prospect with an AE Score (dynastyScore.ts).
  * `landing` holds the landing-spot inputs (landingSpot.ts) for drafted
- * prospects from LANDING_FIRST_CLASS on.
+ * prospects from LANDING_FIRST_CLASS on. `now` decides which classes are
+ * drafted, where the RB speed floor is off (speedFloor.ts).
  */
 export function dynastyScores(
   prospects: readonly ProspectWithStats[],
@@ -321,6 +322,7 @@ export function dynastyScores(
   weights: DynastyWeights,
   landing?: ReadonlyMap<string, LandingInputs>,
   rushing?: ReadonlyMap<string, RushingBonus>,
+  now: Date = new Date(),
 ): Map<string, DynastyBreakdown> {
   const m = new Map<string, DynastyBreakdown>();
   for (const p of prospects) {
@@ -336,6 +338,7 @@ export function dynastyScores(
       forty: p.forty_time != null
         ? { time: Number(p.forty_time), source: p.forty_source ?? "combine", weightLb: p.forty_weight ?? null }
         : null,
+      classDrafted: classDraftedBy(p.draft_class_year, now),
       draftRound: p.draft_round,
       draftPick: p.draft_pick,
       landing: landing?.get(p.id) ?? null,

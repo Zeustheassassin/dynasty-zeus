@@ -123,6 +123,18 @@ describe("scoreDynasty", () => {
     expect(wr.dynasty).toBeCloseTo(scoreDynasty({ ...base, pos: "WR" }, DEFAULT_DYNASTY_WEIGHTS).dynasty, 12);
   });
 
+  it("drops the speed floor once his class is drafted, from Dynasty and Dynasty+ (the user, 2026-11-15)", () => {
+    const forty = { time: 4.75, source: "combine" as const };
+    const without = scoreDynasty({ ...base, draftRound: 4, classDrafted: true }, DEFAULT_DYNASTY_WEIGHTS);
+    const drafted = scoreDynasty({ ...base, draftRound: 4, forty, classDrafted: true }, DEFAULT_DYNASTY_WEIGHTS);
+    expect(drafted.speed!.value).toBe(0);
+    expect(drafted.speed!.speedScore).toBeCloseTo(82.9, 1);
+    expect(drafted.dynasty).toBeCloseTo(without.dynasty, 12);
+    expect(drafted.plus!).toBeCloseTo(without.plus!, 12);
+    // Before the draft it counts.
+    expect(scoreDynasty({ ...base, draftRound: 4, forty, classDrafted: false }, DEFAULT_DYNASTY_WEIGHTS).dynasty - without.dynasty).toBeCloseTo(-0.7, 12);
+  });
+
   it("adds a QB's rushing bonus at the Rushing slider's weight, into Dynasty and so Dynasty+, and only for a QB (2026-11-10)", () => {
     const rushing = { value: 0.2, label: "55 rush yds/game" };
     const w = { ...DEFAULT_DYNASTY_WEIGHTS, rushing: 1.5 };

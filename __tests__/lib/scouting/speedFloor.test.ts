@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   combineEquivalent, fortyDetail, fortyDisplay, formatForty, parseFortyTime, speedFlag, speedScore,
-  FORTY_MAX, FORTY_MIN, PRO_DAY_ADJUST, RB_SPEED_FLOOR,
+  FORTY_MAX, FORTY_MIN, PRO_DAY_ADJUST, RB_SPEED_FLOOR, SPEED_FLOOR_OFF_DRAFTED,
 } from "@/lib/scouting/speedFloor";
 
 // The value the ramp gives at a Speed Score, from the floor's own numbers.
@@ -107,6 +107,18 @@ describe("speedFlag (RB speed floor)", () => {
 
   it("never gives a bonus, however fast", () => {
     expect(speedFlag("RB", { time: 4.28, source: "combine" }, 215)!.value).toBe(0);
+  });
+
+  it("is off once his class is drafted (the user: draft capital prices the 40 in), the Speed Score still shown", () => {
+    const run = { time: 4.75, source: "combine" as const, weightLb: 214 };
+    expect(speedFlag("RB", run, 230, false)!.value).toBeCloseTo(-0.7, 12);
+    const drafted = speedFlag("RB", run, 230, true)!;
+    expect(drafted.value).toBe(0);
+    expect(drafted.speedScore).toBeCloseTo(84.1, 1);
+    expect(drafted.label).toBe(`4.75 at the combine weighing 214: Speed Score 84.1, under the floor (all of it at 88 and under); ${SPEED_FLOOR_OFF_DRAFTED}`);
+    // Still nothing off RB or without a 40.
+    expect(speedFlag("RB", null, 214, true)).toBeNull();
+    expect(speedFlag("WR", run, 200, true)).toBeNull();
   });
 
   it("is 0 without a weight (no penalty on a guess), and null off RB or without a 40", () => {

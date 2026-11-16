@@ -101,7 +101,7 @@ const REALIGN_LABEL: Record<RealignBy, string> = { dynasty: "Dynasty", plus: "Dy
 const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }[] = [
   { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
   { key: "size",  label: "Size",  hint: "How much size counts: RBs and WRs carrying more weight for their height gain, lean and very light ones lose" },
-  { key: "speed", label: "Speed", hint: `How much an RB's speed floor counts: an RB whose Speed Score (weight × 200 ÷ 40⁴, a pro-day 40 +${PRO_DAY_ADJUST.toFixed(2)}) is under ${RB_SPEED_FLOOR.none} loses up to ${Math.abs(RB_SPEED_FLOOR.value).toFixed(1)} at 1×, all of it at ${RB_SPEED_FLOOR.full} and under. Never a bonus, and no WR floor: from past combines, slow WRs hit as often as their draft pick says, while slow RBs fall short of theirs` },
+  { key: "speed", label: "Speed", hint: `How much an RB's speed floor counts: an RB whose Speed Score (weight × 200 ÷ 40⁴, a pro-day 40 +${PRO_DAY_ADJUST.toFixed(2)}) is under ${RB_SPEED_FLOOR.none} loses up to ${Math.abs(RB_SPEED_FLOOR.value).toFixed(1)} at 1×, all of it at ${RB_SPEED_FLOOR.full} and under. Never a bonus, and off once his class is drafted (May 1 of the draft year), when draft capital prices his speed in. No WR floor: from past combines, slow WRs hit as often as their draft pick says, while slow RBs fall short of theirs` },
   { key: "rushing", label: "QB Rushing", hint: "How much a QB's rushing counts: rushing yards per game over his PFF full seasons (carries × yards per carry, no TDs), 0 at the college median (26) up to +0.3 at 62+ at 1×, only as much as his passing allows (none in the bottom third of charted QBs, all of it in the top third)" },
   { key: "draft", label: "Draft", hint: "How much draft capital counts in Dynasty Score Plus: by overall pick, or the round's average when no pick is set" },
   { key: "landing", label: "Landing", hint: "How much his team's room counts in Dynasty Score Plus (2027 classes on): rookie competition (the players at his position his team drafted ahead of him; WRs and Move TEs count against each other), the established veterans ahead of him, and his path by year 2 (Post-Draft tab)" },
@@ -938,7 +938,7 @@ export default function BigBoard({
     "Dynasty Score: the AE Score plus a career-window adjustment for age (prime seasons left at rookie " +
     `age vs a typical ${REFERENCE_ROOKIE_AGE}-year-old rookie; primes end RB ${PRIME_END_AGE.RB}, WR ${PRIME_END_AGE.WR}, ` +
     `TE ${PRIME_END_AGE.TE}, QB ${PRIME_END_AGE.QB}), size (RB and WR pounds per inch of height vs the position's typical, plus WRs under 175 lb), ` +
-    `an RB's speed floor (Speed Score under ${RB_SPEED_FLOOR.none}, never a bonus) and a QB's rushing. Weighted by the sliders.`;
+    `an RB's speed floor (Speed Score under ${RB_SPEED_FLOOR.none}, never a bonus, off once his class is drafted) and a QB's rushing. Weighted by the sliders.`;
   const preGradeTooltip =
     `Pre-draft grade: mirrors the Dynasty Score on a curve (${dynastyGradeCurveText()}, straight lines between) ` +
     "until the class is drafted, then stays as it stood. Read only while it mirrors. " +

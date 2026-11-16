@@ -2,7 +2,7 @@
 // true-talent SDs; aeComposite.ts) plus what a dynasty manager adds on top.
 //
 //   Dynasty Score      = AE Score + age weight × career window + size weight × size flags
-//                        + speed weight × an RB's speed floor (speedFloor.ts)
+//                        + speed weight × an RB's speed floor (speedFloor.ts; off once his class is drafted)
 //                        + rushing weight × a QB's rushing bonus (qbRushing.ts)
 //   Dynasty Score Plus = Dynasty Score + draft weight × draft capital (once a round is set)
 //                        + landing weight × (rookie competition + vets ahead + path by year 2)
@@ -300,7 +300,8 @@ export interface DynastyWeights { age: number; size: number; speed: number; draf
 // Offense defaults to 1: his QB and the pass/run lean reach ±0.3 together.
 // Rushing defaults to 1: a QB's rushing bonus reaches +0.3, gated by his passing (qbRushing.ts).
 // Speed defaults to 1: an RB under the Speed Score floor loses up to 0.7, about
-// a round of draft capital at the Draft slider's 2× (speedFloor.ts).
+// a round of draft capital at the Draft slider's 2× (speedFloor.ts), until his
+// class is drafted.
 export const DEFAULT_DYNASTY_WEIGHTS: DynastyWeights = { age: 1, size: 1, speed: 1, draft: 2, landing: 1, role: 1, offense: 1, rushing: 1 };
 export const WEIGHT_MIN = 0;
 export const WEIGHT_MAX = 3;
@@ -315,6 +316,8 @@ export interface DynastyInputs {
   weightLb: number | null;
   /** His 40, where he ran it and his weigh-in there; null or absent without one. Only an RB's counts (speedFloor.ts). */
   forty?: FortyRun | null;
+  /** His class has been drafted (scoreLock.ts classDraftedBy): the speed floor is off from then. */
+  classDrafted?: boolean;
   /** 1–7, UNDRAFTED_ROUND, or null before the draft. */
   draftRound: number | null;
   /** Overall pick (1 = first), or null when only the round is known. */
@@ -348,7 +351,7 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
   const window = inp.rookieAge ? careerWindowAdjustment(inp.pos, inp.rookieAge.years) : null;
   const flags = sizeFlags(inp.pos, inp.heightIn, inp.weightLb);
   const size = flags.reduce((s, f) => s + f.value, 0);
-  const speed = speedFlag(inp.pos, inp.forty, inp.weightLb);
+  const speed = speedFlag(inp.pos, inp.forty, inp.weightLb, inp.classDrafted ?? false);
   const rushing = inp.pos === "QB" ? inp.rushing ?? null : null;
   const dynasty = inp.aeScore + w.age * (window ?? 0) + w.size * size + (w.speed ?? 0) * (speed?.value ?? 0)
     + (w.rushing ?? 0) * (rushing?.value ?? 0);
