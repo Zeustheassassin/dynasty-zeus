@@ -332,6 +332,10 @@ export function dynastyScores(
       rookieAge: rookieSeasonAge(p.draft_class_year, p.birthday, hsClass.get(p.id)),
       heightIn: parseHeightInches(p.height),
       weightLb: p.weight,
+      // numeric(3,2) can arrive as a string; a time with no source counts as the combine's.
+      forty: p.forty_time != null
+        ? { time: Number(p.forty_time), source: p.forty_source ?? "combine", weightLb: p.forty_weight ?? null }
+        : null,
       draftRound: p.draft_round,
       draftPick: p.draft_pick,
       landing: landing?.get(p.id) ?? null,

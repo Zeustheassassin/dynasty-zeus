@@ -295,7 +295,8 @@ describe("BigBoard AE Score", () => {
   it("sits in its own Composite band before the Above Exp metrics, on every tab", () => {
     renderBoard();
     const labels = headerLabels();
-    expect(labels.indexOf("AE Score")).toBe(labels.indexOf("Wt") + 1);
+    expect(labels.indexOf("40")).toBe(labels.indexOf("Wt") + 1);
+    expect(labels.indexOf("AE Score")).toBe(labels.indexOf("40") + 1);
     expect(labels.slice(labels.indexOf("AE Score"), labels.indexOf("AE Score") + 3)).toEqual(["AE Score", "Dynasty", "Dynasty+"]);
     expect(labels.indexOf("Role")).toBe(labels.indexOf("Dynasty+") + 1);
     expect(labels.indexOf("AAE")).toBe(labels.indexOf("Role") + 1);
@@ -508,6 +509,30 @@ describe("BigBoard ages", () => {
     expect(cell("Has Bday", "Age")).toMatch(/^\d\d$/);
     expect(cell("Est Age", "Age")).toMatch(/^~\d\d$/);
     expect(cell("No Age", "Age")).toBe("—");
+  });
+});
+
+describe("BigBoard 40 column", () => {
+  it("shows the time (PD for a pro day) and sorts fastest first on the combine's scale", () => {
+    renderBoard([
+      prospect("a", "Combine Fast", "RB", 1, { forty_time: 4.5, forty_source: "combine" }),
+      prospect("b", "Pro Day", "RB", 2, { forty_time: 4.47, forty_source: "pro_day" }),
+      prospect("c", "No Time", "RB", 3),
+      prospect("d", "Combine Slow", "WR", 4, { forty_time: 4.61, forty_source: "combine" }),
+    ]);
+    expect(cell("Combine Fast", "40")).toBe("4.50");
+    expect(cell("Pro Day", "40")).toBe("4.47 PD");
+    expect(cell("No Time", "40")).toBe("—");
+    expect(within(rowFor("Pro Day")).getAllByRole("cell")[headerLabels().indexOf("40")].getAttribute("title"))
+      .toBe("Pro day (hand-timed): 4.52 on the combine's scale");
+    fireEvent.click(screen.getByRole("columnheader", { name: "40" }));
+    // 4.47 PD reads 4.52, behind the 4.50 at the combine; no time sinks.
+    expect(names()).toEqual(["Combine Fast", "Pro Day", "Combine Slow", "No Time"]);
+  });
+
+  it("has a Speed slider beside the others", () => {
+    renderBoard();
+    expect(screen.getByRole("slider", { name: "Speed weight" })).toBeTruthy();
   });
 });
 

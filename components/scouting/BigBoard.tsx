@@ -16,6 +16,7 @@ import { DRAFT_ROUND_CHOICES, UNDRAFTED_ROUND, draftCapitalLabel, draftRoundLabe
 import type { DraftPickRow, DraftResultUpdate } from "../../lib/nflDraft";
 import type { LandingSaved } from "../../lib/scouting/teamLanding";
 import { landingLines } from "../../lib/scouting/landingSpot";
+import { PRO_DAY_ADJUST, RB_SPEED_FLOOR, combineEquivalent, fortyDetail, formatForty } from "../../lib/scouting/speedFloor";
 import PostDraftTab from "./PostDraftTab";
 import { classDraftedBy, makeLock } from "../../lib/scouting/scoreLock";
 import type { ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
@@ -100,6 +101,7 @@ const REALIGN_LABEL: Record<RealignBy, string> = { dynasty: "Dynasty", plus: "Dy
 const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }[] = [
   { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
   { key: "size",  label: "Size",  hint: "How much size counts: RBs and WRs carrying more weight for their height gain, lean and very light ones lose" },
+  { key: "speed", label: "Speed", hint: `How much an RB's speed floor counts: an RB whose Speed Score (weight × 200 ÷ 40⁴, a pro-day 40 +${PRO_DAY_ADJUST.toFixed(2)}) is under ${RB_SPEED_FLOOR.none} loses up to ${Math.abs(RB_SPEED_FLOOR.value).toFixed(1)} at 1×, all of it at ${RB_SPEED_FLOOR.full} and under. Never a bonus, and no WR floor: from past combines, slow WRs hit as often as their draft pick says, while slow RBs fall short of theirs` },
   { key: "rushing", label: "QB Rushing", hint: "How much a QB's rushing counts: rushing yards per game over his PFF full seasons (carries × yards per carry, no TDs), 0 at the college median (26) up to +0.3 at 62+ at 1×, only as much as his passing allows (none in the bottom third of charted QBs, all of it in the top third)" },
   { key: "draft", label: "Draft", hint: "How much draft capital counts in Dynasty Score Plus: by overall pick, or the round's average when no pick is set" },
   { key: "landing", label: "Landing", hint: "How much his team's room counts in Dynasty Score Plus (2027 classes on): rookie competition (the players at his position his team drafted ahead of him; WRs and Move TEs count against each other), the established veterans ahead of him, and his path by year 2 (Post-Draft tab)" },
@@ -123,7 +125,7 @@ interface SortContext {
 
 type SortKey =
   | "pre_draft_grade" | "post_draft_grade" | "grade_delta"
-  | "personal_rank" | "overall_rank" | "sample" | "charted_games" | "charted_snaps" | "charted_plays" | "ae_score" | "dynasty" | "dynasty_plus" | "role" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "age" | "position"
+  | "personal_rank" | "overall_rank" | "sample" | "charted_games" | "charted_snaps" | "charted_plays" | "ae_score" | "dynasty" | "dynasty_plus" | "role" | "name" | "school" | "conference" | "draft_class_year" | "height" | "weight" | "forty" | "age" | "position"
   | "total_routes" | "total_games" | "targets" | "catches" | "drops"
   | "success_rate" | "target_rate" | "adj_success_above_exp" | `ae_${AEKey}`
   | "pct_left" | "pct_right" | "pct_slot" | "pct_backfield"
@@ -237,6 +239,8 @@ function getSortValue(
   if (key === "draft_class_year") return p.draft_class_year;
   if (key === "height") return p.height || "ZZZ";
   if (key === "weight") return p.weight ?? BIG;
+  // On the combine's scale (a pro day +0.05), fastest first; no time sinks both ways.
+  if (key === "forty") return p.forty_time != null ? combineEquivalent(Number(p.forty_time), p.forty_source ?? "combine") : null;
   if (key === "age") return ctx.ages.get(p.id)?.years ?? BIG;
   if (key === "total_routes") return p.total_routes;
   if (key === "total_games") return p.total_games;
@@ -821,6 +825,8 @@ export default function BigBoard({
     }
     if (d.flags.length) for (const f of d.flags) lines.push(`Size: ${f.label} → ${signed(weights.size * f.value, 2)}`);
     else lines.push("Size: no flag → +0.00");
+    if (d.speed) lines.push(`Speed: ${d.speed.label} → ${signed(weights.speed * d.speed.value, 2)}`);
+    else if (pos === "RB") lines.push("Speed: no 40 time → +0.00");
     if (d.rushing) lines.push(`Rushing: ${d.rushing.label} → ${signed(weights.rushing * d.rushing.value, 2)}`);
     lines.push(`= Dynasty ${signed(d.dynasty, 2)}`);
     if (plus && d.draftCapital != null) {
@@ -915,7 +921,8 @@ export default function BigBoard({
   const dynastyTooltip =
     "Dynasty Score: the AE Score plus a career-window adjustment for age (prime seasons left at rookie " +
     `age vs a typical ${REFERENCE_ROOKIE_AGE}-year-old rookie; primes end RB ${PRIME_END_AGE.RB}, WR ${PRIME_END_AGE.WR}, ` +
-    `TE ${PRIME_END_AGE.TE}, QB ${PRIME_END_AGE.QB}) and size (RB and WR pounds per inch of height vs the position's typical, plus WRs under 175 lb). Weighted by the sliders.`;
+    `TE ${PRIME_END_AGE.TE}, QB ${PRIME_END_AGE.QB}), size (RB and WR pounds per inch of height vs the position's typical, plus WRs under 175 lb), ` +
+    `an RB's speed floor (Speed Score under ${RB_SPEED_FLOOR.none}, never a bonus) and a QB's rushing. Weighted by the sliders.`;
   const preGradeTooltip =
     `Pre-draft grade: mirrors the Dynasty Score on a curve (${dynastyGradeCurveText()}, straight lines between) ` +
     "until the class is drafted, then stays as it stood. Read only while it mirrors. " +
@@ -1226,7 +1233,7 @@ export default function BigBoard({
     const secondaryGroup = isAll ? "Pos Rank" : "OVR";
     const secondaryKey: SortKey = isAll ? "personal_rank" : "overall_rank";
     const secondaryValue = (p: ProspectWithStats) => (isAll ? p.personal_rank : p.overall_rank);
-    const identitySpan = isAll ? 6 : 5; // Pos column shows only on the All tab
+    const identitySpan = isAll ? 7 : 6; // Pos column shows only on the All tab
     const aeCols = isAll
       ? AE_COLUMNS.filter((c) => !c.breakdown)
       : AE_COLUMNS.filter((c) => c.pos === boardTab);
@@ -1290,7 +1297,8 @@ export default function BigBoard({
             {th("Yr", "draft_class_year")}
             {th("Age", "age")}
             {th("Ht", "height")}
-            {th("Wt", "weight", "border-r border-slate-800")}
+            {th("Wt", "weight")}
+            {th("40", "forty", "border-r border-slate-800", `40-yard dash (Edit Bio). PD = a pro day, hand-timed: it sorts as +${PRO_DAY_ADJUST.toFixed(2)} on the combine's scale. Only an RB's counts, in the Dynasty Score (the Speed slider)`)}
             {th("AE Score", "ae_score", "border-l border-slate-800 text-teal-600", compositeTooltip)}
             {th("Dynasty", "dynasty", "text-teal-600", dynastyTooltip)}
             {th("Dynasty+", "dynasty_plus", "border-r border-slate-800 text-teal-600", dynastyPlusTooltip)}
@@ -1322,7 +1330,11 @@ export default function BigBoard({
                   {age ? `${age.estimated ? "~" : ""}${Math.floor(age.years)}` : "—"}
                 </td>
                 <td className={`${tdBase} text-slate-400`}>{p.height || "—"}</td>
-                <td className={`${tdBase} text-slate-400 border-r border-slate-800`}>{p.weight ?? "—"}</td>
+                <td className={`${tdBase} text-slate-400`}>{p.weight ?? "—"}</td>
+                <td className={`${tdBase} text-slate-400 border-r border-slate-800`}
+                  title={p.forty_time != null ? fortyDetail(Number(p.forty_time), p.forty_source, p.forty_weight) : undefined}>
+                  {p.forty_time != null ? formatForty(Number(p.forty_time), p.forty_source) : "—"}
+                </td>
                 {scoreCell(p)}
                 {dynastyCell(p, false)}
                 {dynastyCell(p, true)}

@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
-import type { Prospect, ScoutingGame, ChartingDecision } from "../../../lib/types";
+import type { Prospect, ScoutingGame, ChartingDecision, FortySource } from "../../../lib/types";
+import { FORTY_MAX, FORTY_MIN, FORTY_SOURCE_LABEL, FORTY_WEIGHT_MAX, FORTY_WEIGHT_MIN, PRO_DAY_ADJUST, parseFortyTime } from "../../../lib/scouting/speedFloor";
 import { GAME_TYPES, CHARTING_DECISIONS } from "./chartingConstants";
 import { BASE_YEAR, FILM_YEARS, classYearOptionsWith } from "../../../lib/helpers/season";
 import { parseGrade, formatGrade, gradeColor, dynastyGradeCurveText, GRADE_MIN, GRADE_MAX } from "../../../lib/scouting/prospectGrade";
@@ -130,6 +131,34 @@ function GradeInput({ label, value, focusBorder, onChange }: {
   );
 }
 
+/**
+ * The 40-yard dash box. Same local-raw-state reason as GradeInput: a
+ * half-typed "4." mustn't be written upward or eaten. Blur shows what saves.
+ */
+function FortyInput({ value, focusBorder, onChange }: {
+  value: number | null;
+  focusBorder: string;
+  onChange: (t: number | null) => void;
+}) {
+  const [raw, setRaw] = useState<string | null>(null);
+  const shown = raw ?? (value != null ? Number(value).toFixed(2) : "");
+  return (
+    <div>
+      <label className="block text-xs text-slate-500 mb-1">40 Time</label>
+      <input type="text" inputMode="decimal" placeholder="e.g. 4.52"
+        aria-label={`40 Time in seconds (${FORTY_MIN.toFixed(2)}-${FORTY_MAX.toFixed(2)})`}
+        className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none ${focusBorder}`}
+        value={shown}
+        onChange={(e) => {
+          setRaw(e.target.value);
+          const parsed = parseFortyTime(e.target.value);
+          if (parsed !== undefined) onChange(parsed);
+        }}
+        onBlur={() => setRaw(null)} />
+    </div>
+  );
+}
+
 export default function ChartingBoard({
   prospect, config, overviewData,
   tab, games, selectedGameId, loading, gamePlayCounts,
@@ -231,6 +260,28 @@ export default function ChartingBoard({
                 />
               </div>
             ))}
+            <FortyInput value={bio.forty_time ?? null} focusBorder={a.focusBorder}
+              onChange={(t) => onBioChange(t == null
+                ? { forty_time: null, forty_source: null, forty_weight: null }
+                : { forty_time: t, forty_source: bio.forty_source ?? "combine" })} />
+            <div>
+              <label htmlFor="bio-forty-source" className="block text-xs text-slate-500 mb-1">40 Run At</label>
+              <select id="bio-forty-source" disabled={bio.forty_time == null}
+                title={`If he ran at both, use the combine's (laser-timed). A pro day is hand-timed and counts +${PRO_DAY_ADJUST.toFixed(2)}.`}
+                className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none disabled:opacity-50 ${a.focusBorder}`}
+                value={bio.forty_source ?? "combine"} onChange={(e) => onBioChange({ forty_source: e.target.value as FortySource })}>
+                {(Object.keys(FORTY_SOURCE_LABEL) as FortySource[]).map((s) => <option key={s} value={s}>{FORTY_SOURCE_LABEL[s]}</option>)}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="bio-forty-weight" className="block text-xs text-slate-500 mb-1">Weighed (lbs)</label>
+              <input id="bio-forty-weight" type="number" min={FORTY_WEIGHT_MIN} max={FORTY_WEIGHT_MAX} disabled={bio.forty_time == null}
+                placeholder={bio.weight != null ? `bio ${bio.weight}` : "e.g. 212"}
+                title="His weigh-in where he ran the 40: Speed Score is set on it, and bio weights run heavy. Blank = his bio weight."
+                className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none disabled:opacity-50 ${a.focusBorder}`}
+                value={bio.forty_weight ?? ""}
+                onChange={(e) => onBioChange({ forty_weight: e.target.value ? Math.round(Number(e.target.value)) : null })} />
+            </div>
             <div>
               <label className="block text-xs text-slate-500 mb-1">Projected Draft Year</label>
               <select className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none ${a.focusBorder}`}

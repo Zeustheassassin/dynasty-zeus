@@ -84,6 +84,23 @@ describe("dynastyScores", () => {
     expect(m.get("a")!.dynasty).toBeCloseTo(1);
     expect(m.get("a")!.plus).toBeCloseTo(3);
   });
+
+  it("reads an RB's 40 off his row (numeric can arrive as a string; no source = the combine's)", () => {
+    const ps = [
+      prospect("slow", "RB", { weight: 214, forty_time: "4.75" as unknown as number, forty_source: null }),
+      prospect("pd", "RB", { weight: 214, forty_time: 4.62, forty_source: "pro_day", forty_weight: 210 }),
+      prospect("none", "RB", { weight: 214 }),
+    ];
+    const views = new Map(ps.map((p) => [p.id, live(1)]));
+    const m = dynastyScores(ps, views, new Map(), DEFAULT_DYNASTY_WEIGHTS);
+    // Same AE Score and frame; only the 40 differs.
+    const none = m.get("none")!.dynasty;
+    expect(m.get("none")!.speed).toBeNull();
+    expect(m.get("slow")!.speed!.label).toContain("4.75 at the combine");
+    expect(m.get("slow")!.dynasty - none).toBeCloseTo(-0.7, 9); // Speed Score 84.1: all of it
+    expect(m.get("pd")!.speed!.label).toContain("at his pro day (+0.05 hand-timed = 4.67) weighing 210");
+    expect(m.get("pd")!.dynasty).toBeLessThan(none);
+  });
 });
 
 describe("gamesByTierFrom / defenseFacedFrom", () => {

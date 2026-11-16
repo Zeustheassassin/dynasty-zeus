@@ -96,11 +96,31 @@ describe("scoreDynasty", () => {
   });
 
   it("scales each piece by its weight; zero weights leave the AE Score", () => {
-    const d = scoreDynasty({ ...base, weightLb: 190, draftRound: 3 }, { age: 0, size: 0, draft: 0, landing: 0, role: 0, offense: 0, rushing: 0 });
+    const slow = { time: 4.8, source: "combine" as const };
+    const d = scoreDynasty({ ...base, weightLb: 190, forty: slow, draftRound: 3 }, { age: 0, size: 0, speed: 0, draft: 0, landing: 0, role: 0, offense: 0, rushing: 0 });
     expect(d.dynasty).toBe(0.8);
     expect(d.plus).toBe(0.8);
-    const half = scoreDynasty({ ...base, draftRound: 3 }, { age: 1, size: 1, draft: 0.5, landing: 1, role: 1, offense: 1, rushing: 1 });
+    const half = scoreDynasty({ ...base, draftRound: 3 }, { age: 1, size: 1, speed: 1, draft: 0.5, landing: 1, role: 1, offense: 1, rushing: 1 });
     expect(half.plus! - half.dynasty).toBeCloseTo(0.5 * DRAFT_CAPITAL[3], 9);
+  });
+
+  it("takes an RB's speed floor at the Speed slider's weight, into Dynasty and so Dynasty+; none for a WR (2026-11-15)", () => {
+    // 4.75 at 211 lb: Speed Score 82.9, all of the floor's −0.7.
+    const forty = { time: 4.75, source: "combine" as const };
+    const without = scoreDynasty({ ...base, draftRound: 4 }, DEFAULT_DYNASTY_WEIGHTS);
+    const rb = scoreDynasty({ ...base, draftRound: 4, forty }, DEFAULT_DYNASTY_WEIGHTS);
+    expect(DEFAULT_DYNASTY_WEIGHTS.speed).toBe(1);
+    expect(rb.speed!.value).toBeCloseTo(-0.7, 12);
+    expect(rb.dynasty - without.dynasty).toBeCloseTo(-0.7, 12);
+    expect(rb.plus! - without.plus!).toBeCloseTo(-0.7, 12);
+    const doubled = scoreDynasty({ ...base, forty }, { ...DEFAULT_DYNASTY_WEIGHTS, speed: 2 });
+    expect(doubled.dynasty - without.dynasty).toBeCloseTo(-1.4, 12);
+    // A fast back gets nothing extra; no 40 and a WR's 40 count for nothing.
+    expect(scoreDynasty({ ...base, forty: { time: 4.35, source: "combine" } }, DEFAULT_DYNASTY_WEIGHTS).dynasty).toBeCloseTo(without.dynasty, 12);
+    expect(without.speed).toBeNull();
+    const wr = scoreDynasty({ ...base, pos: "WR", forty }, DEFAULT_DYNASTY_WEIGHTS);
+    expect(wr.speed).toBeNull();
+    expect(wr.dynasty).toBeCloseTo(scoreDynasty({ ...base, pos: "WR" }, DEFAULT_DYNASTY_WEIGHTS).dynasty, 12);
   });
 
   it("adds a QB's rushing bonus at the Rushing slider's weight, into Dynasty and so Dynasty+, and only for a QB (2026-11-10)", () => {

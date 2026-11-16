@@ -5,6 +5,7 @@ import { logger } from "../../../../lib/logger";
 import { BASE_YEAR } from "../../../../lib/helpers/season";
 import type { Prospect, ScoutingGame } from "../../../../lib/types";
 import { preGradeIsMirrored } from "../../../../lib/scouting/preGradeMirror";
+import { FORTY_WEIGHT_MAX, FORTY_WEIGHT_MIN } from "../../../../lib/scouting/speedFloor";
 import { useDeferredDataChanged } from "./useDeferredDataChanged";
 
 const log = logger("scouting/shared/useChartingState");
@@ -62,6 +63,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
       name: prospect.name,
       school: prospect.school,
       height: prospect.height, weight: prospect.weight, birthday: prospect.birthday,
+      forty_time: prospect.forty_time ?? null, forty_source: prospect.forty_source ?? null, forty_weight: prospect.forty_weight ?? null,
       draft_class_year: prospect.draft_class_year, personal_rank: prospect.personal_rank,
       should_play: prospect.should_play, will_play_pre: prospect.will_play_pre,
       will_play_post: prospect.will_play_post, charting_decision: prospect.charting_decision,
@@ -70,6 +72,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
       pre_draft_grade: prospect.pre_draft_grade, post_draft_grade: prospect.post_draft_grade,
     });
   }, [loadGames, prospect.id, prospect.name, prospect.school, prospect.height, prospect.weight, prospect.birthday,
+    prospect.forty_time, prospect.forty_source, prospect.forty_weight,
     prospect.draft_class_year, prospect.personal_rank,
     prospect.should_play, prospect.will_play_pre, prospect.will_play_post,
     prospect.charting_decision, prospect.charting_notes,
@@ -149,20 +152,46 @@ export function useChartingState(prospect: Prospect, options: Options) {
     setGameError(null);
     // A Pre grade that mirrors the Dynasty Score is the Big Board's to write:
     // left out, so a Bio save can't put back an older value.
-    const fields: Partial<Prospect> = { ...bio };
+    // The 40 (migration 099) goes in its own request, and only when it changed,
+    // so a database without 099 can't fail the rest of the bio.
+    const { forty_time, forty_source, forty_weight, ...fields } = bio;
+    const time = forty_time ?? null;
+    const source = time == null ? null : forty_source ?? "combine";
+    const weighIn = time == null ? null : forty_weight ?? null;
+    if (weighIn != null && (weighIn < FORTY_WEIGHT_MIN || weighIn > FORTY_WEIGHT_MAX)) {
+      setSavingBio(false);
+      setGameError(`Weighed must be ${FORTY_WEIGHT_MIN}–${FORTY_WEIGHT_MAX} lbs, or blank for his bio weight.`);
+      return;
+    }
     if (preGradeIsMirrored(prospect, new Date())) delete fields.pre_draft_grade;
     const { error } = await supabase
       .from("prospects")
       .update({ ...fields, updated_at: new Date().toISOString() })
       .eq("id", prospect.id);
-    setSavingBio(false);
     if (error) {
       // Keep the edit form open so the user's unsaved changes aren't lost and
       // they can see it didn't save, rather than silently closing on failure.
+      setSavingBio(false);
       log.error("prospects bio update failed", { err: error.message });
       setGameError("Couldn't save changes — please try again.");
       return;
     }
+    const stored = prospect.forty_time ?? null;
+    const changed = time !== stored
+      || source !== (stored == null ? null : prospect.forty_source ?? "combine")
+      || weighIn !== (stored == null ? null : prospect.forty_weight ?? null);
+    if (changed) {
+      const { error: fortyErr } = await supabase
+        .from("prospects").update({ forty_time: time, forty_source: source, forty_weight: weighIn }).eq("id", prospect.id);
+      if (fortyErr) {
+        setSavingBio(false);
+        log.error("prospects 40 time update failed", { err: fortyErr.message });
+        setGameError("Saved, except the 40 time (is migration 099 applied?) — please try again.");
+        markDataDirty();
+        return;
+      }
+    }
+    setSavingBio(false);
     setEditBio(false);
     markDataDirty();
   }

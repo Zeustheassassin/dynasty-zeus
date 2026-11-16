@@ -2,16 +2,19 @@
 // true-talent SDs; aeComposite.ts) plus what a dynasty manager adds on top.
 //
 //   Dynasty Score      = AE Score + age weight × career window + size weight × size flags
+//                        + speed weight × an RB's speed floor (speedFloor.ts)
+//                        + rushing weight × a QB's rushing bonus (qbRushing.ts)
 //   Dynasty Score Plus = Dynasty Score + draft weight × draft capital (once a round is set)
 //                        + landing weight × (rookie competition + vets ahead + path by year 2)
 //                        + role weight × role standing
 //                        + offense weight × (QB + pass/run offense)
 //                          (the landing spot, 2027 classes on)
 //
-// The weights are the Big Board sliders (age 1, size 1, draft 2, landing 1, role 1, offense 1 by default). The pieces below are
-// from published research, not fit on the user's charting: there are no NFL
-// outcomes for these prospects to fit against. Each is scaled to sit
-// alongside an AE Score that runs about ±1.5.
+// The weights are the Big Board sliders (age 1, size 1, speed 1, rushing 1, draft 2, landing 1, role 1, offense 1 by default). The pieces below are
+// from published research (the speed floor from past combine classes' NFL
+// results), not fit on the user's charting: there are no NFL outcomes for
+// these prospects to fit against. Each is scaled to sit alongside an AE Score
+// that runs about ±1.5.
 //
 // Age is counted once, as career window. The "older players' college numbers
 // are inflated" effect is real for volume stats (breakout age), but checked
@@ -22,6 +25,7 @@
 import { UNDRAFTED_ROUND } from "../draftRound";
 import type { CompositePos } from "./aeComposite";
 import type { RoleStanding } from "./roleStanding";
+import { speedFlag, type FortyRun, type SpeedFlag } from "./speedFloor";
 import type { TeamLanding } from "./teamLanding";
 
 // ── Career window ──────────────────────────────────────────────────────────
@@ -67,8 +71,8 @@ export function careerWindowAdjustment(pos: CompositePos, rookieAge: number): nu
 // with carries and TDs (NBC Sports, RBs since 2000). A 103-RB study found no
 // size difference between durable and non-durable backs (PMC5405788). WR size
 // showed no significant effect on fantasy output across 360+ NFL seasons
-// (Reception Perception, 2014-21). Speed for a given weight (Speed Score) would
-// matter more, but there are no 40 times.
+// (Reception Perception, 2014-21). Speed for a given weight (Speed Score) is
+// its own piece, an RB floor behind the Speed slider (speedFloor.ts).
 export interface FrameNorm { lbPerIn: number; sd: number; heightIn: number }
 export const FRAME_NORMS: Partial<Record<CompositePos, FrameNorm>> = {
   RB: { lbPerIn: 2.97, sd: 0.135, heightIn: 71 }, // ~210 lb at 5'11"
@@ -285,7 +289,7 @@ export interface LandingBreakdown {
 }
 
 // ── Weights (the Big Board sliders) ────────────────────────────────────────
-export interface DynastyWeights { age: number; size: number; draft: number; landing: number; role: number; offense: number; rushing: number }
+export interface DynastyWeights { age: number; size: number; speed: number; draft: number; landing: number; role: number; offense: number; rushing: number }
 // Draft defaults to 2 (the user's call, 2026-10-01): at 2× a 1st-rounder gets
 // +2.0 and an undrafted rookie −2.0, so draft capital, the strongest single
 // predictor of a fantasy hit, carries more than the AE Score's ±1.5 spread.
@@ -295,7 +299,9 @@ export interface DynastyWeights { age: number; size: number; draft: number; land
 // re-reads the skill the AE Score already counts.
 // Offense defaults to 1: his QB and the pass/run lean reach ±0.3 together.
 // Rushing defaults to 1: a QB's rushing bonus reaches +0.3, gated by his passing (qbRushing.ts).
-export const DEFAULT_DYNASTY_WEIGHTS: DynastyWeights = { age: 1, size: 1, draft: 2, landing: 1, role: 1, offense: 1, rushing: 1 };
+// Speed defaults to 1: an RB under the Speed Score floor loses up to 0.7, about
+// a round of draft capital at the Draft slider's 2× (speedFloor.ts).
+export const DEFAULT_DYNASTY_WEIGHTS: DynastyWeights = { age: 1, size: 1, speed: 1, draft: 2, landing: 1, role: 1, offense: 1, rushing: 1 };
 export const WEIGHT_MIN = 0;
 export const WEIGHT_MAX = 3;
 export const WEIGHT_STEP = 0.25;
@@ -307,6 +313,8 @@ export interface DynastyInputs {
   rookieAge: { years: number; estimated: boolean } | null;
   heightIn: number | null;
   weightLb: number | null;
+  /** His 40, where he ran it and his weigh-in there; null or absent without one. Only an RB's counts (speedFloor.ts). */
+  forty?: FortyRun | null;
   /** 1–7, UNDRAFTED_ROUND, or null before the draft. */
   draftRound: number | null;
   /** Overall pick (1 = first), or null when only the round is known. */
@@ -323,6 +331,8 @@ export interface DynastyBreakdown {
   /** Career-window share before the age weight; null when the age is unknown. */
   window: number | null;
   flags: SizeFlag[];
+  /** An RB's speed floor before the Speed slider; null off RB or without a 40. */
+  speed: SpeedFlag | null;
   /** A QB's rushing bonus before the Rushing slider; null without one. */
   rushing: { value: number; label: string } | null;
   dynasty: number;
@@ -338,8 +348,10 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
   const window = inp.rookieAge ? careerWindowAdjustment(inp.pos, inp.rookieAge.years) : null;
   const flags = sizeFlags(inp.pos, inp.heightIn, inp.weightLb);
   const size = flags.reduce((s, f) => s + f.value, 0);
+  const speed = speedFlag(inp.pos, inp.forty, inp.weightLb);
   const rushing = inp.pos === "QB" ? inp.rushing ?? null : null;
-  const dynasty = inp.aeScore + w.age * (window ?? 0) + w.size * size + (w.rushing ?? 0) * (rushing?.value ?? 0);
+  const dynasty = inp.aeScore + w.age * (window ?? 0) + w.size * size + (w.speed ?? 0) * (speed?.value ?? 0)
+    + (w.rushing ?? 0) * (rushing?.value ?? 0);
   const draftCapital = draftCapitalAt(inp.draftRound, inp.draftPick, inp.pos);
   let landing: LandingBreakdown | null = null;
   if (inp.landing && draftCapital != null) {
@@ -354,6 +366,7 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
     rookieAge: inp.rookieAge,
     window,
     flags,
+    speed,
     rushing,
     dynasty,
     draftCapital,

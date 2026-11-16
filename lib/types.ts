@@ -1122,6 +1122,9 @@ export type FocusTag = "focus_now" | "monitor" | "low_priority" | "off_board";
 export type RouteType =
   | "nine" | "post" | "dig" | "curl" | "slant" | "screen"
   | "flat" | "comeback" | "out" | "corner" | "other";
+/** Where a 40 was run (migration 099): the combine's laser timing, or a hand-timed pro day. */
+export type FortySource = "combine" | "pro_day";
+
 export type Alignment = "left" | "right" | "slot" | "backfield";
 export type CoverageType = "man" | "zone" | "double" | "press" | "";
 /** Per-play tag (migration 062): beat press at the release or not. */
@@ -1142,6 +1145,13 @@ export interface Prospect {
   eligible_thru_year?: number | null;
   height: string;
   weight: number | null;
+  /** 40-yard dash in seconds, where he ran it, and what he weighed in at
+   *  there (migration 099; lib/scouting/speedFloor.ts: an RB's Speed Score
+   *  floor in the Dynasty Score; no weigh-in = his bio weight). Optional:
+   *  absent before the migration, and never sent on insert. Null = none. */
+  forty_time?: number | null;
+  forty_source?: FortySource | null;
+  forty_weight?: number | null;
   birthday: string | null;
   personal_rank: number | null;
   overall_rank: number | null;
