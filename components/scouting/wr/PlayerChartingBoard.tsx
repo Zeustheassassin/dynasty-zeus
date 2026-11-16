@@ -50,6 +50,8 @@ const ALIGNMENTS: { key: Alignment; label: string }[] = [
 
 interface Props {
   prospect: Prospect;
+  /** Open on Chart Game with this game picked (Scouting → Unwatched); omitted = Overview. */
+  initialGameId?: string | null;
   onBack: () => void;
   onDataChanged: () => void;
   /** ScoutingHub's data for the Overview page (scores, percentiles). */
@@ -60,7 +62,7 @@ interface Props {
   wrModel: WRDifficultyModel;
 }
 
-export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, overviewData, allProspects, wrModel }: Props) {
+export default function PlayerChartingBoard({ prospect, initialGameId, onBack, onDataChanged, overviewData, allProspects, wrModel }: Props) {
   const [plays, setPlays] = useState<RoutePlay[]>([]);
 
   // Import panel state
@@ -100,6 +102,7 @@ export default function PlayerChartingBoard({ prospect, onBack, onDataChanged, o
 
   const cs = useChartingState(prospect, {
     onDataChanged,
+    initialGameId,
     onDeleteGamePlays: (id) => setPlays((p) => p.filter((pl) => pl.game_id !== id)),
   });
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,

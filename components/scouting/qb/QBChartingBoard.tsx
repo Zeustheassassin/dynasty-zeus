@@ -64,6 +64,8 @@ const QB_CONFIG: ChartingBoardConfig = {
 
 interface Props {
   prospect: Prospect;
+  /** Open on Chart Game with this game picked (Scouting → Unwatched); omitted = Overview. */
+  initialGameId?: string | null;
   onBack: () => void;
   onDataChanged: () => void;
   /** ScoutingHub's data for the Overview page (scores, percentiles). */
@@ -83,7 +85,7 @@ const DEPTH_SHORT: Record<QBDepthZone, string>   = {
   short_left:"SL", short_center:"SC", short_right:"SR",
 };
 
-export default function QBChartingBoard({ prospect, onBack, onDataChanged, overviewData, allProspects, allGames }: Props) {
+export default function QBChartingBoard({ prospect, initialGameId, onBack, onDataChanged, overviewData, allProspects, allGames }: Props) {
   // Position-specific play state
   const [plays, setPlays]                   = useState<QBPlay[]>([]);
   // League-wide QB plays (across all charted prospects) — used to build the
@@ -120,6 +122,7 @@ export default function QBChartingBoard({ prospect, onBack, onDataChanged, overv
   // Shared state via hook
   const cs = useChartingState(prospect, {
     onDataChanged,
+    initialGameId,
     onDeleteGamePlays: (id) => setPlays((p) => p.filter((pl) => pl.game_id !== id)),
   });
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,

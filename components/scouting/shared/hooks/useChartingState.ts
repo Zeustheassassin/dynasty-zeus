@@ -24,16 +24,21 @@ interface Options {
    * stable reference (module constant). Default: overview + breakdown.
    */
   freshDataTabs?: readonly string[];
+  /**
+   * Open on Chart Game with this game picked (Scouting → Unwatched). Read once,
+   * at mount; a game that isn't his (deleted since) falls back to his first.
+   */
+  initialGameId?: string | null;
 }
 
 export function useChartingState(prospect: Prospect, options: Options) {
-  const { onDataChanged, onDeleteGamePlays, freshDataTabs = DEFAULT_FRESH_DATA_TABS } = options;
+  const { onDataChanged, onDeleteGamePlays, freshDataTabs = DEFAULT_FRESH_DATA_TABS, initialGameId } = options;
 
-  const [tab, setTab]                         = useState<string>("overview");
+  const [tab, setTab]                         = useState<string>(initialGameId ? "chart" : "overview");
   // Deferred hub reload (see useDeferredDataChanged): every write below calls markDataDirty().
   const { markDirty: markDataDirty }          = useDeferredDataChanged(onDataChanged, tab, freshDataTabs);
   const [games, setGames]                     = useState<ScoutingGame[]>([]);
-  const [selectedGameId, setSelectedGameId]   = useState<string | null>(null);
+  const [selectedGameId, setSelectedGameId]   = useState<string | null>(initialGameId ?? null);
   const [loading, setLoading]                 = useState(true);
   const [showAddGame, setShowAddGame]         = useState(false);
   const [newGame, setNewGame]                 = useState({ year: BASE_YEAR, opponent: "", type: "regular" });
@@ -80,8 +85,11 @@ export function useChartingState(prospect: Prospect, options: Options) {
     prospect.pre_draft_grade, prospect.post_draft_grade]);
 
   useEffect(() => {
+    if (games.length === 0) return;
+    // No game picked yet, or the picked one isn't among his (an Unwatched link to
+    // a game deleted since): his first game.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (!selectedGameId && games.length > 0) setSelectedGameId(games[0].id);
+    if (!selectedGameId || !games.some((g) => g.id === selectedGameId)) setSelectedGameId(games[0].id);
   }, [games, selectedGameId]);
 
   async function addGame() {

@@ -38,6 +38,8 @@ export interface QBHubProps {
   draftYearFilter: number | null;
   setDraftYearFilter: (y: number | null) => void;
   navigateToProspect?: Prospect | null;
+  /** With navigateToProspect: open his board on Chart Game with this game picked (Unwatched tab). */
+  navigateToGameId?: string | null;
   onNavigated?: () => void;
   /** ScoutingHub's data for the board's Overview page (scores, percentiles). */
   overviewData: OverviewData;
@@ -56,6 +58,7 @@ export default function QBHub({
   draftYearFilter,
   setDraftYearFilter,
   navigateToProspect,
+  navigateToGameId,
   onNavigated,
   overviewData,
   games,
@@ -63,13 +66,18 @@ export default function QBHub({
 }: QBHubProps) {
   const { matchProspect } = useRecruitIndex();
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
+  // The game his board opens on (Unwatched tab); null = the board's usual start.
+  const [startGameId, setStartGameId] = useState<string | null>(null);
 
   useEffect(() => {
     if (navigateToProspect) {
-      startTransition(() => { setSelectedProspect(navigateToProspect); });
+      startTransition(() => {
+        setSelectedProspect(navigateToProspect);
+        setStartGameId(navigateToGameId ?? null);
+      });
       onNavigated?.();
     }
-  }, [navigateToProspect, onNavigated]);
+  }, [navigateToProspect, navigateToGameId, onNavigated]);
   const [hubView, setHubView]   = useState<HubView>("list");
   const [sortKey, setSortKey]   = useState<SortKey>("personal_rank");
   const [sortDir, setSortDir]   = useState<"asc" | "desc">("asc");
@@ -152,7 +160,8 @@ export default function QBHub({
     return (
       <QBChartingBoard
         prospect={selectedProspect}
-        onBack={() => setSelectedProspect(null)} // the board reloads the hub on unmount if it wrote anything
+        initialGameId={startGameId}
+        onBack={() => { setSelectedProspect(null); setStartGameId(null); }} // the board reloads the hub on unmount if it wrote anything
         onDataChanged={onDataChanged}
         overviewData={overviewData}
         allProspects={qbProspects}

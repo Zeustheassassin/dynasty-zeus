@@ -38,6 +38,7 @@ import { useDraftPicks } from "./scouting/shared/hooks/useDraftPicks";
 import type { DraftResultUpdate } from "../lib/nflDraft";
 import type { LandingSaved } from "../lib/scouting/teamLanding";
 import type { RankUpdate } from "../lib/scouting/realignRanks";
+import { countUnwatched, tapeSourceSuggestions, unwatchedByProspect } from "../lib/scouting/unwatchedGames";
 
 const log = logger("ScoutingHub");
 
@@ -170,9 +171,28 @@ async function fetchGameAlignment(): Promise<ProspectGameAlignmentRow[]> {
   }
 }
 
-// A per-game view (migration 064: prospect_game_route_counts /
-// prospect_game_route_tag_cells), paged. Throws on error, which includes the
-// view not existing.
+// Every logged game, paged: PostgREST returns at most 1000 rows a request, and
+// games are logged at ~50 a week (799 on 2026-11-16). Newest season first, as
+// before, with id breaking ties so pages never overlap or skip. Throws on error.
+async function fetchAllGames(): Promise<ScoutingGame[]> {
+  const PAGE = 1000;
+  const all: ScoutingGame[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("scouting_games")
+      .select("*")
+      .order("season_year", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    all.push(...((data ?? []) as ScoutingGame[]));
+    if (!data || data.length < PAGE) return all;
+  }
+}
+
+// A per-game view (migration 022: prospect_game_snap_stats; 064:
+// prospect_game_route_counts / prospect_game_route_tag_cells), paged. Throws on
+// error, which includes the view not existing.
 async function fetchGameView<T>(view: string, select: string): Promise<T[]> {
   const PAGE = 1000;
   const all: T[] = [];
@@ -207,8 +227,9 @@ const CompareProspectsTab = dynamic(() => import("./scouting/stats/CompareProspe
 const RecruitsTab = dynamic(() => import("./scouting/RecruitsTab"), { ssr: false });
 const RecruitStatsTab = dynamic(() => import("./scouting/RecruitStatsTab"), { ssr: false });
 const PffLinksTab = dynamic(() => import("./scouting/pff/PffLinksTab"), { ssr: false });
+const UnwatchedTab = dynamic(() => import("./scouting/UnwatchedTab"), { ssr: false });
 
-type HubTab = "prospects" | "big_board" | "games_log" | "analysis" | "compare" | "recruits" | "recruit_stats" | "pff_links";
+type HubTab = "prospects" | "big_board" | "games_log" | "analysis" | "compare" | "recruits" | "recruit_stats" | "pff_links" | "unwatched";
 type PositionTab = "WR" | "RB" | "QB" | "TE";
 
 const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
@@ -223,12 +244,21 @@ export default function ScoutingHub() {
   const [tab, setTab] = useState<HubTab>("prospects");
   const [positionTab, setPositionTab] = useState<PositionTab>("WR");
   const [pendingProspect, setPendingProspect] = useState<Prospect | null>(null);
+  // With pendingProspect: open his board on Chart Game with this game picked (Unwatched tab).
+  const [pendingGameId, setPendingGameId] = useState<string | null>(null);
   const [prospects, setProspects] = useState<Prospect[]>([]);
   // Stored NFL draft results (migration 090) for Dynasty+ rookie competition.
   const { picks: draftPicks, reload: reloadDraftPicks } = useDraftPicks();
   const [games, setGames] = useState<ScoutingGame[]>([]);
   const [routeStatsRows, setRouteStatsRows] = useState<ProspectRouteStatsRow[]>([]);
   const [gameSnapStatsRows, setGameSnapStatsRows] = useState<GameSnapStatsRow[]>([]);
+  // The games or their play counts didn't load: the Unwatched tab says so
+  // rather than calling every game unwatched (or none).
+  const [unwatchedLoadFailed, setUnwatchedLoadFailed] = useState(false);
+  // Tape sources saved this session (Unwatched tab, migration 101), over the
+  // loaded games' own. Kept apart from `games` so a save doesn't recompute
+  // everything built from the games; a newer save is always the latest value.
+  const [tapeEdits, setTapeEdits] = useState<ReadonlyMap<string, string | null>>(new Map());
   const [posSnapsRows, setPosSnapsRows] = useState<PosSnapsRow[]>([]);
   const [qbThrowsByProspect, setQbThrowsByProspect] = useState<Map<string, number>>(new Map());
   const [teRoutesByProspect, setTeRoutesByProspect] = useState<Map<string, number>>(new Map());
@@ -307,7 +337,10 @@ export default function ScoutingHub() {
         { rows: contextRows, error: contextErr },
       ] = await Promise.all([
         supabase.from("prospects").select("*").order("personal_rank", { ascending: true, nullsFirst: false }),
-        supabase.from("scouting_games").select("*").order("season_year", { ascending: false }),
+        fetchAllGames().then(
+          (rows) => ({ data: rows, error: null }),
+          (error: { message?: string; code?: string; details?: string; hint?: string }) => ({ data: null, error }),
+        ),
         supabase.from("prospect_route_stats").select("*"),
         // WR SAE / cSAE, per game (migration 058). Its own query, so a failure only
         // blanks SAE / cSAE instead of failing prospect_route_stats too.
@@ -321,7 +354,12 @@ export default function ScoutingHub() {
           (rows) => ({ rows, error: null }),
           (error: { message?: string; code?: string }) => ({ rows: [] as ProspectGameAlignmentRow[], error }),
         ),
-        supabase.from("prospect_game_snap_stats").select("*"),
+        // Paged like the games (one row per logged game), so the Unwatched tab
+        // never mistakes a game past the first 1000 for one with no plays.
+        fetchGameView<GameSnapStatsRow>("prospect_game_snap_stats", "game_id,prospect_id,snaps_charted").then(
+          (rows) => ({ data: rows, error: null }),
+          (error: { message?: string; code?: string; details?: string; hint?: string }) => ({ data: null, error }),
+        ),
         supabase.from("prospect_rb_stats").select("prospect_id,total_snaps,run_type_stats_raw"),
         supabase.from("prospect_qb_stats").select("prospect_id,total_snaps,total_throws,depth_zone_stats_raw"),
         supabase.from("prospect_te_stats").select("prospect_id,total_snaps,total_routes,coverage_stats_raw,block_stats_raw"),
@@ -385,7 +423,8 @@ export default function ScoutingHub() {
       setContextData(contextRows);
       setInputsComplete(!(pErr || gErr || rsErr || cellErr || alignErr || gssErr || rbStatsErr || qbStatsErr || teStatsErr
         || pffErr || countErr || tagCellErr || contextErr));
-      setGameSnapStatsRows((gssData ?? []) as GameSnapStatsRow[]);
+      setGameSnapStatsRows(gssData ?? []);
+      setUnwatchedLoadFailed(Boolean(gErr || gssErr));
       const rbRows = (rbStatsData ?? []) as RbRunTypeRow[];
       const qbRows = (qbStatsData ?? []) as QbThresholdRow[];
       const teRows = (teStatsData ?? []) as TeThresholdRow[];
@@ -726,7 +765,47 @@ export default function ScoutingHub() {
     { key: "recruits",  label: "Recruits" },
     { key: "recruit_stats", label: "Recruit Statistics" },
     { key: "pff_links", label: "PFF Links" },
+    { key: "unwatched", label: "Unwatched" },
   ];
+
+  // Logged games with no charted plays (Unwatched tab, and the count on its tab).
+  const unwatchedGroups = useMemo(
+    () => unwatchedByProspect(games, gameSnapStatsRows, prospects),
+    [games, gameSnapStatsRows, prospects],
+  );
+  const unwatchedCount = unwatchedLoadFailed ? 0 : countUnwatched(unwatchedGroups);
+  const classYears = useMemo(
+    () => [...new Set(prospects.map((p) => p.draft_class_year))].sort((a, b) => a - b),
+    [prospects],
+  );
+
+  // Unwatched tab → his board, on Chart Game with that game picked.
+  const openGame = useCallback((p: Prospect, gameId: string) => {
+    setPendingProspect(p);
+    setPendingGameId(gameId);
+    setPositionTab(p.position as PositionTab);
+    setTab("prospects");
+  }, []);
+  const onNavigated = useCallback(() => {
+    setPendingProspect(null);
+    setPendingGameId(null);
+  }, []);
+
+  // Where each game's tape is (Unwatched tab).
+  const tapeSourceOf = useCallback(
+    (g: ScoutingGame) => (tapeEdits.has(g.id) ? tapeEdits.get(g.id)! : g.tape_source ?? null),
+    [tapeEdits],
+  );
+  const tapeSuggestions = useMemo(() => tapeSourceSuggestions(games.map(tapeSourceOf)), [games, tapeSourceOf]);
+  const saveTapeSource = useCallback(async (gameId: string, source: string | null): Promise<string | null> => {
+    const { error } = await supabase.from("scouting_games").update({ tape_source: source }).eq("id", gameId);
+    if (error) {
+      log.error("save tape source (needs migration 101)", { msg: error.message, code: error.code });
+      return "Couldn't save (is migration 101 applied?)";
+    }
+    setTapeEdits((prev) => new Map(prev).set(gameId, source));
+    return null;
+  }, []);
 
   const positionTabs: PositionTab[] = ["QB", "RB", "WR", "TE"];
 
@@ -782,7 +861,8 @@ export default function ScoutingHub() {
     draftYearFilter,
     setDraftYearFilter,
     navigateToProspect: pendingProspect,
-    onNavigated: () => setPendingProspect(null),
+    navigateToGameId: pendingGameId,
+    onNavigated,
     // League-wide (all charted prospects at that position) data — used by the
     // "Charts" tab's percentile-tiered radar (H1). WRHub ignores these extra
     // props since route_stats already lives on prospectsWithStats.
@@ -846,6 +926,14 @@ export default function ScoutingHub() {
                   }`}
                 >
                   {t.label}
+                  {t.key === "unwatched" && unwatchedCount > 0 && (
+                    <span
+                      className="ml-1.5 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[11px] font-semibold text-amber-300"
+                      title={`${unwatchedCount} logged ${unwatchedCount === 1 ? "game has" : "games have"} no charted plays`}
+                    >
+                      {unwatchedCount}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -977,6 +1065,21 @@ export default function ScoutingHub() {
 
         {tab === "pff_links" && (
           <PffLinksTab onStatsChanged={reloadHub} />
+        )}
+
+        {tab === "unwatched" && (
+          <UnwatchedTab
+            groups={unwatchedGroups}
+            years={classYears}
+            loading={loading}
+            failed={unwatchedLoadFailed}
+            draftYearFilter={draftYearFilter}
+            setDraftYearFilter={setDraftYearFilter}
+            onOpenGame={openGame}
+            tapeSourceOf={tapeSourceOf}
+            tapeSuggestions={tapeSuggestions}
+            onSaveTapeSource={saveTapeSource}
+          />
         )}
       </div>
     </div>

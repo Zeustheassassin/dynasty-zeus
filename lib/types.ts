@@ -1236,6 +1236,9 @@ export interface ScoutingGame {
   /** Per-game trait grades, 1–10 per trait key (migration 065). Unread since the user removed
    *  trait grades on 2026-11-09; the saved grades stay in the column. */
   trait_grades?: Record<string, number> | null;
+  /** Where the tape of this game is, e.g. "Dynasty Nerds" or a link (migration 101; Scouting →
+   *  Unwatched). Optional: absent before the migration. */
+  tape_source?: string | null;
 }
 
 // PFF match states (migration 062). auto = linked by the matcher, confirmed =

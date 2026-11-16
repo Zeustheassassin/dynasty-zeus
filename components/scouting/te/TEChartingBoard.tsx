@@ -68,6 +68,8 @@ const TE_CONFIG: ChartingBoardConfig = {
 
 interface Props {
   prospect: Prospect;
+  /** Open on Chart Game with this game picked (Scouting → Unwatched); omitted = Overview. */
+  initialGameId?: string | null;
   onBack: () => void;
   onDataChanged: () => void;
   /** ScoutingHub's data for the Overview page (scores, percentiles). */
@@ -77,7 +79,7 @@ interface Props {
   leaguePlays: TEPlay[];
 }
 
-export default function TEChartingBoard({ prospect, onBack, onDataChanged, overviewData, allProspects, allGames, leaguePlays }: Props) {
+export default function TEChartingBoard({ prospect, initialGameId, onBack, onDataChanged, overviewData, allProspects, allGames, leaguePlays }: Props) {
   const [plays, setPlays] = useState<TEPlay[]>([]);
 
   // Play logger form state. Location and positioning: where he lines up most (`usual`, below)
@@ -105,6 +107,7 @@ export default function TEChartingBoard({ prospect, onBack, onDataChanged, overv
 
   const cs = useChartingState(prospect, {
     onDataChanged,
+    initialGameId,
     onDeleteGamePlays: (id) => setPlays((p) => p.filter((pl) => pl.game_id !== id)),
   });
   const { tab, games, selectedGameId, loading, showAddGame, newGame, savingGame, gameError,
