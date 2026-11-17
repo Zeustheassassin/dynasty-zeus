@@ -146,14 +146,14 @@ function GameButton({ game, onClick }: { game: ScoutingGame; onClick: () => void
   return (
     <button
       onClick={onClick}
-      title="Open on Chart Game"
-      className="flex items-baseline gap-1.5 rounded border border-amber-800/60 bg-amber-950/20 px-2 py-1 text-xs text-amber-200 transition hover:border-amber-500 hover:text-white"
+      title="Open his board on Chart Game, with this game picked"
+      className="group flex items-baseline gap-1.5 rounded border border-amber-800/60 bg-amber-950/20 px-2 py-1 text-xs text-amber-200 transition hover:border-amber-500 hover:text-white"
     >
       <span className="text-amber-400/80">{game.season_year}</span>
       <span className="font-medium">{game.opponent || "Unknown opponent"}</span>
       {type && <span className="text-[11px] text-amber-400/80">{type}</span>}
       {logged && <span className="text-[11px] text-slate-500">logged {logged}</span>}
-      <span aria-hidden="true" className="text-slate-500">→</span>
+      <span className="ml-1 rounded bg-blue-600/80 px-1.5 text-[11px] font-semibold text-white group-hover:bg-blue-500">Chart →</span>
     </button>
   );
 }
