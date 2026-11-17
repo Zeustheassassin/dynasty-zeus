@@ -28,7 +28,7 @@ import type { OpponentTier } from "./opponentTier";
 import { applyOpponentStrength, type OpponentAdjusted } from "./opponentAdjust";
 import { activeLock, classDraftedBy } from "./scoreLock";
 import { alignmentPenalty } from "./alignmentPenalty";
-import { middleAdjustment, type MiddleUsage } from "./middleUsage";
+import { chartedSeasonRows, middleAdjustment, type MiddleUsage } from "./middleUsage";
 import type { RushingBonus } from "./qbRushing";
 import { buildWRGameSplits, buildWRTierSplits, type ProspectGameRouteCellsRow } from "./aggregateMerge";
 import type { ContextCovariates, GameContext } from "./gameContext";
@@ -142,6 +142,8 @@ export function computeAEScores(
       wrRouteCounts: gradingData.routeCounts,
       tagReps: tagStatReps({ games, qbPlays, rbPlays, tePlays, wrTagRows: gradingData.routeTagCells }),
       context: contextCov,
+      // QB TWP% over his full charted seasons, depth-adjusted (seasonTwp.ts).
+      pffSeasonRows: gradingData.pffSeasonDepth ? chartedSeasonRows(gradingData.pffSeasonDepth, games) : undefined,
     }).extra,
   };
   return {

@@ -38,6 +38,7 @@ import { buildComponents, type GradingData } from "./aeComponents";
 import { tagStatReps } from "./tagStats";
 import { learnOpponents, tierGames } from "./opponentTier";
 import { gameCovariates, resolveGameContexts } from "./gameContext";
+import { chartedSeasonRows } from "./middleUsage";
 import type { CountStatResult } from "./countComponents";
 
 export interface ModelCheck {
@@ -176,6 +177,8 @@ export function buildGradingReport(inp: GradingInputs): GradingReport {
     qbPlays: inp.qbPlays, rbPlays: inp.rbPlays,
     pffGameRows: inp.gradingData.pffGameRows, wrRouteCounts: inp.gradingData.routeCounts,
     tagReps: tagStatReps({ games: inp.games, qbPlays: inp.qbPlays, rbPlays: inp.rbPlays, tePlays: inp.tePlays, wrTagRows: inp.gradingData.routeTagCells }),
+    // Same full-season TWP% the AE Score reads (seasonTwp.ts).
+    pffSeasonRows: inp.gradingData.pffSeasonDepth ? chartedSeasonRows(inp.gradingData.pffSeasonDepth, inp.games) : undefined,
   });
   const none = new Map();
   const composite = buildAEComposite({ qb: none, rb: none, wr: none, wrCore: none, teRoute: none, teBlock: none, extra: built.extra });

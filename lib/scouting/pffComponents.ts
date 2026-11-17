@@ -94,7 +94,7 @@ export const PFF_COMPONENTS: readonly PffStatDef[] = [
     description: "Big-time throws per attempt (PFF): the hard, high-value throws, which on-target accuracy alone doesn't credit.",
     count: (r) => ratio(r.btt, r.all_attempts) },
   { key: "pff_twp", label: "TWP%", source: "pff", pos: "QB", dir: -1, scale: 100, unit: "dropbacks", floor: 50, suffix: "%",
-    description: "Turnover-worthy plays per dropback (PFF), lower is better: decision-making risk that accuracy doesn't see.",
+    description: "Turnover-worthy plays per dropback (PFF) over his full charted seasons, adjusted for how deep he throws (deep and intermediate throws are TWPs ~3× as often as short ones); lower is better: decision-making risk that accuracy doesn't see.",
     count: (r) => ratio(r.twp, r.all_dropbacks) },
   { key: "pff_qb_ypc", label: "Rush Y/C", source: "pff", pos: "QB", dir: 1, scale: 1, unit: "carries", floor: 15, suffix: " yds/carry",
     description: "Rushing yards per carry, designed runs and scrambles (PFF): what his legs add.",

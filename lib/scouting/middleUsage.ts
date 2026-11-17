@@ -44,6 +44,9 @@ export const SEASON_RAW_FIELDS: Readonly<Record<string, string>> = {
   dropbacks: "dropbacks", attempts: "attempts", ttt_total: "ttt_total_time", adot: "avg_depth_of_target",
   sacks: "sacks", pressures: "def_gen_pressures", scrambles: "scrambles",
   ...Object.fromEntries(DEPTH_ZONES.flatMap((z) => [[`aimed_${z}`, `${z}_aimed_passes`], [`acc_${z}`, `${z}_accuracy_percent`]])),
+  // Turnover-worthy plays, whole season and per depth band (seasonTwp.ts).
+  all_dropbacks: "all_dropbacks", twp: "turnover_worthy_plays",
+  ...Object.fromEntries(DEPTH_BANDS.flatMap((b) => [[`${b}_dropbacks`, `${b}_dropbacks`], [`${b}_twp_rate`, `${b}_twp_rate`]])),
 };
 
 // The same from `pocket` (migration 093, PFF's time-in-pocket report):

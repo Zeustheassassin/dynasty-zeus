@@ -19,6 +19,7 @@ import type { OpponentTier } from "./opponentTier";
 import type { ProspectGameRouteTagCellsRow } from "./aggregateMerge";
 import { EMPTY_CONTEXT_DATA, type ContextCovariates, type GameContextData } from "./gameContext";
 import type { PffSeasonDepthRow } from "./middleUsage";
+import { SEASON_PFF_KEYS, seasonTwpCounts } from "./seasonTwp";
 
 /** What the screens need beyond plays and games to build the components and
  *  tag stats: ScoutingHub's PFF game rows, the two migration-064 views and the
@@ -56,6 +57,10 @@ export interface ComponentInputs {
   context?: ContextCovariates;
   /** Keep every sample's per-game residuals (the Grading checks' context tests). */
   byGame?: boolean;
+  /** PFF full seasons, charted seasons only (chartedSeasonRows). Given, the
+   *  SEASON_PFF_KEYS components (QB TWP%) read them, depth-adjusted
+   *  (seasonTwp.ts), instead of the charted games. */
+  pffSeasonRows?: readonly PffSeasonDepthRow[];
 }
 
 // The floor on each component's true spread, as a share of its observed
@@ -119,7 +124,13 @@ export function buildComponents(inp: ComponentInputs): ComponentBuild {
   for (const def of CHARTED_COMPONENTS) {
     add(def, countStat(def, chartedGameCounts(def.key, { games: inp.games, qbPlays: inp.qbPlays, rbPlays: inp.rbPlays, wrRouteCounts: inp.wrRouteCounts }), inp.games, inp.tierByGame, { context: inp.context, byGame: inp.byGame }));
   }
+  const seasonTwp = inp.pffSeasonRows ? seasonTwpCounts(inp.pffSeasonRows, (id) => posOf.get(id) === "QB") : null;
   for (const def of PFF_COMPONENTS) {
+    if (seasonTwp && SEASON_PFF_KEYS.has(def.key)) {
+      // Whole seasons: no per-game opponent tier or context to take out.
+      add(def, countStat(def, seasonTwp.counts, seasonTwp.games));
+      continue;
+    }
     add(def, countStat(def, pffGameCounts(def, inp.games, inp.pffGameRows, (id) => posOf.get(id)), inp.games, inp.tierByGame, { context: inp.context, byGame: inp.byGame }));
   }
   for (const def of TAG_COMPONENTS) {
