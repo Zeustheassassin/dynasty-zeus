@@ -12,7 +12,26 @@ import type {
   QBPressure,
   QBPressureHandling,
   QBDepthZone,
+  QBIntType,
 } from "../../../lib/types";
+
+// Interception types: the board's INT Type buttons, the play list's short code
+// ("INT (BT)") and the Overview panel's counts, in this order. Records only (no
+// grade reads them). WR Error (2026-11-17): the receiver's mistake made the pick
+// (wrong route, fell down, let it through); a tipped ball he should have caught
+// stays Tipped Ball with its WR Fault call.
+export const INT_TYPES: { key: QBIntType; label: string; short: string }[] = [
+  { key: "bad_throw",    label: "Bad Throw",    short: "BT" },
+  { key: "bad_decision", label: "Bad Decision", short: "BD" },
+  { key: "fifty_fifty",  label: "50/50 Ball",   short: "50" },
+  { key: "tipped",       label: "Tipped Ball",  short: "TP" },
+  { key: "wr_error",     label: "WR Error",     short: "WR err" },
+];
+
+/** "BT" etc. for a pick's type; "" when it has none, or an unknown one. */
+export function intTypeShort(type: QBIntType | null | undefined): string {
+  return INT_TYPES.find((t) => t.key === type)?.short ?? "";
+}
 
 export const SNAP_POSITIONS: { key: QBSnapPosition; label: string }[] = [
   { key: "shotgun",      label: "Shotgun" },

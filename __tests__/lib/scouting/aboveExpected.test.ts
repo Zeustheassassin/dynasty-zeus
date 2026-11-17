@@ -316,6 +316,22 @@ describe("computeQBAboveExpected", () => {
     expect(out.get("unasked")!).toBe(out.get("notFault")!);
   });
 
+  it("graded throw value: a WR Error pick is graded on its accuracy, like any pick (2026-11-17)", () => {
+    const prospects = [prospect("wrErr", "QB"), prospect("badDec", "QB"), prospect("drop", "QB")];
+    const games = [game("g_w", "wrErr"), game("g_b", "badDec"), game("g_d", "drop")];
+    const sample = (g: string, two: Partial<QBPlay> & { accuracy: QBAccuracy }) => [
+      ...repeat(28, (i) => qbPlay(g, { accuracy: i % 4 ? "on_target" : "high", completion: i % 4 ? "caught" : "incomplete", depth_zone: "mid_center" })),
+      ...repeat(2, () => qbPlay(g, { depth_zone: "mid_center", ...two })),
+    ];
+    const out = computeQBAboveExpected(prospects, games, [
+      ...sample("g_w", { accuracy: "on_target", completion: "interception", int_type: "wr_error" }),
+      ...sample("g_b", { accuracy: "on_target", completion: "interception", int_type: "bad_decision" }),
+      ...sample("g_d", { accuracy: "on_target", completion: "incomplete" }),
+    ]);
+    expect(out.get("wrErr")!).toBe(out.get("badDec")!);
+    expect(out.get("wrErr")!).toBe(out.get("drop")!);
+  });
+
   it("league-wide AAE nets to 0 (play-weighted) even when QBs face different situations", () => {
     // The unpenalized intercept makes the league's expected sum equal its actual
     // sum — the QBStatsTable footer relies on this.

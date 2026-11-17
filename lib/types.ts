@@ -1369,7 +1369,10 @@ export type QBDepthZone    =
   | "short_left" | "short_center" | "short_right";
 
 export type QBCompletion = "caught" | "incomplete" | "interception";
-export type QBIntType    = "bad_throw" | "bad_decision" | "fifty_fifty" | "tipped";
+/** Why the pick happened. A record only: AAE grades every throw on its accuracy, and the
+ *  turnover is PFF's TWP% (aboveExpected.ts). `wr_error` added 2026-11-17 (no migration:
+ *  qb_plays.int_type is unconstrained text). Labels: qbConstants.ts INT_TYPES. */
+export type QBIntType    = "bad_throw" | "bad_decision" | "fifty_fifty" | "tipped" | "wr_error";
 export type QBTargetPos  = "rb" | "wr" | "te";
 export type QBPlatform   = "on_platform" | "off_platform" | "on_the_run";
 export type QBPlatformSide = "strong_side" | "cross_body";

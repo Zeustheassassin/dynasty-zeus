@@ -53,6 +53,8 @@ import {
   PRESSURES,
   PRESSURE_HANDLINGS,
   DEPTH_ROWS,
+  INT_TYPES,
+  intTypeShort,
   onTargetColor,
 } from "./qbConstants";
 
@@ -761,12 +763,7 @@ export default function QBChartingBoard({ prospect, initialGameId, onBack, onDat
                     <div className="mt-3">
                       <div className="text-xs text-slate-500 mb-2">INT Type</div>
                       <div className="flex gap-2 flex-wrap">
-                        {([
-                          { key: "bad_throw",    label: "Bad Throw" },
-                          { key: "bad_decision", label: "Bad Decision" },
-                          { key: "fifty_fifty",  label: "50/50 Ball" },
-                          { key: "tipped",       label: "Tipped Ball" },
-                        ] as { key: QBIntType; label: string }[]).map(({ key, label }) => (
+                        {INT_TYPES.map(({ key, label }) => (
                           <button
                             key={key}
                             onClick={() => { setIntType((t) => t === key ? null : key); setIntReceiverFault(false); }}
@@ -889,7 +886,7 @@ export default function QBChartingBoard({ prospect, initialGameId, onBack, onDat
                       {pl.completion === "incomplete"   && <span className="text-slate-400 font-bold">INC</span>}
                       {pl.completion === "interception" && (
                         <span className="text-red-400 font-bold">
-                          INT{pl.int_type ? ` (${pl.int_type === "bad_throw" ? "BT" : pl.int_type === "bad_decision" ? "BD" : pl.int_type === "fifty_fifty" ? "50" : "TP"})` : ""}
+                          INT{intTypeShort(pl.int_type) ? ` (${intTypeShort(pl.int_type)})` : ""}
                         </span>
                       )}
                       {pl.int_receiver_fault && (

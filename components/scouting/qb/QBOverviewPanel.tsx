@@ -25,6 +25,7 @@ import {
   PRESSURES,
   PRESSURE_HANDLINGS,
   DEPTH_ROWS,
+  INT_TYPES,
   onTargetColor,
   type PlatformBreakdownKey,
 } from "./qbConstants";
@@ -78,12 +79,9 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
     const intPlays      = thrownPlays.filter((p) => p.completion === "interception").length;
     const catchPct      = pct(caughtPlays, compTracked);
     const intPct        = pct(intPlays, compTracked);
-    const intTypeCounts: Record<QBIntType, number> = {
-      bad_throw: thrownPlays.filter((p) => p.int_type === "bad_throw").length,
-      bad_decision: thrownPlays.filter((p) => p.int_type === "bad_decision").length,
-      fifty_fifty: thrownPlays.filter((p) => p.int_type === "fifty_fifty").length,
-      tipped: thrownPlays.filter((p) => p.int_type === "tipped").length,
-    };
+    const intTypeCounts = Object.fromEntries(
+      INT_TYPES.map(({ key }) => [key, thrownPlays.filter((p) => p.int_type === key).length]),
+    ) as Record<QBIntType, number>;
     // Tipped picks charted as the receiver's fault (a record; no grade reads it).
     const intReceiverFault = thrownPlays.filter((p) => p.int_receiver_fault === true).length;
 
@@ -440,12 +438,7 @@ export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: 
               </div>
               {stats.intPlays > 0 && (
                 <div className="grid grid-cols-2 sm:flex gap-2">
-                  {([
-                    { key: "bad_throw",    label: "Bad Throw" },
-                    { key: "bad_decision", label: "Bad Decision" },
-                    { key: "fifty_fifty",  label: "50/50 Ball" },
-                    { key: "tipped",       label: "Tipped Ball" },
-                  ] as { key: QBIntType; label: string }[]).map(({ key, label }) => {
+                  {INT_TYPES.map(({ key, label }) => {
                     const n = stats.intTypeCounts[key];
                     return (
                       <div key={key} className="flex-1 p-2 bg-orange-900/20 border border-orange-800/30 rounded text-center">
