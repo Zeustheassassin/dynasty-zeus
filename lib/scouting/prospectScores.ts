@@ -216,8 +216,9 @@ const sgn = (v: number, dp: number) => `${v >= 0 ? "+" : ""}${v.toFixed(dp)}`;
  * An AE Score, piece by piece: each metric adds weight × z ÷ D, where D is
  * the summed weight of the position's ready AE metrics plus his per-player
  * components at weight × trust (buildPositionComposite). An additive piece
- * (fumbles) adds weight × z outright. A paired modifier (TE blocking through
- * field time) adds its contribution ÷ D. Then the WR alignment penalty and
+ * (fumbles) adds weight × z outright. Blocking through field time: TE's adds
+ * its contribution ÷ D (it stands in the average), RB's and WR's add theirs
+ * outright (on top, like an additive piece). Then the WR alignment penalty and
  * the position baseline. The adds sum to the score.
  */
 export function scorePieces(view: ScoreView, pc: PositionComposite): ScorePiece[] {
@@ -231,14 +232,14 @@ export function scorePieces(view: ScoreView, pc: PositionComposite): ScorePiece[
       : c.rawAe != null
         ? `${sgn(c.ae, 1)} on ${c.n} ${unit ?? "plays"} (${sgn(c.ae - c.rawAe, 1)} for opponents)`
         : `${sgn(c.ae, 1)} on ${c.n} ${unit ?? "plays"}`;
-    const weight = c.additive
-      ? `${c.weight}, added on top`
-      : c.perPlayer
-        ? `${c.weight} × ${Math.round(c.reliability * 100)}% = ${(c.effectiveWeight ?? 0).toFixed(2)}`
-        : c.contribution != null
-          ? `field time: ${c.via ?? "snaps"}`
+    const weight = c.contribution != null
+      ? `field time: ${c.via ?? "snaps"}${c.additive ? ", added on top" : ""}`
+      : c.additive
+        ? `${c.weight}, added on top`
+        : c.perPlayer
+          ? `${c.weight} × ${Math.round(c.reliability * 100)}% = ${(c.effectiveWeight ?? 0).toFixed(2)}`
           : `${c.weight}`;
-    const add = c.additive ? c.weight * c.z : d > 0 ? (c.contribution ?? c.weight * c.z) / d : 0;
+    const add = c.additive ? c.contribution ?? c.weight * c.z : d > 0 ? (c.contribution ?? c.weight * c.z) / d : 0;
     return { key: c.key, label: c.label, value, trust: c.reliability, weight, add };
   });
   if (view.alignment) pieces.push({ key: "alignment", label: "One-side alignment", value: view.alignment.label, trust: null, weight: null, add: view.alignment.value });

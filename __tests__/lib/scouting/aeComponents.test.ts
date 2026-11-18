@@ -105,10 +105,11 @@ describe("the component lists", () => {
     expect(PFF_COMPONENT_WEIGHTS).toEqual({
       pff_btt: 0.4, pff_twp: 0.4, pff_qb_ypc: 0.3, pff_qb_fum: 0.05,
       pff_rb_yco: 0.3, pff_rb_mtf: 0.3, pff_rb_10p: 0.2, pff_rb_15of10: 0.05, pff_rb_yprr: 0.2, pff_rb_fum: 0.2,
-      pff_wr_yprr: 0.5, pff_wr_yac: 0.2, pff_wr_cc: 0.1, pff_wr_mtf: 0.05, pff_wr_fum: 0,
+      pff_wr_yprr: 0.5, pff_wr_yac: 0.2, pff_wr_cc: 0.1, pff_wr_mtf: 0.05, pff_wr_fum: 0, pff_wr_rbg: 0,
       pff_te_yprr: 0.5, pff_te_cc: 0.1, pff_te_mtf: 0.05, pff_te_fum: 0,
     });
-    expect(CHARTED_COMPONENT_WEIGHTS.ch_rb_pb).toBe(0.15);
+    // RB pass protection counts through field time, not as a weighted share (2026-11-18).
+    expect(CHARTED_COMPONENT_WEIGHTS.ch_rb_pb).toBe(0);
     // QB reads and throw difficulty (the user's picks, 2026-11-10).
     expect(CHARTED_COMPONENT_WEIGHTS).toMatchObject({ ch_qb_p2s: 0.2, ch_qb_reads: 0.2, ch_qb_diff: 0.2 });
     expect(CHARTED_COMPONENTS.filter((d) => d.pos === "QB").map((d) => d.key)).toEqual(["ch_qb_p2s", "ch_qb_reads", "ch_qb_diff"]);
@@ -143,6 +144,19 @@ describe("per-game counts", () => {
     // A QB's scrambles are in both his dropbacks and his rush attempts: counted once.
     expect(count("pff_qb_fum", { fumbles: 2, all_dropbacks: 40, rush_att: 8, scrambles: 3 })).toEqual([{ prospectId: "R", gameId: "g1", num: 2, den: 45 }]);
     expect(count("pff_wr_fum", { fumbles: 0, receptions: 6 })).toEqual([{ prospectId: "R", gameId: "g1", num: 0, den: 6 }]);
+  });
+
+  it("PFF: WR run-block grade, each game's grade weighted by its run-block snaps", () => {
+    const def = PFF_COMPONENTS.find((d) => d.key === "pff_wr_rbg")!;
+    const games = [game("g1", "W"), game("g2", "W"), game("g3", "W")];
+    const rows = [
+      pffRow("g1", "W", { grade_run_block: 58.5, run_block_snaps: 20 }),
+      pffRow("g2", "W", { grade_run_block: 70, run_block_snaps: 0 }), // no run blocks: no evidence
+      pffRow("g3", "W", { grade_run_block: null, run_block_snaps: 12 }),
+    ];
+    expect(pffGameCounts(def, games, rows, () => "WR")).toEqual([{ prospectId: "W", gameId: "g1", num: 58.5 * 20, den: 20 }]);
+    expect(def).toMatchObject({ pos: "WR", dir: 1, scale: 1, decimals: 1, floor: 40 });
+    expect(formatRate(def, 61.234)).toBe("61.2");
   });
 
   it("PFF: WR / TE contested catches per contested target and missed tackles per catch", () => {

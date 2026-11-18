@@ -758,6 +758,11 @@ export default function BigBoard({
       return <td className={`${cls} text-slate-600`} title={aeScoreMissingReason(composite, p.position)}>—</td>;
     }
     const lines = sc.components.map((c) => {
+      // RB / WR blocking through field time: added on top, 0 for an average blocker.
+      if (c.additive && c.contribution != null) {
+        return `${c.label} ${c.text ?? signed(c.ae, 2)} · ${Math.round(c.reliability * 100)}% taken as real → ${signed(c.z, 2)} · ` +
+          `field time ${c.via ?? ""} → adds ${signed(c.contribution, 2)}`;
+      }
       // An additive piece (fumbles): added on top, 0 at the pool's rate.
       if (c.additive) {
         return `${c.label} ${c.text ?? signed(c.ae, 2)} · ${Math.round(c.reliability * 100)}% taken as real · ` +

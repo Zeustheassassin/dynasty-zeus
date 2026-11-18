@@ -31,7 +31,7 @@
 // 3 when this shipped; it joined on 2026-10-21 with a spread floor (TE_SPREAD_FLOOR).
 
 import type { AESample, ScoreComponent } from "../types";
-import { describeFieldTime, teRouteEquivalent } from "./teFieldTime";
+import { blockingEffect, describeFieldTime, routeEquivalent, RB_PASS_DOWNS, WR_RUN_DOWNS, type AddedFieldTime } from "./fieldTime";
 
 export type CompositePos = "QB" | "RB" | "WR" | "TE";
 
@@ -102,23 +102,41 @@ export interface MetricSpread {
   floored?: true;
 }
 
-/** Two of a position's own metrics scored as one by a rule instead of
- *  weighted side by side (TE: routes and blocking through field time,
- *  teFieldTime.ts). */
-export interface PairedMetrics {
-  /** The metric the pair is scored in; its weight is the pair's. */
-  primary: string;
-  /** The metric that works through the rule. Weight 0: it adds the rule's
-   *  effect (ScoreComponent.contribution), not weight × z. */
+/** A metric that counts through a rule with another skill instead of as a
+ *  weighted share: blocking through field time (fieldTime.ts). Its weight is
+ *  0; it adds the rule's effect (ScoreComponent.contribution), not weight × z.
+ *  Two ways the effect counts:
+ *   - "averaged" (TE): routes and blocking scored as one. combine gives the
+ *     pair's z in the primary's SDs (the route equivalent), standing in for
+ *     the primary's z in the weighted average: the modifier adds
+ *     primary weight × (combine − z). combine(z, 0, τ) must be z.
+ *   - "added" (RB pass pro, WR run blocking): combine gives the modifier's own
+ *     effect in score units, added on top of the averaged score like an
+ *     additive component. combine(z, 0, τ) must be 0.
+ *  Either way a prospect without a modifier sample is average on it, so the
+ *  rule leaves his score as it was. */
+export type PairedMetrics = {
+  /** The metric that works through the rule (weight 0; a per-player one is
+   *  kept in the score at weight 0 for this). */
   modifier: string;
-  /** The pair's z, in the primary's SDs, from the two shrunk z's and the
-   *  modifier's spread τ (pts), which turns its z back into points.
-   *  combine(z, 0, τ) must be z: a prospect without a modifier sample is
-   *  average on it, so he's scored on the primary alone. */
-  combine: (zPrimary: number, zModifier: number, tauModifier: number) => number;
+  /** From the skill's z, the modifier's shrunk z and its spread τ (pts),
+   *  which turns its z back into points. */
+  combine: (zSkill: number, zModifier: number, tauModifier: number) => number;
   /** How the rule read him, for the breakdown. */
-  describe?: (zPrimary: number, zModifier: number, tauModifier: number) => string;
-}
+  describe?: (zSkill: number, zModifier: number, tauModifier: number) => string;
+} & (
+  | {
+      counts: "averaged";
+      /** The metric the pair is scored in; its weight is the pair's. */
+      primary: string;
+    }
+  | {
+      counts: "added";
+      /** The skill the rule reads, as weights over his shrunk z's: Σ w·z / Σ w,
+       *  a metric he has no sample on counting as average (0). */
+      skill: Readonly<Record<string, number>>;
+    }
+);
 
 export type { ScoreComponent };
 
@@ -219,10 +237,12 @@ function observedSD(xs: readonly AESample[]): number {
 //     is (averaged in, an average rate would pull an elite back down and lift
 //     a poor one), and the trust in his sample is already in z.
 //
-// `paired` scores two of the user's own metrics as one (PairedMetrics): the
-// primary adds weight × z as usual, and the modifier adds the rest of the
-// pair's score, weight × (combine(z, zModifier) − z), so the pieces still sum
-// to the score.
+// `paired` counts one metric through a rule with another skill (PairedMetrics,
+// blocking through field time). "averaged" (TE): the primary adds weight × z
+// as usual, and the modifier adds the rest of the pair's score,
+// weight × (combine(z, zModifier) − z), so the pieces still sum to the score.
+// "added" (RB, WR): the modifier adds combine(skill z, zModifier) on top of
+// the averaged score, like an additive component.
 export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetric[], baseline = 0, paired?: PairedMetrics): PositionComposite {
   const fitted = metrics.map((m) => {
     const xs = [...m.samples.values()].filter((s): s is AESample => s != null);
@@ -252,7 +272,9 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
   const primary = fitted[0];
   if (!primary?.spread.ready) return { pos, ready: false, metrics: spreads, scores };
 
-  const ready = fitted.filter((f) => f.spread.ready && !(f.m.perPlayer && !(f.m.weight > 0)));
+  // A per-player component at weight 0 is shown, not scored, unless it's the
+  // pair's modifier, which counts through the rule at weight 0.
+  const ready = fitted.filter((f) => f.spread.ready && !(f.m.perPlayer && !(f.m.weight > 0) && f.m.key !== paired?.modifier));
   const totalWeight = ready.reduce((s, f) => s + (f.m.perPlayer ? 0 : f.m.weight), 0);
   for (const [id, primarySample] of primary.m.samples) {
     if (!primarySample) continue;
@@ -277,7 +299,10 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
         added += m.weight * z;
         continue;
       }
-      if (m.key === paired?.modifier) continue; // adds through the pair's rule, below
+      if (m.key === paired?.modifier) { // adds through the pair's rule, below
+        if (m.perPlayer) c.perPlayer = true;
+        continue;
+      }
       if (m.perPlayer) {
         c.perPlayer = true;
         c.effectiveWeight = m.weight * reliability;
@@ -285,13 +310,25 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
       }
       weighted += m.weight * z;
     }
-    const lead = paired && components.find((c) => c.key === paired.primary);
     const mod = paired && components.find((c) => c.key === paired.modifier);
     const modTau = paired && ready.find((f) => f.m.key === paired.modifier)?.spread.tau;
-    if (paired && lead && mod && modTau) {
-      mod.contribution = lead.weight * (paired.combine(lead.z, mod.z, modTau) - lead.z);
-      if (paired.describe) mod.via = paired.describe(lead.z, mod.z, modTau);
-      weighted += mod.contribution;
+    if (paired && mod && modTau) {
+      if (paired.counts === "averaged") {
+        const lead = components.find((c) => c.key === paired.primary);
+        if (lead) {
+          mod.contribution = lead.weight * (paired.combine(lead.z, mod.z, modTau) - lead.z);
+          if (paired.describe) mod.via = paired.describe(lead.z, mod.z, modTau);
+          weighted += mod.contribution;
+        }
+      } else {
+        const zOf = (key: string) => components.find((c) => c.key === key)?.z ?? 0;
+        const sw = Object.values(paired.skill).reduce((a, w) => a + w, 0);
+        const zSkill = sw > 0 ? Object.entries(paired.skill).reduce((a, [key, w]) => a + w * zOf(key), 0) / sw : 0;
+        mod.additive = true;
+        mod.contribution = paired.combine(zSkill, mod.z, modTau);
+        if (paired.describe) mod.via = paired.describe(zSkill, mod.z, modTau);
+        added += mod.contribution;
+      }
     }
     scores.set(id, { score: weighted / (totalWeight + perPlayerWeight) + added + baseline, components, ...(baseline ? { baseline } : {}) });
   }
@@ -299,10 +336,12 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
 }
 
 // ── The board's inputs ───────────────────────────────────────────────────
-// One headline metric each for QB and RB. TE pairs route running (SAER) with
-// blocking (SAEB) through field time (teFieldTime.ts): blocking scores no
-// fantasy points but decides how often he's on the field, so it moves his
-// score through his snaps, not as a weighted share.
+// One headline metric each for QB and RB. Blocking counts through field time
+// at TE, RB and WR (fieldTime.ts): it scores no fantasy points but decides how
+// often he's on the field, so it moves his score through his snaps, not as a
+// weighted share. TE pairs route running (SAER) with blocking (SAEB); RB adds
+// pass protection (charted PB%) on passing downs and WR run blocking (PFF's
+// run-block grade) on run downs.
 //
 // WR leans on cSAE, 70/30 with SAE, by the user's call (2026-10-01). A nine is
 // often a clear-out with no intent to win, and a screen is close to an
@@ -355,11 +394,32 @@ export function matchedCeiling(wr: PositionComposite): ((halfPoint: number) => n
 const TE_ROUTE_WEIGHT = 1;
 const TE_BLOCK_WEIGHT = 0;
 export const TE_FIELD_TIME_PAIR: PairedMetrics = {
+  counts: "averaged",
   primary: "te_saer",
   modifier: "te_saeb",
-  combine: teRouteEquivalent,
-  describe: describeFieldTime,
+  combine: (z, zB, tau) => routeEquivalent(z, zB, tau),
+  describe: (z, zB, tau) => describeFieldTime(z, zB, tau),
 };
+
+// RB and WR blocking, added on top of the score through field time (the
+// user, 2026-11-18). Each blocking component has weight 0 in
+// chartedComponents.ts / pffComponents.ts and counts only here.
+const addedFieldTime = (modifier: string, skill: Readonly<Record<string, number>>, rule: AddedFieldTime): PairedMetrics => ({
+  counts: "added",
+  modifier,
+  skill,
+  combine: (z, zB, tau) => blockingEffect(z, zB, tau, rule),
+  describe: (z, zB, tau) => describeFieldTime(z, zB, tau, rule.dials, rule.snaps),
+});
+// RB: pass protection decides his passing downs; what he does with them is
+// his receiving, read from the receiving components at their own weights
+// (Open% 0.1, Drop% 0.1, PFF YPRR 0.2).
+export const RB_FIELD_TIME_PAIR = addedFieldTime("ch_rb_pb", { ch_rb_open: 0.1, ch_rb_drop: 0.1, pff_rb_yprr: 0.2 }, RB_PASS_DOWNS);
+// WR: run blocking decides his run downs; what he does with them is his route
+// running, cSAE and SAE at their 70/30.
+export const WR_FIELD_TIME_PAIR = addedFieldTime("pff_wr_rbg", { csae: WR_CORE_WEIGHT, sae: WR_ALL_WEIGHT }, WR_RUN_DOWNS);
+/** The metrics that count only through field time (Grading checks). */
+export const FIELD_TIME_MODIFIERS: ReadonlySet<string> = new Set([TE_FIELD_TIME_PAIR, RB_FIELD_TIME_PAIR, WR_FIELD_TIME_PAIR].map((p) => p.modifier));
 
 // TEs joined before their pool showed its own spread (the user's call,
 // 2026-10-21: 11 TEs at ~40 routes each, Paule–Mandel τ 0 on both metrics,
@@ -395,12 +455,12 @@ export function buildAEComposite(inp: AECompositeInputs): AEComposite {
     { key: "csae", label: "cSAE", weight: WR_CORE_WEIGHT, samples: inp.wrCore, fullTrustAt: WR_CORE_FULL_TRUST },
     { key: "sae", label: "SAE", weight: WR_ALL_WEIGHT, samples: inp.wr, fullTrustAt: WR_ALL_FULL_TRUST },
     ...extra("WR"),
-  ], POSITION_BASELINE.WR);
+  ], POSITION_BASELINE.WR, WR_FIELD_TIME_PAIR);
   const matched = matchedCeiling(WR);
   const positions: Record<CompositePos, PositionComposite> = {
     QB: buildPositionComposite("QB", [{ key: "aae", label: "AAE", weight: 1, samples: inp.qb, fullTrustAt: QB_FULL_TRUST }, ...extra("QB")], POSITION_BASELINE.QB),
     // RB's samples come in at the NFL run mix (runMix.ts), so its label says so.
-    RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE (NFL run mix)", weight: 1, samples: inp.rb, fullTrustAt: RB_FULL_TRUST }, ...extra("RB")], POSITION_BASELINE.RB),
+    RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE (NFL run mix)", weight: 1, samples: inp.rb, fullTrustAt: RB_FULL_TRUST }, ...extra("RB")], POSITION_BASELINE.RB, RB_FIELD_TIME_PAIR),
     WR,
     TE: buildPositionComposite("TE", [
       { key: "te_saer", label: "TE-SAER", weight: TE_ROUTE_WEIGHT, samples: inp.teRoute, fullTrustAt: matched, spreadFloor: TE_SPREAD_FLOOR },

@@ -8,7 +8,7 @@ import { computeRBAboveExpectedSamples } from "../../../lib/scouting/aboveExpect
 import { EMPTY_GRADING_DATA } from "../../../lib/scouting/aeComponents";
 import { gameCovariates } from "../../../lib/scouting/gameContext";
 import { NFL_RUN_MIX } from "../../../lib/scouting/runMix";
-import { buildPositionComposite, TE_FIELD_TIME_PAIR } from "../../../lib/scouting/aeComposite";
+import { buildPositionComposite, TE_FIELD_TIME_PAIR, WR_FIELD_TIME_PAIR } from "../../../lib/scouting/aeComposite";
 import { DEFAULT_DYNASTY_WEIGHTS } from "../../../lib/scouting/dynastyScore";
 import type { GameContext } from "../../../lib/scouting/gameContext";
 import type { OpponentTier } from "../../../lib/scouting/opponentTier";
@@ -234,5 +234,27 @@ describe("scorePieces", () => {
       const b = pieces.find((x) => x.key === "te_saeb")!;
       expect(b.weight).toMatch(/^field time: \d+% of snaps × \d\.\d\d per snap$/);
     }
+  });
+
+  it("adds RB / WR blocking's field-time effect outright, and the pieces still sum to the score", () => {
+    const rbg = {
+      key: "pff_wr_rbg", label: "PFF Run-block grade", weight: 0, perPlayer: true as const, minVariance: 1e-6,
+      samples: new Map(ids.map((id, i) => [id, i === 2 ? null : sample(60 + (i % 5) * 3 - 6, 150, 9)])),
+      describe: (_id: string, x: { ae: number }) => `${x.ae.toFixed(1)} on 150 run-block snaps`,
+    };
+    const pc = buildPositionComposite("WR", [primary, secondary, extra, rbg], 0, WR_FIELD_TIME_PAIR);
+    for (const id of ["p0", "p5", "p11"]) {
+      const sc = pc.scores.get(id)!;
+      const pieces = scorePieces({ score: sc.score, components: sc.components.map((c) => ({ ...c, tau: 1 })) }, pc);
+      expect(pieces.reduce((t, x) => t + x.add, 0)).toBeCloseTo(sc.score, 10);
+      const b = pieces.find((x) => x.key === "pff_wr_rbg")!;
+      const c = sc.components.find((x) => x.key === "pff_wr_rbg")!;
+      expect(b.weight).toMatch(/^field time: \d+% of run-down snaps × \d\.\d\d per snap, added on top$/);
+      expect(b.value).toBe(`${c.ae.toFixed(1)} on 150 run-block snaps`);
+      expect(b.add).toBe(c.contribution);
+    }
+    // Weight 0 and out of the average: the other pieces' divisor is unchanged.
+    const plain = buildPositionComposite("WR", [primary, secondary, extra]);
+    expect(pc.scores.get("p5")!.score - plain.scores.get("p5")!.score).toBeCloseTo(pc.scores.get("p5")!.components.find((c) => c.key === "pff_wr_rbg")!.contribution!, 12);
   });
 });

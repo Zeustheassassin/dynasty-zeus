@@ -64,6 +64,8 @@ export interface CountStatDef {
   floor: number;
   /** Shown after the rate in tooltips, e.g. "%" or " yds/route". */
   suffix: string;
+  /** Decimals the rate shows with (default 1 for a percentage, 2 otherwise). */
+  decimals?: number;
   /** What it measures, for the header tooltip and the Grading checks. */
   description: string;
   /** Added on top of the AE Score rather than averaged in (aeComposite.ts CompositeMetric.additive). */
@@ -96,7 +98,7 @@ export interface CountStatResult {
 const fmtNum = (v: number, dp: number) => (Number.isFinite(v) ? v.toFixed(dp) : "—");
 /** "6.1%" / "2.43 yds/route": a rate in display units with its suffix. */
 export function formatRate(def: CountStatDef, rate: number): string {
-  return `${fmtNum(rate, def.scale === 100 ? 1 : 2)}${def.suffix}`;
+  return `${fmtNum(rate, def.decimals ?? (def.scale === 100 ? 1 : 2))}${def.suffix}`;
 }
 
 /**

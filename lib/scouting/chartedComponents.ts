@@ -87,7 +87,7 @@ export const QB_DIFFICULTY: CountStatDef = {
 
 export const RB_CHARTED: readonly PlayCountDef<RBPlay>[] = [
   { key: "ch_rb_pb", label: "PB%", source: "charted", pos: "RB", dir: 1, scale: 100, unit: "pass blocks", floor: 15, suffix: "%",
-    description: "Pass blocks won, from your charting.",
+    description: "Pass blocks won, from your charting. Counts through field time: a poor pass blocker loses passing-down snaps, and the routes and catches with them.",
     of: (pl) => (pl.run_type === "pass_block" && pl.success !== null ? one(pl.success === true) : null) },
   { key: "ch_rb_drop", label: "Drop%", source: "charted", pos: "RB", dir: -1, scale: 100, unit: "targets", floor: 8, suffix: "%",
     description: "Drops per target, from your charting (an uncatchable ball isn't a drop).",
@@ -162,8 +162,12 @@ export function chartedGameCounts(key: string, inp: ChartedInputs): GameCount[] 
 // Weights at full trust, next to the user's own AE(s) (= 1 per position); the
 // user's call (2026-10-05, the "heavier" set; see pffComponents.ts).
 // QB reads and throw difficulty, 0.2 each: the user's picks (2026-11-10).
+// RB pass protection (PB%) is 0 here because it counts through field time
+// instead (the user, 2026-11-18; aeComposite.ts RB_FIELD_TIME_PAIR,
+// fieldTime.ts): a poor pass blocker loses passing downs, and with them the
+// routes and catches. It was a 0.15 weighted share before.
 export const CHARTED_COMPONENT_WEIGHTS: Readonly<Record<string, number>> = {
   ch_qb_p2s: 0.2, ch_qb_reads: 0.2, ch_qb_diff: 0.2,
-  ch_rb_pb: 0.15, ch_rb_drop: 0.1, ch_rb_open: 0.1,
+  ch_rb_pb: 0, ch_rb_drop: 0.1, ch_rb_open: 0.1,
   ch_wr_drop: 0.2,
 };

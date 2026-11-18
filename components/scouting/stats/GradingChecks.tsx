@@ -15,7 +15,7 @@ import {
   GT_MIN_PROSPECTS, GT_MIN_GARBAGE_PLAYS, ERA_CHECK_MIN_TAGGED,
   SUB_ROUTE_FULL_REPS, SUB_ROUTE_FULL_PROSPECTS, SUB_ROUTE_TEST_MIN_REPS, SUB_ROUTE_TEST_MIN_PROSPECTS,
 } from "../../../lib/scouting/tagCorrection";
-import { MIN_POOL, type CompositePos } from "../../../lib/scouting/aeComposite";
+import { FIELD_TIME_MODIFIERS, MIN_POOL, type CompositePos } from "../../../lib/scouting/aeComposite";
 import type { ProspectGameRouteCellsRow } from "../../../lib/scouting/aggregateMerge";
 import GameContextChecks from "./GameContextChecks";
 
@@ -114,22 +114,24 @@ function ComponentRows({ pos, checks }: { pos: CompositePos; checks: ComponentCh
     <>
       {checks.map(({ result: r, spread, medianTrust }) => {
         const w = componentWeight(r.def.key);
+        // Blocking counts at weight 0, through field time (fieldTime.ts).
+        const fieldTime = FIELD_TIME_MODIFIERS.has(r.def.key);
         const source = r.def.source === "pff" ? "PFF" : r.def.source === "tag" ? "Tag" : "Your charting";
-        const status = !(w > 0) ? "Shown only (weight 0)"
-          : spread?.ready ? "Counting"
+        const status = !(w > 0) && !fieldTime ? "Shown only (weight 0)"
+          : spread?.ready ? (fieldTime ? "Counting (field time)" : "Counting")
           : `Waits: ${spread?.qualified ?? 0}/${MIN_POOL} prospects`;
         return (
           <tr key={r.def.key} className="border-t border-slate-800/60">
             <td className={td}>{pos}</td>
             <td className={td} title={r.def.description}>{r.def.label}</td>
             <td className={td}>{source}</td>
-            <td className={`${td} text-right`}>{w}</td>
+            <td className={`${td} text-right`} title={fieldTime ? "Counts through field time, not as a weighted share" : undefined}>{fieldTime ? "field time" : w}</td>
             <td className={`${td} text-right`}>{spread?.qualified ?? 0}</td>
             <td className={`${td} text-right`}>{r.poolRate != null ? formatRate(r.def, r.poolRate) : "—"}</td>
             <td className={`${td} text-right`}>{spread?.tau != null ? `±${formatRate(r.def, spread.tau)}` : "—"}</td>
             <td className={`${td} text-right`}>{medianTrust != null ? `${Math.round(medianTrust * 100)}%` : "—"}</td>
             <td className={`${td} text-right`}>{r.context?.opponent === "sp" && r.context.fit ? "Opp. defense SP+ (Game context below)" : r.measured ? `G5 ${formatRate(r.def, r.effects.G5 * r.def.scale)} (${r.tierProspects} players)` : `not yet (${r.tierProspects} players)`}</td>
-            <td className={`${td} ${status === "Counting" ? "text-emerald-400" : "text-slate-500"}`}>{status}</td>
+            <td className={`${td} ${status.startsWith("Counting") ? "text-emerald-400" : "text-slate-500"}`}>{status}</td>
           </tr>
         );
       })}

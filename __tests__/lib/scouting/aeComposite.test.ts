@@ -13,9 +13,13 @@ import {
   MIN_POOL,
   TE_SPREAD_FLOOR,
   TE_FIELD_TIME_PAIR,
+  RB_FIELD_TIME_PAIR,
+  WR_FIELD_TIME_PAIR,
+  FIELD_TIME_MODIFIERS,
   type CompositeMetric,
 } from "@/lib/scouting/aeComposite";
-import { teRouteEquivalent } from "@/lib/scouting/teFieldTime";
+import { routeEquivalent, blockingEffect, RB_PASS_DOWNS, WR_RUN_DOWNS } from "@/lib/scouting/fieldTime";
+import { componentWeight } from "@/lib/scouting/aeComponents";
 import type { AESample } from "@/lib/types";
 
 const s = (ae: number, variance = 4, n = 100): AESample => ({ ae, n, variance });
@@ -209,9 +213,9 @@ describe("TE: switched on at the spread floor, blocking through field time", () 
       const [r, b] = sc.components;
       expect([r.key, b.key]).toEqual(["te_saer", "te_saeb"]);
       expect(b.weight).toBe(0);
-      expect(b.contribution).toBeCloseTo(teRouteEquivalent(r.z, b.z, tauB) - r.z, 12);
+      expect(b.contribution).toBeCloseTo(routeEquivalent(r.z, b.z, tauB) - r.z, 12);
       expect(b.via).toMatch(/^\d+% of snaps × \d\.\d\d per snap$/);
-      expect(sc.score).toBeCloseTo(teRouteEquivalent(r.z, b.z, tauB), 12);
+      expect(sc.score).toBeCloseTo(routeEquivalent(r.z, b.z, tauB), 12);
     }
   });
 
@@ -225,8 +229,8 @@ describe("TE: switched on at the spread floor, blocking through field time", () 
   });
 
   it("is the pair rule buildAEComposite uses", () => {
-    expect(TE_FIELD_TIME_PAIR).toMatchObject({ primary: "te_saer", modifier: "te_saeb" });
-    expect(TE_FIELD_TIME_PAIR.combine).toBe(teRouteEquivalent);
+    expect(TE_FIELD_TIME_PAIR).toMatchObject({ counts: "averaged", primary: "te_saer", modifier: "te_saeb" });
+    expect(TE_FIELD_TIME_PAIR.combine(0.5, -1.2, 4)).toBe(routeEquivalent(0.5, -1.2, 4));
   });
 });
 
@@ -414,5 +418,95 @@ describe("additive components (fumbles)", () => {
   it("is ignored at weight 0 (a data point only)", () => {
     const withF = buildPositionComposite("RB", [metric(core), fum((i) => SPREAD[i], 0)]);
     for (const id of ids) expect(withF.scores.get(id)!.score).toBe(plain.scores.get(id)!.score);
+  });
+});
+
+describe("RB / WR blocking through field time, added on top (2026-11-18)", () => {
+  const ids = SPREAD.map((_, i) => `p${i}`);
+  const perPlayer = (key: string, weight: number, value: (i: number) => number, skip: number[] = []): CompositeMetric => ({
+    key, label: key, weight, perPlayer: true,
+    samples: new Map(ids.map((id, i) => [id, skip.includes(i) ? null : s(value(i))])),
+  });
+  const srae = { key: "srae", label: "SRAE", weight: 1, samples: pool(SPREAD) };
+  const open = perPlayer("ch_rb_open", 0.1, (i) => SPREAD[(i + 3) % 10]);
+  const yprr = perPlayer("pff_rb_yprr", 0.2, (i) => SPREAD[(i + 7) % 10]);
+  // Pass blocks won, in win-rate points around the pool. p1 has none; an
+  // unscored back keeps the pool at 10 qualified (MIN_POOL).
+  const pb = perPlayer("ch_rb_pb", 0, (i) => 2 * SPREAD[(i + 5) % 10], [1]);
+  pb.samples.set("other", s(0));
+  const without = buildPositionComposite("RB", [srae, open, yprr], -0.2);
+  const withPb = buildPositionComposite("RB", [srae, open, yprr, pb], -0.2, RB_FIELD_TIME_PAIR);
+
+  it("adds his pass protection's effect on top, from his receiving and his pass-block z", () => {
+    const tau = withPb.metrics.find((m) => m.key === "ch_rb_pb")!.tau!;
+    for (const id of ids.filter((x) => x !== "p1")) {
+      const sc = withPb.scores.get(id)!;
+      const z = (k: string) => sc.components.find((c) => c.key === k)?.z ?? 0;
+      const c = sc.components.find((x) => x.key === "ch_rb_pb")!;
+      const zSkill = (0.1 * z("ch_rb_open") + 0.2 * z("pff_rb_yprr")) / 0.4; // no Drop% sample: average
+      expect(c).toMatchObject({ weight: 0, perPlayer: true, additive: true });
+      expect(c.effectiveWeight).toBeUndefined();
+      expect(c.contribution).toBeCloseTo(blockingEffect(zSkill, c.z, tau, RB_PASS_DOWNS), 12);
+      expect(c.via).toMatch(/^\d+% of passing-down snaps × \d\.\d\d per snap$/);
+      expect(sc.score).toBeCloseTo(without.scores.get(id)!.score + c.contribution!, 12);
+    }
+  });
+
+  it("leaves everything else in the score as it was: weight 0, out of the average", () => {
+    for (const id of ids) {
+      const a = without.scores.get(id)!.components, b = withPb.scores.get(id)!.components;
+      for (const c of a) expect(b.find((x) => x.key === c.key)).toEqual(c);
+    }
+  });
+
+  it("scores a back with no pass-block sample as an average blocker", () => {
+    expect(withPb.scores.get("p1")!.components.map((c) => c.key)).not.toContain("ch_rb_pb");
+    expect(withPb.scores.get("p1")!.score).toBe(without.scores.get("p1")!.score);
+  });
+
+  it("costs a poor pass blocker and credits a good one", () => {
+    const add = (id: string) => withPb.scores.get(id)!.components.find((c) => c.key === "ch_rb_pb")!.contribution!;
+    // p5 has the lowest pass-block rate (−12 pts raw), p4 the highest (+12).
+    expect(add("p5")).toBeLessThan(0);
+    expect(add("p4")).toBeGreaterThan(0);
+  });
+
+  it("reads a WR's routes at cSAE 70 / SAE 30 against his run-block grade", () => {
+    const csae = { key: "csae", label: "cSAE", weight: 0.7, samples: pool(SPREAD) };
+    const sae = { key: "sae", label: "SAE", weight: 0.3, samples: new Map(ids.map((id, i) => [id, s(SPREAD[(i + 2) % 10])])) };
+    const rbg = perPlayer("pff_wr_rbg", 0, (i) => SPREAD[(i + 4) % 10]);
+    const plain = buildPositionComposite("WR", [csae, sae]);
+    const pc = buildPositionComposite("WR", [csae, sae, rbg], 0, WR_FIELD_TIME_PAIR);
+    const tau = pc.metrics.find((m) => m.key === "pff_wr_rbg")!.tau!;
+    for (const id of ids) {
+      const sc = pc.scores.get(id)!;
+      const z = (k: string) => sc.components.find((c) => c.key === k)!.z;
+      const c = sc.components.find((x) => x.key === "pff_wr_rbg")!;
+      expect(c.contribution).toBeCloseTo(blockingEffect(0.7 * z("csae") + 0.3 * z("sae"), c.z, tau, WR_RUN_DOWNS), 12);
+      expect(c.via).toMatch(/of run-down snaps/);
+      expect(sc.score).toBeCloseTo(plain.scores.get(id)!.score + c.contribution!, 12);
+    }
+  });
+
+  it("reads each skill at the weights it counts at in the score", () => {
+    if (RB_FIELD_TIME_PAIR.counts !== "added" || WR_FIELD_TIME_PAIR.counts !== "added") throw new Error("RB / WR blocking adds on top");
+    for (const [key, w] of Object.entries(RB_FIELD_TIME_PAIR.skill)) expect(w).toBe(componentWeight(key));
+    expect(WR_FIELD_TIME_PAIR.skill).toEqual({ csae: 0.7, sae: 0.3 });
+    expect(componentWeight("ch_rb_pb")).toBe(0);
+    expect(componentWeight("pff_wr_rbg")).toBe(0);
+    expect([...FIELD_TIME_MODIFIERS].sort()).toEqual(["ch_rb_pb", "pff_wr_rbg", "te_saeb"]);
+  });
+
+  it("is wired into the board for RB and WR", () => {
+    const tag = (prefix: string, m: Map<string, AESample | null>) => new Map([...m].map(([id, v]) => [`${prefix}${id}`, v]));
+    const comp = buildAEComposite({
+      qb: new Map(), rb: tag("rb", pool(SPREAD)), wr: tag("wr", pool(SPREAD)), wrCore: tag("wr", pool(SPREAD)), teRoute: new Map(), teBlock: new Map(),
+      extra: {
+        RB: [{ ...pb, samples: tag("rb", pb.samples) }],
+        WR: [{ ...perPlayer("pff_wr_rbg", 0, (i) => SPREAD[(i + 4) % 10]), samples: tag("wr", perPlayer("pff_wr_rbg", 0, (i) => SPREAD[(i + 4) % 10]).samples) }],
+      },
+    });
+    expect(comp.positions.RB.scores.get("rbp5")!.components.find((c) => c.key === "ch_rb_pb")!.contribution).toBeLessThan(0);
+    expect(comp.positions.WR.scores.get("wrp0")!.components.find((c) => c.key === "pff_wr_rbg")!.contribution).toBeDefined();
   });
 });

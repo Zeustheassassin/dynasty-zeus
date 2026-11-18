@@ -1499,14 +1499,15 @@ export interface ScoreComponent {
    *  who have it. */
   perPlayer?: boolean;
   effectiveWeight?: number;
-  /** Added on top of the averaged score (weight × z) instead of averaged in,
-   *  e.g. fumbles: 0 at the pool's mean (aeComposite.ts). No effectiveWeight. */
+  /** Added on top of the averaged score instead of averaged in: weight × z
+   *  (fumbles, 0 at the pool's mean), or `contribution` for RB / WR blocking
+   *  through field time (aeComposite.ts). No effectiveWeight. */
   additive?: boolean;
   /** The value as shown, e.g. "6.1% on 210 attempts (pool 4.5%)". */
   text?: string;
-  /** What it adds to the weighted sum in place of weight × z: a paired
-   *  metric's modifier (TE blocking through field time, aeComposite.ts
-   *  PairedMetrics). Its weight is 0. */
+  /** What it adds in place of weight × z: blocking through field time
+   *  (aeComposite.ts PairedMetrics). Its weight is 0. TE's goes into the
+   *  weighted sum; RB's and WR's (with `additive`) on top of the score. */
   contribution?: number;
   /** How the pair's rule read him, e.g. "81% of snaps × 1.19 per snap". */
   via?: string;

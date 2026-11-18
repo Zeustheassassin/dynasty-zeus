@@ -10,7 +10,10 @@
 // score, per player (a prospect without PFF games keeps his score as it was).
 //
 // What's here are results, not PFF's grades: a grade is PFF's opinion of the
-// player, and the AE Score is the user's. And only what the user doesn't chart
+// player, and the AE Score is the user's. One exception, the user's call
+// (2026-11-18): WR run blocking reads PFF's run-block grade, since PFF keeps
+// no run-blocking result for a receiver and the user doesn't chart it. It
+// counts only through field time (aeComposite.ts WR_FIELD_TIME_PAIR). And only what the user doesn't chart
 // (the user's rule, 2026-10-05: nothing may count twice). Accuracy (ADJ%) is
 // AAE's; pressures allowed, drops and pressure-to-sack are the user's own
 // charted pass-block results, drops and sacks under pressure
@@ -128,6 +131,12 @@ export const PFF_COMPONENTS: readonly PffStatDef[] = [
   contestedCatches("WR"),
   missedTacklesPerCatch("WR", 15),
   fumbles("WR", 20),
+  // The one PFF grade in the score (see the top). Each game's grade weighted by
+  // its run-block snaps, so his rate is his snap-weighted grade. 40 snaps ≈ 2
+  // games. Weight 0: it counts through run-down field time (fieldTime.ts).
+  { key: "pff_wr_rbg", label: "Run-block grade", source: "pff", pos: "WR", dir: 1, scale: 1, decimals: 1, unit: "run-block snaps", floor: 40, suffix: "",
+    description: "PFF's run-blocking grade over the charted games, weighted by run-block snaps. Counts through field time: good blocking keeps a receiver on the field on run downs (2-WR sets), and a poor blocker comes off.",
+    count: (r) => (r.grade_run_block != null ? ratio(Number(r.grade_run_block) * (r.run_block_snaps ?? 0), r.run_block_snaps) : null) },
   // ── TE ──
   { key: "pff_te_yprr", label: "YPRR", source: "pff", pos: "TE", dir: 1, scale: 1, unit: "routes", floor: 40, suffix: " yds/route",
     description: "Receiving yards per route run (PFF yards ÷ PFF routes).",
@@ -139,7 +148,8 @@ export const PFF_COMPONENTS: readonly PffStatDef[] = [
 
 // Each component's weight in its position's score at full trust, next to the
 // user's own metric(s) (QB AAE 1 · RB SRAE 1 · WR cSAE 0.7 + SAE 0.3 · TE-SAER
-// 1, with TE-SAEB through field time). The user's call (2026-10-05): the "heavier" set, so PFF
+// 1, with TE-SAEB through field time; RB pass protection and WR run blocking
+// count through field time too, at weight 0 here). The user's call (2026-10-05): the "heavier" set, so PFF
 // fills the gaps the charting misses while the user's grading stays the
 // biggest piece. Each prospect's own weight is this × his trust in the sample
 // (aeComposite.ts), so today, at 4–5 charted games, PFF and the charted
@@ -158,7 +168,7 @@ export const PFF_COMPONENTS: readonly PffStatDef[] = [
 export const PFF_COMPONENT_WEIGHTS: Readonly<Record<string, number>> = {
   pff_btt: 0.4, pff_twp: 0.4, pff_qb_ypc: 0.3, pff_qb_fum: 0.05,
   pff_rb_yco: 0.3, pff_rb_mtf: 0.3, pff_rb_10p: 0.2, pff_rb_15of10: 0.05, pff_rb_yprr: 0.2, pff_rb_fum: 0.2,
-  pff_wr_yprr: 0.5, pff_wr_yac: 0.2, pff_wr_cc: 0.1, pff_wr_mtf: 0.05, pff_wr_fum: 0,
+  pff_wr_yprr: 0.5, pff_wr_yac: 0.2, pff_wr_cc: 0.1, pff_wr_mtf: 0.05, pff_wr_fum: 0, pff_wr_rbg: 0,
   pff_te_yprr: 0.5, pff_te_cc: 0.1, pff_te_mtf: 0.05, pff_te_fum: 0,
 };
 
