@@ -12,6 +12,7 @@ import {
   countUnwatched,
   normalizeTapeSource,
   tapeLink,
+  unwatchedDynasty,
   type UnwatchedGroup,
 } from "../../lib/scouting/unwatchedGames";
 
@@ -69,7 +70,8 @@ export default function UnwatchedTab({
         Games you&apos;ve logged that have no charted plays yet. A logged game counts in a prospect&apos;s games
         (the G on his row) as soon as it&apos;s added, so these are the ones that make that number run ahead of what
         you&apos;ve charted. Click a game to open it on Chart Game. Note where each one&apos;s tape is in its Tape box
-        (e.g. Dynasty Nerds, or paste a link); it saves when you leave the box or press Enter.
+        (e.g. Dynasty Nerds, or paste a link); it saves when you leave the box or press Enter. Prospects with no
+        Dynasty Score yet come first, then the Big Board&apos;s Dynasty Score, highest first.
       </p>
       <datalist id={listId}>
         {tapeSuggestions.map((s) => <option key={s} value={s} />)}
@@ -113,12 +115,23 @@ export default function UnwatchedTab({
             {gamesShown} {gamesShown === 1 ? "game" : "games"} across {shown.length} {shown.length === 1 ? "prospect" : "prospects"}
           </p>
           <ul className="space-y-2">
-            {shown.map(({ prospect: p, games, logged }) => (
+            {shown.map(({ prospect: p, games, logged }) => {
+              const dynasty = unwatchedDynasty(p);
+              return (
               <li key={p.id} className="rounded border border-slate-800 bg-slate-900/40 px-3 py-2">
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                   <span className="font-semibold text-white">{p.name}</span>
                   <span className={`text-xs font-semibold ${POS_COLOR[p.position] ?? "text-slate-400"}`}>{p.position}</span>
                   <span className="text-xs text-slate-400">{p.school} · {p.draft_class_year}</span>
+                  {dynasty == null ? (
+                    <span className="text-xs font-semibold text-amber-400" title="No Dynasty Score on the Big Board yet (no AE Score), so he's listed first">
+                      No Dynasty Score
+                    </span>
+                  ) : (
+                    <span className="text-xs text-teal-500" title="Dynasty Score, as the Big Board last saved it">
+                      Dynasty <span className="font-semibold">{`${dynasty >= 0 ? "+" : ""}${dynasty.toFixed(2)}`}</span>
+                    </span>
+                  )}
                   <span className="ml-auto text-xs text-slate-400" title="Games with charted plays, of every game logged for him">
                     Charted <span className="font-semibold text-slate-200">{logged - games.length}</span> of {logged} games
                   </span>
@@ -132,7 +145,8 @@ export default function UnwatchedTab({
                   ))}
                 </ul>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </>
       )}

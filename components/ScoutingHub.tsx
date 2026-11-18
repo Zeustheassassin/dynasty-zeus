@@ -743,8 +743,9 @@ export default function ScoutingHub() {
   }, []);
 
   // The draft board's scores (prospects.board_scores, migration 068), many
-  // prospects in one call. Not mirrored into state: nothing on this hub reads
-  // them, and the Big Board tracks what it saved. False on a failed write.
+  // prospects in one call. Not mirrored into state: the Big Board tracks what it
+  // saved, and the Unwatched tab's order reads them as loaded (a Big Board
+  // change shows there on the next page load). False on a failed write.
   // Stable, so the Big Board's save delay isn't restarted by every render here.
   const handleSaveBoardScores = useCallback(async (scores: Record<string, BoardScores>): Promise<boolean> => {
     const { error } = await supabase.rpc("save_prospect_board_scores", { p_scores: scores });

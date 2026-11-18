@@ -14,7 +14,7 @@ export interface GameSnapCount {
   snaps_charted: number;
 }
 
-type GroupProspect = Pick<Prospect, "id" | "name" | "position" | "draft_class_year" | "personal_rank">;
+type GroupProspect = Pick<Prospect, "id" | "name" | "position" | "draft_class_year" | "personal_rank" | "board_scores">;
 
 export interface UnwatchedGroup<P extends GroupProspect> {
   prospect: P;
@@ -24,14 +24,20 @@ export interface UnwatchedGroup<P extends GroupProspect> {
   logged: number;
 }
 
-const POSITION_ORDER: Record<string, number> = { QB: 0, RB: 1, WR: 2, TE: 3 };
+/** The Dynasty Score the Big Board last saved for him (prospects.board_scores), or null. */
+export function unwatchedDynasty(p: Pick<Prospect, "board_scores">): number | null {
+  const v = p.board_scores?.dynasty;
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
 
 /**
- * One group per prospect with at least one unwatched game: class, then position
- * (QB, RB, WR, TE), then his rank (unranked last), then name. A game missing from
- * `snapCounts` counts as unwatched (the view has a row for every logged game, so
- * that's only a game logged between the two reads). Games whose prospect isn't
- * in `prospects` are skipped.
+ * One group per prospect with at least one unwatched game: class, then the
+ * prospects with no Dynasty Score yet (no eyes on them, so they're watched
+ * first), then the Big Board's Dynasty Score, highest first; ties by his rank
+ * (unranked last), then name. Positions mix, as on the Big Board's Dynasty sort.
+ * A game missing from `snapCounts` counts as unwatched (the view has a row for
+ * every logged game, so that's only a game logged between the two reads). Games
+ * whose prospect isn't in `prospects` are skipped.
  */
 export function unwatchedByProspect<P extends GroupProspect>(
   games: readonly ScoutingGame[],
@@ -58,11 +64,14 @@ export function unwatchedByProspect<P extends GroupProspect>(
     group.logged = logged.get(group.prospect.id) ?? group.games.length;
     group.games.sort((a, b) => a.season_year - b.season_year || a.game_slot - b.game_slot);
   }
-  return out.sort((a, b) =>
-    a.prospect.draft_class_year - b.prospect.draft_class_year
-    || (POSITION_ORDER[a.prospect.position] ?? 9) - (POSITION_ORDER[b.prospect.position] ?? 9)
-    || (a.prospect.personal_rank ?? Infinity) - (b.prospect.personal_rank ?? Infinity)
-    || a.prospect.name.localeCompare(b.prospect.name));
+  return out.sort((a, b) => {
+    const da = unwatchedDynasty(a.prospect), db = unwatchedDynasty(b.prospect);
+    return a.prospect.draft_class_year - b.prospect.draft_class_year
+      || (da == null ? 0 : 1) - (db == null ? 0 : 1)
+      || (da != null && db != null ? db - da : 0)
+      || (a.prospect.personal_rank ?? Infinity) - (b.prospect.personal_rank ?? Infinity)
+      || a.prospect.name.localeCompare(b.prospect.name);
+  });
 }
 
 /** Unwatched games across the groups. */

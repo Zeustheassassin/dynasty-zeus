@@ -5,6 +5,7 @@ import {
   tapeLink,
   tapeSourceSuggestions,
   unwatchedByProspect,
+  unwatchedDynasty,
 } from "../../../lib/scouting/unwatchedGames";
 import type { Prospect, ScoutingGame } from "../../../lib/types";
 
@@ -12,9 +13,11 @@ import type { Prospect, ScoutingGame } from "../../../lib/types";
 // charted plays associated with them … right now it might show '8 charted games'
 // but really i only charted 6 and 2 havent been completed yet."
 
-type P = Pick<Prospect, "id" | "name" | "position" | "draft_class_year" | "personal_rank">;
+type P = Pick<Prospect, "id" | "name" | "position" | "draft_class_year" | "personal_rank" | "board_scores">;
 const prospect = (id: string, extra: Partial<P> = {}): P =>
   ({ id, name: id, position: "WR", draft_class_year: 2027, personal_rank: null, ...extra });
+const scored = (dynasty: number | null) =>
+  ({ board_scores: { dynasty, plus: null, sample: { n: null, share: 0, tier: "low" }, weights: { age: 1, size: 1, draft: 1 }, saved_at: "2026-11-18T00:00:00Z" } }) as Partial<P>;
 const game = (id: string, prospect_id: string, season_year = 2026, game_slot = 1) =>
   ({ id, prospect_id, season_year, game_slot, opponent: `Opp ${id}`, game_type: "regular" }) as ScoutingGame;
 
@@ -51,20 +54,31 @@ describe("unwatchedByProspect", () => {
     expect(group.games.map((g) => g.id)).toEqual(["old", "early", "late"]);
   });
 
-  it("orders prospects by class, then QB RB WR TE, then rank (unranked last), then name", () => {
+  // 2026-11-18, the user: order them by "dynasty score order from the big
+  // board"; "Players with no Dynasty Score are the exception and get listed
+  // above all others since i will want to watch guys i havent gotten eyes on
+  // first and foremost".
+  it("orders prospects by class, then no Dynasty Score first, then Dynasty highest first (positions mixed), then rank, then name", () => {
     const prospects = [
-      prospect("te27", { position: "TE" }),
+      prospect("te27", { position: "TE", ...scored(1.9) }),
       prospect("wr28", { draft_class_year: 2028 }),
-      prospect("wrUnrankedB", { name: "B" }),
-      prospect("wrUnrankedA", { name: "A" }),
-      prospect("wr5", { personal_rank: 5 }),
-      prospect("wr2", { personal_rank: 2 }),
-      prospect("qb27", { position: "QB", personal_rank: 40 }),
-      prospect("rb27", { position: "RB" }),
+      prospect("qbLow", { position: "QB", personal_rank: 1, ...scored(-0.4) }),
+      prospect("rbHigh", { position: "RB", ...scored(2.3) }),
+      prospect("wrTie5", { personal_rank: 5, ...scored(0.8) }),
+      prospect("wrTie2", { personal_rank: 2, ...scored(0.8) }),
+      prospect("noScoreB", { name: "B", ...scored(null) }),
+      prospect("noScoreA", { name: "A" }),
+      prospect("noScoreRanked", { position: "QB", personal_rank: 9 }),
     ];
     const games = prospects.map((p, i) => game(`g${i}`, p.id));
     expect(unwatchedByProspect(games, [], prospects).map((g) => g.prospect.id))
-      .toEqual(["qb27", "rb27", "wr2", "wr5", "wrUnrankedA", "wrUnrankedB", "te27", "wr28"]);
+      .toEqual(["noScoreRanked", "noScoreA", "noScoreB", "rbHigh", "te27", "wrTie2", "wrTie5", "qbLow", "wr28"]);
+  });
+
+  it("reads the Dynasty Score the Big Board saved, null without one", () => {
+    expect(unwatchedDynasty(prospect("a", scored(1.25)))).toBe(1.25);
+    expect(unwatchedDynasty(prospect("a", scored(null)))).toBeNull();
+    expect(unwatchedDynasty(prospect("a"))).toBeNull();
   });
 
   it("counts the games across groups", () => {
