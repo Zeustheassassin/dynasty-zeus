@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { RB_BACKFIELD_ROUTES, rbBucketFor, rbRouteOffered } from "@/lib/scouting/rbRouteTree";
-import { ROUTE_VARIANTS, routeVariantsFor } from "@/lib/scouting/routeVariants";
+import { RB_BACKFIELD_ROUTES, RB_ROUTE_RUN_DEFAULT, rbBucketFor, rbRouteOffered } from "@/lib/scouting/rbRouteTree";
+import { ROUTE_VARIANTS, defaultRouteVariant, routeVariantsFor } from "@/lib/scouting/routeVariants";
 import { ROUTE_TYPES } from "@/components/scouting/shared/chartingConstants";
 
 describe("RB route tree (the user, 2026-10-23)", () => {
@@ -49,5 +49,20 @@ describe("migration 077", () => {
     expect(code).toMatch(/CHECK \(route_detail IS NULL OR run_type = 'route'\)/);
     expect(code).toMatch(/FOREIGN KEY \(route_detail, route_variant\) REFERENCES public\.route_variant_options \(route_type, route_variant\)/);
     expect(code).toMatch(/CHECK \(route_variant IS NULL OR route_detail IS NOT NULL\)/);
+  });
+});
+
+describe("RB Route Run default (the user, 2026-11-18)", () => {
+  it("starts on Flat · True Flat, open, offered from the backfield and wide", () => {
+    expect(RB_ROUTE_RUN_DEFAULT).toEqual({ route: "flat", open: true });
+    expect(defaultRouteVariant(RB_ROUTE_RUN_DEFAULT.route)).toBe("true_flat");
+    expect(rbRouteOffered(RB_ROUTE_RUN_DEFAULT.route, false)).toBe(true);
+    expect(rbRouteOffered(RB_ROUTE_RUN_DEFAULT.route, true)).toBe(true);
+  });
+
+  it("is wired to the Route Run button, only for a fresh pick", () => {
+    const board = readFileSync(join(process.cwd(), "components/scouting/rb/RBChartingBoard.tsx"), "utf8");
+    expect(board).toMatch(/onClick=\{pickRouteRun\}/);
+    expect(board).toMatch(/if \(!routeDetail && !rbRouteType\) \{\s*setRouteDetail\(RB_ROUTE_RUN_DEFAULT\.route\);\s*variant\.reset\(RB_ROUTE_RUN_DEFAULT\.route\);\s*setRbWasOpen\(RB_ROUTE_RUN_DEFAULT\.open\);/);
   });
 });

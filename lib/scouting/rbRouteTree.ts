@@ -22,6 +22,14 @@ import type { RouteVariant } from "./routeVariants";
 /** The backfield tree, in button order. Split out wide, the board offers all 11. */
 export const RB_BACKFIELD_ROUTES: readonly RouteType[] = ["screen", "flat", "curl", "other"];
 
+/**
+ * What Route Run starts on (the user, 2026-11-18): the most common RB route,
+ * Flat · True Flat (Flat's default sub-route), open; 39 of the first 85 tree
+ * routes were exactly that. Only a fresh pick: a route already on keeps its
+ * picks, and Open stays on until it's clicked off.
+ */
+export const RB_ROUTE_RUN_DEFAULT: { route: RouteType; open: boolean } = { route: "flat", open: true };
+
 /** Whether the board offers this route for where he lined up. */
 export function rbRouteOffered(route: RouteType, alignedAsWr: boolean): boolean {
   return alignedAsWr || RB_BACKFIELD_ROUTES.includes(route);

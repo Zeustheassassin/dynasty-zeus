@@ -22,7 +22,7 @@ import { ROUTE_LABELS, ROUTE_TYPES as TREE_ROUTES } from "../shared/chartingCons
 import RouteVariantPicker, { RouteVariantMark } from "../shared/RouteVariantPicker";
 import { useRouteVariant } from "../shared/hooks/useRouteVariant";
 import { routeVariantSpec } from "../../../lib/scouting/routeVariants";
-import { RB_BACKFIELD_ROUTES, rbBucketFor, rbRouteOffered } from "../../../lib/scouting/rbRouteTree";
+import { RB_BACKFIELD_ROUTES, RB_ROUTE_RUN_DEFAULT, rbBucketFor, rbRouteOffered } from "../../../lib/scouting/rbRouteTree";
 import RBPlayerCharts from "./RBPlayerCharts";
 import { buildRBBaselines, computeRBAboveExpectedForPlays } from "../../../lib/scouting/aboveExpected";
 import type {
@@ -387,6 +387,20 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
     if (routeDetail && !rbRouteOffered(routeDetail, wide)) {
       setRouteDetail(null);
       variant.reset(null);
+    }
+  }
+
+  // Route Run starts on Flat · True Flat, open (RB_ROUTE_RUN_DEFAULT), when no
+  // route is picked yet; coming back to it keeps the picks. Re-clicking it is a no-op.
+  function pickRouteRun() {
+    if (runType === "route") return;
+    setRunType("route");
+    setSuccess(null);
+    setRbOutcome(null);
+    if (!routeDetail && !rbRouteType) {
+      setRouteDetail(RB_ROUTE_RUN_DEFAULT.route);
+      variant.reset(RB_ROUTE_RUN_DEFAULT.route);
+      setRbWasOpen(RB_ROUTE_RUN_DEFAULT.open);
     }
   }
 
@@ -830,7 +844,7 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
                 <div className="p-2 bg-slate-900 border border-slate-800 rounded-lg space-y-2">
                   <div className="text-xs text-blue-400/80 font-medium uppercase tracking-wider">Pass Play</div>
                   <div className="flex gap-2">
-                    <button onClick={() => { setRunType("route"); setSuccess(null); setRbOutcome(null); }}
+                    <button onClick={pickRouteRun}
                       className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "route" ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       Route Run
                     </button>
