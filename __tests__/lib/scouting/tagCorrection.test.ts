@@ -8,6 +8,7 @@ import {
   eraResiduals, eraDrift, withGarbageWeight, DIFFICULTY_TAGS, ENABLED_TAG_CORRECTIONS,
   TEST_MIN_ON_PLAYS, TEST_MIN_PROSPECTS, ERA_CHECK_MIN_TAGGED, GT_MIN_PROSPECTS,
   ENABLED_SUB_ROUTES, SUB_ROUTE_TEST_MIN_REPS, subRouteSpecs, subRouteOf, subRouteLabel, subRouteReadiness, heldOutSubRouteTests,
+  OWN_LEVEL_FAMILIES, NEVER_WON_SUB_ROUTES,
 } from "@/lib/scouting/tagCorrection";
 
 // A tiny play: a situation bucket, the outcome, an optional tag set and owner.
@@ -174,12 +175,12 @@ describe("readiness and the held-out test", () => {
 // ── Sub-routes ───────────────────────────────────────────────────────────
 // Routes in two families. Unsplit routes (charted before sub-routes) carry no
 // variant and aren't tagged; split ones are tagged. Nines: Love of the Game
-// is a clear-out (5%), a real nine 60%; curls 80%.
+// is a clear-out, never won (the user's rule), a real nine 60%; curls 80%.
 interface R { game_id: string; pid: string; route_type: "nine" | "curl"; route_variant?: string | null; y: number; red_zone?: boolean | null }
 const RDESIGN = makeDesign<R>([[["nine", "curl"], (r) => r.route_type]]);
 const rOutcome = (r: R) => r.y;
 const rTagged = (r: R) => r.red_zone != null;
-function routes({ prospects = 12, perProspect = 60, lotgRate = 0.05, seed = 3 } = {}): R[] {
+function routes({ prospects = 12, perProspect = 60, lotgRate = 0, seed = 3 } = {}): R[] {
   const r = rng(seed);
   const out: R[] = [];
   for (let k = 0; k < prospects; k++) {
@@ -311,6 +312,115 @@ describe("sub-routes", () => {
     expect(Math.abs(onTop.baseLoss - onTop.withLoss)).toBeLessThan((alone.baseLoss - alone.withLoss) / 10);
     expect(onTop.effects).toHaveProperty("love_of_the_game");
   });
+});
+
+// Older nines hid clear-outs: 2 of every 5 were charted as plain nines.
+// Split out, Love of the Game is 1 of 5, so the split nines win more as a
+// family than the older nine level says (the user, 2026-11-18).
+function hiddenClearOuts(seed = 5): R[] {
+  const r = rng(seed);
+  const out: R[] = [];
+  for (let k = 0; k < 16; k++) {
+    const split = k >= 8;
+    for (let i = 0; i < 90; i++) {
+      const route_type = i % 3 === 0 ? "curl" : "nine";
+      const clearOut = route_type === "nine" && (split ? i % 5 === 1 : i % 5 === 1 || i % 5 === 2);
+      const p = route_type === "curl" ? 0.8 : clearOut ? 0 : 0.6;
+      out.push({
+        game_id: `g${k}`, pid: `p${k}`, route_type, y: r() < p ? 1 : 0,
+        ...(split ? { red_zone: false, route_variant: route_type === "nine" ? (clearOut ? "love_of_the_game" : "nine") : "short" } : {}),
+      });
+    }
+  }
+  return out;
+}
+
+describe("a sub-route family at its own level (WR nines, 2026-11-18)", () => {
+  const rows = hiddenClearOuts();
+  const base = { ...rFitted(rows), model: rFitted(rows).model! };
+  const inp = { rows, outcome: rOutcome, tagged: rTagged };
+  const anchored = { ...base, correction: fitTagCorrection(base, inp, subRouteSpecs([LOTG]))! };
+  const own = { ...base, correction: fitTagCorrection(base, inp, subRouteSpecs([LOTG], ["nine"]))! };
+  const sum = (xs: R[], f: FittedDifficulty<R> & { model: Float64Array }) => xs.reduce((t, x) => t + expectedFor(f, x), 0);
+  const tagged = rows.filter(rTagged);
+  const splitNines = tagged.filter((x) => x.route_type === "nine");
+  const won = splitNines.reduce((t, x) => t + x.y, 0);
+
+  it("is WR's nine family only", () => {
+    expect(OWN_LEVEL_FAMILIES).toEqual({ qb_aae: [], rb_srae: [], te_saeb: [], te_saer: [], wr_sae: ["nine"] });
+    expect(enabledSpecs("wr_sae").filter((x) => x.ownLevel).map((x) => x.family)).toEqual(["nine"]);
+    expect(enabledSpecs("te_saer").some((x) => x.ownLevel)).toBe(false);
+    expect(subRouteSpecs([LOTG]).some((x) => x.ownLevel)).toBe(false);
+  });
+
+  it("judges the split nines at what they actually won, where the family anchor holds them to the older level", () => {
+    expect(sum(splitNines, own)).toBeCloseTo(won, 6);
+    // Anchored, they sit at today's model: well under what they won.
+    expect(sum(splitNines, anchored)).toBeCloseTo(sum(splitNines, base), 6);
+    // (Today's nine level is half older routes here, so the gap is about half the clear-out difference.)
+    expect(won - sum(splitNines, anchored)).toBeGreaterThan(0.03 * splitNines.length);
+  });
+
+  it("keeps the credit split inside the family", () => {
+    const lotg = splitNines.find((x) => x.route_variant === "love_of_the_game")!;
+    const nine = splitNines.find((x) => x.route_variant === "nine")!;
+    expect(expectedFor(own, lotg)).toBeLessThan(expectedFor(own, nine) - 0.3);
+  });
+
+  it("leaves the split nines out of the level, so the other tagged routes stay at today's total", () => {
+    const curls = tagged.filter((x) => x.route_type === "curl");
+    expect(sum(curls, own)).toBeCloseTo(sum(curls, base), 6);
+  });
+
+  it("never touches an older route", () => {
+    for (const old of rows.filter((x) => !rTagged(x)).slice(0, 30)) expect(expectedFor(own, old)).toBe(expectedFor(base, old));
+  });
+
+  it("judges the other split nines at what they won, with Love of the Game at 0%", () => {
+    const real = splitNines.filter((x) => x.route_variant !== "love_of_the_game");
+    expect(sum(real, own)).toBeCloseTo(real.reduce((t, x) => t + x.y, 0), 6);
+  });
+});
+
+describe("a sub-route nobody tries to win (Love of the Game, 2026-11-18)", () => {
+  const rows = routes({ prospects: 16, perProspect: 90 });
+  const base = { ...rFitted(rows), model: rFitted(rows).model! };
+  const inp = { rows, outcome: rOutcome, tagged: rTagged };
+  const on = { ...base, correction: fitTagCorrection(base, inp, subRouteSpecs([LOTG]))! };
+  const tagged = rows.filter(rTagged);
+  const splitNines = tagged.filter((x) => x.route_type === "nine");
+  const lotgs = splitNines.filter((x) => x.route_variant === "love_of_the_game");
+  const sum = (xs: R[], f: FittedDifficulty<R> & { model: Float64Array }) => xs.reduce((t, x) => t + expectedFor(f, x), 0);
+
+  it("is Love of the Game, on every board's spec", () => {
+    expect(NEVER_WON_SUB_ROUTES).toEqual([LOTG]);
+    expect(subRouteSpecs([LOTG, "nine:seam"])[0].neverWon).toEqual(["love_of_the_game"]);
+    expect(subRouteSpecs(["nine:seam"])[0].neverWon).toBeUndefined();
+    for (const key of ["wr_sae", "te_saer"] as const) {
+      expect(enabledSpecs(key).find((x) => x.family === "nine")!.neverWon).toEqual(["love_of_the_game"]);
+    }
+  });
+
+  it("expects 0%, with no ridge holding it up, red zone or not", () => {
+    expect(lotgs.length).toBeGreaterThan(20);
+    for (const x of lotgs) expect(expectedFor(on, x)).toBeLessThan(1e-12);
+  });
+
+  it("hands its share of an anchored family's total to the family's other split routes", () => {
+    // The family's columns start at 1 here (no tag before it): zero them all.
+    const noFamily = { ...on, correction: { ...on.correction, model: Float64Array.from(on.correction.model).map((v, j) => (j >= 1 ? 0 : v)) } };
+    expect(sum(splitNines, on)).toBeCloseTo(sum(splitNines, noFamily), 6);
+    const real = splitNines.filter((x) => x.route_variant !== "love_of_the_game");
+    expect(sum(real, on)).toBeGreaterThan(sum(real, noFamily) + 0.1 * real.length);
+  });
+
+  it("stays out of the fit: the red-zone effect is the same with or without the clear-outs", () => {
+    const rz = DIFFICULTY_TAGS.rb_srae.filter((x) => x.column === "red_zone");
+    const withThem = fitTagCorrection(base, inp, [...rz, ...subRouteSpecs([LOTG])])!;
+    const without = fitTagCorrection(base, { ...inp, rows: rows.filter((x) => x.route_variant !== "love_of_the_game") }, [...rz, ...subRouteSpecs([LOTG])])!;
+    expect(withThem.model[1]).toBeCloseTo(without.model[1], 9);
+  });
+
 });
 
 describe("garbage time", () => {

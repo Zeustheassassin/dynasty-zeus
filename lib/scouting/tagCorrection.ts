@@ -61,6 +61,13 @@ export interface DifficultyTagSpec {
    *  effects are re-centered within the family's split routes, so they only
    *  move credit between that family's routes. */
   family?: string;
+  /** A sub-route family judged at its own level (OWN_LEVEL_FAMILIES): its split
+   *  routes' expected total is what they actually won, not what today's model
+   *  says, and they're left out of the correction's level. */
+  ownLevel?: true;
+  /** Buckets nobody tries to win (NEVER_WON_SUB_ROUTES): expected at 0%,
+   *  left out of the fit, so they neither cost nor credit a player. */
+  neverWon?: readonly string[];
 }
 
 const ON = ["on"] as const;
@@ -139,9 +146,10 @@ export const ENABLED_TAG_CORRECTIONS: Record<CorrectionKey, readonly string[]> =
 // more anchor: within each family, the split routes' expected total stays
 // what today's model says. So switching Love of the Game on lowers its own
 // expected open rate and raises the family's other split nines' to match:
-// credit moves only between that family's routes. Unsplit routes (charted
-// before sub-routes, 2026-10-23) and every other route are judged as before,
-// and the user's raw win rates don't change.
+// credit moves only between that family's routes (except a family judged at
+// its own level, OWN_LEVEL_FAMILIES: WR nines from 2026-11-18). Unsplit
+// routes (charted before sub-routes, 2026-10-23) and every other route are
+// judged as before, and the user's raw win rates don't change.
 //
 // One sub-route at a time (the user's plan, 2026-11-10): the family's other
 // sub-routes stay pooled as "rest" until each is switched on. Each is switched
@@ -193,6 +201,39 @@ export const ENABLED_TAG_CORRECTIONS: Record<CorrectionKey, readonly string[]> =
 export type SubRouteId = `${string}:${string}`;
 export const SUB_ROUTE_REST = "rest";
 
+// Route families whose split routes are judged at their own level (the user,
+// 2026-11-18: "I almost guarantee clearouts effected the previous guys").
+// Before sub-routes (2026-10-23), a clear-out was charted as a plain nine, so
+// today's model reads nines as hard: the 2,542 older WR nines were won 39.4%.
+// Split out, the nines a receiver is trying to win were won 60.3% (315, Love
+// of the Game aside), and with every nine sub-route on the split nines still
+// beat the model by ~10 points as a family (51% won vs ~41% expected), which
+// the family anchor can't change: it only moves credit between sub-routes.
+// So for WR nines the anchor is to what the split nines actually won: as a
+// group they're judged at the charted pool's own rate, Love of the Game's
+// clear-outs at theirs, and the rest of the WR level is set without them.
+// Older nines are judged exactly as before (their clear-outs can't be told
+// apart). TE shows the same pattern (61 older nines won 44%, 21 split
+// nines 76% without Love of the Game) but has only 27 split nines to anchor
+// to; left off until it has more.
+export const OWN_LEVEL_FAMILIES: Record<CorrectionKey, readonly string[]> = {
+  qb_aae: [], rb_srae: [], te_saeb: [], te_saer: [],
+  wr_sae: ["nine"],
+};
+
+// Sub-routes nobody tries to win, judged at exactly 0% wherever they're on
+// (the user, 2026-11-18: "I will never chart a love for the game route as
+// WON. If a love for the game route is won then i consider it a Nine route as
+// the reciever truely tried to win the route and didnt just jog"). There's no
+// skill to measure, so no ridge: the ridge had held Love of the Game at 15%
+// expected (21.6% once WR nines got their own level) on 0 of 57 won. Such a
+// route neither costs nor credits a player; it's left out of the correction's
+// fit, and in a family anchored to today's model its share of the family's
+// expected total still moves to the family's other split routes.
+export const NEVER_WON_SUB_ROUTES: readonly SubRouteId[] = ["nine:love_of_the_game"];
+// The logit a never-won bucket carries: expected ~4e-18, 0% to any precision shown.
+const NEVER_WON_LOGIT = -40;
+
 export const ENABLED_SUB_ROUTES: Record<CorrectionKey, readonly SubRouteId[]> = {
   qb_aae: [], rb_srae: [], te_saeb: [],
   wr_sae: [
@@ -222,9 +263,10 @@ export function subRouteOf(row: object): SubRouteId | null {
 /**
  * One spec per route family with a sub-route switched on: a bucket per
  * switched-on sub-route, and "rest" for the family's other split routes.
- * Unsplit routes and other families carry no bucket.
+ * Unsplit routes and other families carry no bucket. A family in `ownLevel`
+ * is judged at its own level (OWN_LEVEL_FAMILIES).
  */
-export function subRouteSpecs(ids: readonly SubRouteId[]): DifficultyTagSpec[] {
+export function subRouteSpecs(ids: readonly SubRouteId[], ownLevel: readonly string[] = []): DifficultyTagSpec[] {
   const byFamily = new Map<string, string[]>();
   for (const id of ids) {
     const [route, variant] = id.split(":");
@@ -237,6 +279,10 @@ export function subRouteSpecs(ids: readonly SubRouteId[]): DifficultyTagSpec[] {
     label: `${keyLabel(route)} sub-routes (${variants.map(keyLabel).join(", ")})`,
     buckets: [...variants, SUB_ROUTE_REST],
     family: route,
+    ...(ownLevel.includes(route) ? { ownLevel: true as const } : {}),
+    ...(variants.some((v) => NEVER_WON_SUB_ROUTES.includes(`${route}:${v}`))
+      ? { neverWon: variants.filter((v) => NEVER_WON_SUB_ROUTES.includes(`${route}:${v}`)) }
+      : {}),
     bucketOf: (row: object) => {
       const r = row as { route_type?: unknown; route_variant?: unknown };
       if (r.route_type !== route || typeof r.route_variant !== "string" || !r.route_variant) return null;
@@ -296,7 +342,7 @@ export function enabledSpecs(
   enabled: readonly string[] = ENABLED_TAG_CORRECTIONS[key],
   subRoutes: readonly SubRouteId[] = ENABLED_SUB_ROUTES[key],
 ): DifficultyTagSpec[] {
-  return [...DIFFICULTY_TAGS[key].filter((s) => enabled.includes(s.column)), ...subRouteSpecs(subRoutes)];
+  return [...DIFFICULTY_TAGS[key].filter((s) => enabled.includes(s.column)), ...subRouteSpecs(subRoutes, OWN_LEVEL_FAMILIES[key])];
 }
 
 type WithModel<T> = FittedDifficulty<T> & { model: Float64Array };
@@ -330,38 +376,50 @@ export function fitTagCorrection<T extends Row>(
   const count = inp.countOf ?? (() => 1);
   const design = correctionDesign<T>(specs);
   const zBase = tagged.map((r) => baseLogitFor(base, r));
-  const fitted = fitDifficultyModel(
-    tagged.map((r, i) => ({ cols: design.cols(r), y: inp.outcome(r), w: count(r), offset: zBase[i] })),
-    design.size,
-    lambda,
-  );
+  const colsOf = tagged.map((r) => design.cols(r));
+  // Never-won buckets' columns: their routes are pinned at 0% (below), so they
+  // stay out of the fit.
+  const neverWonCols = new Set<number>();
+  for (let s = 0, col = 1; s < specs.length; col += specs[s].buckets.length, s++) {
+    for (const b of specs[s].neverWon ?? []) {
+      const k = specs[s].buckets.indexOf(b);
+      if (k >= 0) neverWonCols.add(col + k);
+    }
+  }
+  const pinned = colsOf.map((cs) => cs.some((c) => neverWonCols.has(c)));
+  const fitRows = tagged.flatMap((r, i) => (pinned[i] ? [] : [{ cols: colsOf[i], y: inp.outcome(r), w: count(r), offset: zBase[i] }]));
+  const fitted = fitRows.length ? fitDifficultyModel(fitRows, design.size, lambda) : new Float64Array(design.size);
   if (!fitted) return null;
   // Sub-route specs' columns (each family's buckets), kept out of the level:
   // their own anchor below holds each family's total where the rest of the
   // correction puts it.
-  const families: { from: number; to: number }[] = [];
+  const families: { from: number; to: number; ownLevel: boolean }[] = [];
   let col = 1;
   for (const s of specs) {
-    if (s.family) families.push({ from: col, to: col + s.buckets.length });
+    if (s.family) families.push({ from: col, to: col + s.buckets.length, ownLevel: s.ownLevel === true });
     col += s.buckets.length;
   }
   const isFamilyCol = (c: number) => families.some((f) => c >= f.from && c < f.to);
-  const colsOf = tagged.map((r) => design.cols(r));
   // Each row's logit without the level and without any sub-route column.
   const zTags = tagged.map((_, i) => colsOf[i].reduce((z, c) => (isFamilyCol(c) ? z : z + fitted[c]), zBase[i]));
+  // A family at its own level sets its own total, so its split routes stay
+  // out of the level: what they win can't move every other tagged play.
+  const inLevel = tagged.map((_, i) => !families.some((f) => f.ownLevel && colsOf[i].some((c) => c >= f.from && c < f.to)));
   // The anchor: the level that makes the tagged rows' expected total what
   // today's model says (or, re-centered, what the older eras' level says).
   let target = 0;
   if (recenterTo != null) {
-    for (const r of tagged) target += count(r) * (inp.outcome(r) - recenterTo);
+    tagged.forEach((r, i) => { if (inLevel[i]) target += count(r) * (inp.outcome(r) - recenterTo); });
   } else {
-    tagged.forEach((r, i) => { target += count(r) / (1 + Math.exp(-zBase[i])); });
+    tagged.forEach((r, i) => { if (inLevel[i]) target += count(r) / (1 + Math.exp(-zBase[i])); });
   }
   const model = Float64Array.from(fitted);
-  model[0] = levelOffset(tagged.map((r, i) => ({ n: count(r), z: zTags[i] })), target);
+  model[0] = levelOffset(tagged.flatMap((r, i) => (inLevel[i] ? [{ n: count(r), z: zTags[i] }] : [])), target);
   // Each family's anchor: one shift on all its buckets, so its split routes'
-  // expected total is what it'd be without them. The level above is then
-  // still exact, since no family's total moved.
+  // expected total is what it'd be without them (the level above is then
+  // still exact, since no family's total moved), or, at its own level, what
+  // they actually won. A never-won route counts toward that total but takes
+  // no shift: it's pinned at 0%, so the family's other routes carry its share.
   for (const f of families) {
     const rows: { n: number; z: number }[] = [];
     let familyTarget = 0;
@@ -369,12 +427,13 @@ export function fitTagCorrection<T extends Row>(
       const c = colsOf[i].find((x) => x >= f.from && x < f.to);
       if (c == null) return;
       const n = count(r), z = zTags[i] + model[0];
-      familyTarget += n / (1 + Math.exp(-z));
-      rows.push({ n, z: z + fitted[c] });
+      familyTarget += f.ownLevel ? n * inp.outcome(r) : n / (1 + Math.exp(-z));
+      if (!pinned[i]) rows.push({ n, z: z + fitted[c] });
     });
     const shift = rows.length ? levelOffset(rows, familyTarget) : 0;
     for (let c = f.from; c < f.to; c++) model[c] = fitted[c] + shift;
   }
+  for (const c of neverWonCols) model[c] = NEVER_WON_LOGIT;
   return { design, model, applies: inp.tagged };
 }
 
@@ -647,8 +706,8 @@ export function heldOutSubRouteTests<T extends Row>(
   const tests = ready.filter((r) => r.testable).map((r) => {
     const family = r.id.split(":")[0];
     const others = enabled.filter((id) => id !== r.id && id.split(":")[0] === family);
-    const withSpecs = subRouteSpecs([...others, r.id]);
-    return { column: r.id, label: r.label, base: subRouteSpecs(others), with: withSpecs, probe: withSpecs[0] };
+    const withSpecs = subRouteSpecs([...others, r.id], OWN_LEVEL_FAMILIES[key]);
+    return { column: r.id, label: r.label, base: subRouteSpecs(others, OWN_LEVEL_FAMILIES[key]), with: withSpecs, probe: withSpecs[0] };
   });
   return heldOutSpecTests(tests, inp, prospectOf, buildBase);
 }
