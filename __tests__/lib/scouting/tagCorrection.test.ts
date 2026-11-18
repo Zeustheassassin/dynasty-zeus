@@ -200,9 +200,19 @@ const rFitted = (rows: readonly R[]) => fitFromPlays([...rows], RDESIGN, rOutcom
 const LOTG = "nine:love_of_the_game" as const;
 
 describe("sub-routes", () => {
-  it("are switched on one at a time: Love of the Game for WR SAE and TE-SAER, and TE's flat split (2026-11-10)", () => {
-    expect(ENABLED_SUB_ROUTES).toEqual({ qb_aae: [], rb_srae: [], te_saeb: [], wr_sae: [LOTG], te_saer: [LOTG, "flat:true_flat", "flat:quick_out"] });
-    expect(enabledSpecs("wr_sae").map((s) => s.column)).toEqual(["double_coverage", "sub_route:nine"]);
+  it("are switched on by the user: Love of the Game and TE's flat split (2026-11-10), ten more for WR (2026-11-18)", () => {
+    expect(ENABLED_SUB_ROUTES).toEqual({
+      qb_aae: [], rb_srae: [], te_saeb: [],
+      wr_sae: [
+        LOTG, "nine:nine", "nine:back_shoulder_fade", "nine:seam", "curl:short", "curl:intermediate",
+        "slant:true_slant", "slant:drag", "flat:quick_out", "flat:true_flat", "other:zig",
+      ],
+      te_saer: [LOTG, "flat:true_flat", "flat:quick_out"],
+    });
+    // One spec per family, in the order the families first appear.
+    expect(enabledSpecs("wr_sae").map((s) => s.column)).toEqual(["double_coverage", "sub_route:nine", "sub_route:curl", "sub_route:slant", "sub_route:flat", "sub_route:other"]);
+    const nine = enabledSpecs("wr_sae").find((s) => s.column === "sub_route:nine")!;
+    expect(nine.buckets).toEqual(["love_of_the_game", "nine", "back_shoulder_fade", "seam", "rest"]);
     expect(enabledSpecs("wr_sae", undefined, []).map((s) => s.column)).toEqual(["double_coverage"]);
     expect(subRouteLabel(LOTG)).toBe("Nine: Love of the game");
     expect(subRouteOf({ route_type: "nine", route_variant: "seam" })).toBe("nine:seam");
@@ -276,13 +286,15 @@ describe("sub-routes", () => {
   });
 
   it("pass a sub-route that really plays differently, held out by prospect, and not one that doesn't", () => {
+    // Love of the Game alone in its family (the live list also has Nine on,
+    // which would leave it nothing to test against).
     const big = routes({ prospects: 20, perProspect: 90 });
-    const t = heldOutSubRouteTests("wr_sae", { rows: big, outcome: rOutcome, tagged: rTagged }, (x) => x.pid, rFitted).find((x) => x.column === LOTG)!;
+    const t = heldOutSubRouteTests("wr_sae", { rows: big, outcome: rOutcome, tagged: rTagged }, (x) => x.pid, rFitted, undefined, [LOTG]).find((x) => x.column === LOTG)!;
     expect(t.improves).toBe(true);
     expect(t.foldsBetter).toBeGreaterThanOrEqual(4);
     expect(t.effects.love_of_the_game).toBeLessThan(t.effects.rest);
     const same = routes({ prospects: 20, perProspect: 90, lotgRate: 0.6, seed: 9 });
-    const u = heldOutSubRouteTests("wr_sae", { rows: same, outcome: rOutcome, tagged: rTagged }, (x) => x.pid, rFitted).find((x) => x.column === LOTG)!;
+    const u = heldOutSubRouteTests("wr_sae", { rows: same, outcome: rOutcome, tagged: rTagged }, (x) => x.pid, rFitted, undefined, [LOTG]).find((x) => x.column === LOTG)!;
     expect(u.withLoss).toBeGreaterThanOrEqual(u.baseLoss - 5e-4);
   });
 

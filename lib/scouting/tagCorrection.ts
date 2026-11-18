@@ -177,12 +177,31 @@ export const ENABLED_TAG_CORRECTIONS: Record<CorrectionKey, readonly string[]> =
 //   - No gain: WR Nine once Love of the Game is on (0/5 folds; its first pass
 //     was Love of the Game's own signal), Dig Intermediate, True Slant, Drag,
 //     Post Deep.
+//
+// WR, the user's call (2026-11-18), not the bar: Nine, Back Shoulder Fade,
+// Seam, Curl Short and Intermediate, True Slant, Drag, Quick Out, True Flat
+// and Zig. That day's full bar (on top of Love of the Game) had none passing:
+// Curl Short 190 routes 3/5 folds p .31, Curl Intermediate 128 3/5 p .13,
+// Drag 76 5/5 p .10 improved but missed the chance check; Nine, True Slant,
+// Quick Out, True Flat, Back Shoulder Fade and Seam showed no held-out gain; Zig
+// (21 routes) had too few other Other routes to test. The ridge and the
+// family anchor keep a wrong offset small, and the user's rule is that every
+// sub-route goes on eventually. Each family's unswitched sub-routes stay
+// pooled as "rest": Nine's Sluggo, Out and Up, Stop and Go; Slant's
+// Deep Slant and Slant Stop; Curl's Deep; Other's Wheel, Block and Release,
+// Texas, Option. TE-SAER unchanged.
 export type SubRouteId = `${string}:${string}`;
 export const SUB_ROUTE_REST = "rest";
 
 export const ENABLED_SUB_ROUTES: Record<CorrectionKey, readonly SubRouteId[]> = {
   qb_aae: [], rb_srae: [], te_saeb: [],
-  wr_sae: ["nine:love_of_the_game"],
+  wr_sae: [
+    "nine:love_of_the_game", "nine:nine", "nine:back_shoulder_fade", "nine:seam",
+    "curl:short", "curl:intermediate",
+    "slant:true_slant", "slant:drag",
+    "flat:quick_out", "flat:true_flat",
+    "other:zig",
+  ],
   te_saer: ["nine:love_of_the_game", "flat:true_flat", "flat:quick_out"],
 };
 
