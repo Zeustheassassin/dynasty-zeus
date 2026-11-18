@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useState, useEffect, useMemo } from "react";
+import { Fragment, useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../../../lib/supabaseclient";
 import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
 import { logger } from "../../../lib/logger";
@@ -23,6 +23,7 @@ import RouteVariantPicker, { RouteVariantMark } from "../shared/RouteVariantPick
 import { useRouteVariant } from "../shared/hooks/useRouteVariant";
 import { routeVariantSpec } from "../../../lib/scouting/routeVariants";
 import { RB_BACKFIELD_ROUTES, RB_ROUTE_RUN_DEFAULT, rbBucketFor, rbRouteOffered } from "../../../lib/scouting/rbRouteTree";
+import { isRBCarry, usualRBPlay, type UsualRBPlay } from "../../../lib/scouting/usualAlignment";
 import RBPlayerCharts from "./RBPlayerCharts";
 import { buildRBBaselines, computeRBAboveExpectedForPlays } from "../../../lib/scouting/aboveExpected";
 import type {
@@ -189,6 +190,11 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
   const [savingPlay, setSavingPlay]               = useState(false);
   const [playError, setPlayError]                 = useState<string | null>(null);
   const [editingPlayId, setEditingPlayId]         = useState<string | null>(null);
+  // His usual play (lib/scouting/usualAlignment.ts usualRBPlay: formation, alignment,
+  // carry and its result), counted once from his plays when the board opens and
+  // kept for every play while it stays open, like the WR / TE usual alignment
+  // (the user, 2026-11-18); null = none charted, undefined = not loaded yet.
+  const usual = useRef<UsualRBPlay | null | undefined>(undefined);
 
   // Shared state via hook
   const cs = useChartingState(prospect, {
@@ -212,7 +218,18 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
     fetchAllRows<RBPlay>((from, to) =>
       supabase.from("rb_plays").select("*").in("game_id", ids).order("created_at").range(from, to)
     )
-      .then((rows) => setPlays(rows))
+      .then((rows) => {
+        setPlays(rows);
+        if (usual.current === undefined) {
+          const u = usualRBPlay(rows);
+          usual.current = u;
+          if (u) {
+            setFormation(u.formation);
+            setAlignedAsWr(u.alignedAsWr);
+            if (u.runType) { setRunType(u.runType); setSuccess(u.success); }
+          }
+        }
+      })
       .catch((err) => log.error("rb_plays load failed", { err: String(err) }));
   }, [games]);
 
@@ -364,13 +381,14 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
   function resetPlayForm() {
     setEditingPlayId(null);
     tags.reset();
-    setFormation("gun");
-    setRunType("outside_zone");
-    setSuccess(null);
+    // Each play starts on his usual play (usual), else Gun / RB / Outside Zone, no result.
+    setFormation(usual.current?.formation ?? "gun");
+    setRunType(usual.current?.runType ?? "outside_zone");
+    setSuccess(usual.current?.runType ? usual.current.success : null);
     setLoadedBox(false);
     setUnblockedDefender(false);
     setRunStuff(false);
-    setAlignedAsWr(false);
+    setAlignedAsWr(usual.current?.alignedAsWr ?? false);
     setRouteDetail(null);
     variant.reset(null);
     setRbRouteType(null);
@@ -388,6 +406,14 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
       setRouteDetail(null);
       variant.reset(null);
     }
+  }
+
+  // Switching between a carry and anything else (block, decoy) clears the result,
+  // so a pre-picked carry Success never rides onto a block; coming back to a
+  // carry picks his usual carry result again. Carry to carry keeps it.
+  function pickRunType(rt: RBRunType) {
+    if (isRBCarry(rt) !== isRBCarry(runType)) setSuccess(isRBCarry(rt) ? usual.current?.success ?? null : null);
+    setRunType(rt);
   }
 
   // Route Run starts on Flat · True Flat, open (RB_ROUTE_RUN_DEFAULT), when no
@@ -817,7 +843,7 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
                       <div className="text-[10px] text-slate-600 mb-1 font-medium uppercase tracking-wider">Man Gap</div>
                       <div className="flex gap-2">
                         {(["outside_man_gap", "inside_man_gap"] as RBRunType[]).map((rt) => (
-                          <button key={rt} onClick={() => setRunType(rt)}
+                          <button key={rt} onClick={() => pickRunType(rt)}
                             className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                             {rt === "outside_man_gap" ? "Outside" : "Inside"}
                           </button>
@@ -828,7 +854,7 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
                       <div className="text-[10px] text-slate-600 mb-1 font-medium uppercase tracking-wider">Zone</div>
                       <div className="flex gap-2">
                         {(["outside_zone", "inside_zone"] as RBRunType[]).map((rt) => (
-                          <button key={rt} onClick={() => setRunType(rt)}
+                          <button key={rt} onClick={() => pickRunType(rt)}
                             className={`flex-1 py-2 rounded text-xs font-medium transition ${runType === rt ? "bg-green-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                             {rt === "outside_zone" ? "Outside" : "Inside"}
                           </button>
@@ -836,7 +862,7 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
                       </div>
                     </div>
                   </div>
-                  <button onClick={() => setRunType("run_block")}
+                  <button onClick={() => pickRunType("run_block")}
                     className={`w-full py-2 rounded text-sm font-medium transition ${runType === "run_block" ? "bg-orange-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                     Run Block
                   </button>
@@ -848,13 +874,13 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
                       className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "route" ? "bg-blue-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       Route Run
                     </button>
-                    <button onClick={() => setRunType("pass_block")}
+                    <button onClick={() => pickRunType("pass_block")}
                       className={`flex-1 py-2 rounded text-sm font-medium transition ${runType === "pass_block" ? "bg-purple-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       Pass Block
                     </button>
                   </div>
                 </div>
-                <button onClick={() => setRunType("decoy")}
+                <button onClick={() => pickRunType("decoy")}
                   className={`w-full py-2 rounded text-sm font-medium transition ${runType === "decoy" ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                   Decoy
                 </button>
