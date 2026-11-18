@@ -13,7 +13,11 @@ import {
   qbRoundAverage,
   rookieCompetition,
   QB_DRAFT_CAPITAL,
-  QB_ROUND1_LAST,
+  QB_FULL_CAPITAL_LAST,
+  QB_PREDRAFT_SCALE,
+  qbPredraftDiscount,
+  QB_SLOT_RATES,
+  qbSlotValue,
   ROUND_PICKS,
   type DynastyInputs,
 } from "@/lib/scouting/dynastyScore";
@@ -135,6 +139,31 @@ describe("scoreDynasty", () => {
     expect(scoreDynasty({ ...base, draftRound: 4, forty, classDrafted: false }, DEFAULT_DYNASTY_WEIGHTS).dynasty - without.dynasty).toBeCloseTo(-0.7, 12);
   });
 
+  it("counts 80% of a QB's AE Score before the draft, and never in Dynasty+ (the user, 2026-11-18)", () => {
+    expect(QB_PREDRAFT_SCALE).toBe(0.8);
+    const zero = { ...DEFAULT_DYNASTY_WEIGHTS, age: 0, size: 0, speed: 0, rushing: 0 };
+    const qb = (aeScore: number, extra: Partial<DynastyInputs> = {}) =>
+      scoreDynasty({ ...base, pos: "QB", aeScore, ...extra }, zero);
+    // A strong QB loses 20% of his edge, a weak one comes 20% back toward 0.
+    expect(qb(1.65).dynasty).toBeCloseTo(1.32, 12);
+    expect(qb(1.65).qbDiscount!.value).toBeCloseTo(-0.33, 12);
+    expect(qb(-1).dynasty).toBeCloseTo(-0.8, 12);
+    expect(qb(0).qbDiscount).toBeNull();
+    // Off once his class is drafted.
+    expect(qb(1.65, { classDrafted: true }).dynasty).toBeCloseTo(1.65, 12);
+    expect(qb(1.65, { classDrafted: true }).qbDiscount).toBeNull();
+    // Dynasty+ backs it out, so a pick set before May 1 doesn't stack it with the QB capital curve.
+    const early = qb(1.65, { draftRound: 1, draftPick: 3 });
+    const drafted = qb(1.65, { draftRound: 1, draftPick: 3, classDrafted: true });
+    expect(early.plus!).toBeCloseTo(drafted.plus!, 12);
+    expect(early.plus!).toBeCloseTo(1.65 + 2 * draftCapitalForPick(3, "QB"), 12);
+    // Other positions never.
+    for (const pos of ["RB", "WR", "TE"] as const) {
+      expect(qbPredraftDiscount(pos, 1.65, false)).toBeNull();
+      expect(scoreDynasty({ ...base, pos, aeScore: 1.65 }, zero).dynasty).toBeCloseTo(1.65, 12);
+    }
+  });
+
   it("adds a QB's rushing bonus at the Rushing slider's weight, into Dynasty and so Dynasty+, and only for a QB (2026-11-10)", () => {
     const rushing = { value: 0.2, label: "55 rush yds/game" };
     const w = { ...DEFAULT_DYNASTY_WEIGHTS, rushing: 1.5 };
@@ -224,29 +253,44 @@ describe("draft capital by pick", () => {
 });
 
 describe("a QB's draft capital", () => {
-  it("is everyone's through round 1's last pick", () => {
-    for (let pick = 1; pick <= QB_ROUND1_LAST; pick++) {
+  it("is everyone's through pick 5, then under everyone's and falling with every pick", () => {
+    for (let pick = 1; pick <= QB_FULL_CAPITAL_LAST; pick++) {
       expect(draftCapitalForPick(pick, "QB")).toBeCloseTo(draftCapitalForPick(pick), 12);
     }
-    // The user's call: a late first-round QB (CJ Carr at 26 in the 2027 mock) keeps first-round value.
-    expect(draftCapitalForPick(26, "QB")).toBeCloseTo(draftCapitalForPick(26, "WR"), 12);
+    for (let pick = QB_FULL_CAPITAL_LAST + 1; pick <= 262; pick++) {
+      expect(draftCapitalForPick(pick, "QB")).toBeLessThan(draftCapitalForPick(pick));
+      expect(draftCapitalForPick(pick, "QB")).toBeLessThan(draftCapitalForPick(pick - 1, "QB"));
+    }
+    expect(QB_DRAFT_CAPITAL[UNDRAFTED_ROUND]).toBe(DRAFT_CAPITAL[UNDRAFTED_ROUND]);
   });
 
-  it("puts the QB table at each later round's middle, under everyone's, and falls with every pick", () => {
+  it("tapers inside round 1 by the user's 8+ year starter rates (2026-11-18)", () => {
+    expect(QB_SLOT_RATES.map((s) => [s.first, s.last])).toEqual([[1, 5], [6, 10], [11, 15], [16, 32]]);
+    // Each slot sits at its middle pick, between picks 1–5 (everyone's) and round 2 (QB table) on log-odds.
+    expect(qbSlotValue(0.375)).toBeCloseTo(draftCapitalForPick(3), 12);
+    expect(qbSlotValue(0.1)).toBeCloseTo(QB_DRAFT_CAPITAL[2], 12);
+    expect(draftCapitalForPick(8, "QB")).toBeCloseTo(qbSlotValue(0.275), 12);
+    expect(draftCapitalForPick(13, "QB")).toBeCloseTo(qbSlotValue(0.225), 12);
+    expect(draftCapitalForPick(24, "QB")).toBeCloseTo(qbSlotValue(0.125), 12);
+    expect(qbSlotValue(0.275)).toBeCloseTo(0.8645, 4);
+    expect(qbSlotValue(0.225)).toBeCloseTo(0.6872, 4);
+    expect(qbSlotValue(0.125)).toBeCloseTo(0.2167, 4);
+    // The user's test board: Carr at pick 6 keeps most of his first-round value; a QB at 24 sits near a 2nd-rounder.
+    expect(draftCapitalForPick(6) - draftCapitalForPick(6, "QB")).toBeCloseTo(0.0806, 4);
+    expect(draftCapitalForPick(24, "QB")).toBeLessThan(draftCapitalForPick(48, "WR"));
+  });
+
+  it("puts the QB table at each later round's middle, under everyone's", () => {
     for (const r of [2, 3, 4, 5, 6, 7]) {
       expect(draftCapitalForPick(ROUND_MIDDLE_PICK[r], "QB")).toBeCloseTo(QB_DRAFT_CAPITAL[r], 12);
       expect(QB_DRAFT_CAPITAL[r]).toBeLessThan(DRAFT_CAPITAL[r]);
     }
-    for (let pick = QB_ROUND1_LAST + 1; pick <= 262; pick++) {
-      expect(draftCapitalForPick(pick, "QB")).toBeLessThan(draftCapitalForPick(pick));
-      expect(draftCapitalForPick(pick, "QB")).toBeLessThan(draftCapitalForPick(pick - 1, "QB"));
-    }
-    expect(QB_DRAFT_CAPITAL[1]).toBe(DRAFT_CAPITAL[1]);
-    expect(QB_DRAFT_CAPITAL[UNDRAFTED_ROUND]).toBe(DRAFT_CAPITAL[UNDRAFTED_ROUND]);
+    expect(QB_DRAFT_CAPITAL[1]).toBeUndefined(); // round 1 goes by slot
   });
 
-  it("drops off a cliff after round 1, and a 4th-rounder to about a 7th-round WR", () => {
-    expect(draftCapitalForPick(33, "QB")).toBeCloseTo(0.80625 - 0.75625 / 16.5, 9);
+  it("runs from round 1's last slot into round 2, and a 4th-rounder to about a 7th-round WR", () => {
+    const v24 = qbSlotValue(0.125);
+    expect(draftCapitalForPick(33, "QB")).toBeCloseTo(v24 + (9 * (0.05 - v24)) / 24.5, 9);
     // Drake Lindsey at pick 109 in the 2027 mock: between round 3's middle (−0.15) and round 4's (−0.6).
     expect(draftCapitalForPick(109, "QB")).toBeCloseTo(-0.15 - (26 * 0.45) / 37, 9);
     expect(draftCapitalForPick(109)).toBeCloseTo(0.25 - (26 * 0.4) / 37, 9); // everyone else: about −0.03
@@ -255,9 +299,10 @@ describe("a QB's draft capital", () => {
   });
 
   it("averages the QB curve over a round without a pick, and leaves the others on the table", () => {
-    expect(qbRoundAverage(1)).toBeCloseTo(1, 9);
-    expect(qbRoundAverage(2)).toBeGreaterThan(QB_DRAFT_CAPITAL[2]); // the cliff runs into round 2
+    expect(qbRoundAverage(1)).toBeCloseTo(0.5854, 4); // tapered: well under everyone's 1.0
+    expect(qbRoundAverage(2)).toBeCloseTo(0.054, 3); // the taper's last stretch runs into round 2
     expect(qbRoundAverage(9)).toBeNull();
+    expect(draftCapitalAt(1, null, "QB")).toBeCloseTo(qbRoundAverage(1)!, 12);
     expect(draftCapitalAt(2, null, "QB")).toBeCloseTo(qbRoundAverage(2)!, 12);
     expect(draftCapitalAt(2, null, "WR")).toBe(DRAFT_CAPITAL[2]);
     expect(draftCapitalAt(4, 109, "QB")).toBeCloseTo(draftCapitalForPick(109, "QB"), 12);
@@ -270,18 +315,23 @@ describe("a QB's draft capital", () => {
       pos: "QB", aeScore: 0, rookieAge: null, heightIn: null, weightLb: null, draftRound: 4, draftPick,
     });
     expect(scoreDynasty(qb(109), DEFAULT_DYNASTY_WEIGHTS).draftCapital).toBeCloseTo(draftCapitalForPick(109, "QB"), 12);
-    // A QB taken at 20 ahead of one at 109: on the QB curve they're more than a full
-    // point of capital apart (the full 0.2); on everyone else's, 0.987 apart.
+    // A QB taken at 20 ahead of one at 109: on the QB curve they're 0.85 of capital
+    // apart (0.17 of the 0.2); on everyone else's, 0.987 apart.
     const ahead = { name: "Ahead", position: "QB" as const, overall: 20, round: 1, moveTe: false };
-    expect(rookieCompetition(draftCapitalForPick(109, "QB"), [ahead]).competitors[0].cost).toBeCloseTo(0.2, 12);
+    const qbGap = draftCapitalForPick(20, "QB") - draftCapitalForPick(109, "QB");
+    expect(qbGap).toBeCloseTo(0.854, 3);
+    expect(rookieCompetition(draftCapitalForPick(109, "QB"), [ahead]).competitors[0].cost).toBeCloseTo(0.2 * qbGap, 12);
     expect(rookieCompetition(draftCapitalForPick(109), [{ ...ahead, position: "WR" as const }]).competitors[0].cost)
       .toBeCloseTo(0.2 * (draftCapitalForPick(20) - draftCapitalForPick(109)), 12);
   });
 
-  it("says a QB past round 1 is on the QB scale", () => {
-    expect(draftCapitalLabel(2, 40, "QB")).toBe("2nd round, pick 40, on the QB scale (QBs fall faster after round 1)");
-    expect(draftCapitalLabel(3, null, "QB")).toBe("3rd round (no pick set, the round's average), on the QB scale (QBs fall faster after round 1)");
-    expect(draftCapitalLabel(1, 26, "QB")).toBe("1st round, pick 26");
+  it("says a QB past pick 5 is on the QB scale", () => {
+    const tail = ", on the QB scale (QBs fall faster after the top 5 picks)";
+    expect(draftCapitalLabel(2, 40, "QB")).toBe(`2nd round, pick 40${tail}`);
+    expect(draftCapitalLabel(3, null, "QB")).toBe(`3rd round (no pick set, the round's average)${tail}`);
+    expect(draftCapitalLabel(1, 26, "QB")).toBe(`1st round, pick 26${tail}`);
+    expect(draftCapitalLabel(1, null, "QB")).toBe(`1st round (no pick set, the round's average)${tail}`);
+    expect(draftCapitalLabel(1, 5, "QB")).toBe("1st round, pick 5");
     expect(draftCapitalLabel(2, 40, "WR")).toBe("2nd round, pick 40");
     expect(draftCapitalLabel(8, 300, "QB")).toBe("Undrafted");
   });

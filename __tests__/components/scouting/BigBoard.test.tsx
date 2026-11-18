@@ -12,6 +12,7 @@ import type { ProspectWithStats, AEScoreLock, BoardScores } from "@/lib/types";
 import type { RoleFit } from "@/lib/scouting/roleFit";
 import { totalsFor } from "@/lib/pff/totals";
 import { gradeFromDynasty } from "@/lib/scouting/prospectGrade";
+import { QB_PREDRAFT_SCALE } from "@/lib/scouting/dynastyScore";
 import { GAME_STAT_KEYS, SEASON_STAT_KEYS, type PffGameRow, type PffSeasonRow } from "@/lib/pff/stats";
 
 // The Big Board's Above Exp group: one column per metric (AAE, SRAE, SAE, cSAE,
@@ -554,6 +555,14 @@ describe("BigBoard Dynasty Score", () => {
   const POOL = Array.from({ length: 10 }, (_, i) => prospect(`pq${i}`, `Pool QB ${i}`, "QB", 10 + i));
   const scoreCellOf = (name: string, label: string) =>
     within(rowFor(name)).getAllByRole("cell")[headerLabels().indexOf(label)];
+  // Quarter One's class (2027) isn't drafted yet, so his Dynasty carries the QB pre-draft
+  // discount and Dynasty+ backs it out: Dynasty+ builds on the Dynasty Score without it.
+  const qbDynasty = () => {
+    const ae = Number(cell("Quarter One", "AE Score"));
+    return { ae, dyn: Number(cell("Quarter One", "Dynasty")), full: Number(cell("Quarter One", "Dynasty")) + (1 - QB_PREDRAFT_SCALE) * ae };
+  };
+  // Three cells read at 2 decimals: allow their rounding.
+  const near = (a: number, b: number) => expect(Math.abs(a - b)).toBeLessThan(0.0111);
 
   it("needs an AE Score, and Plus also needs the draft round", () => {
     renderBoard([...PROSPECTS, ...POOL]);
@@ -565,36 +574,38 @@ describe("BigBoard Dynasty Score", () => {
 
   it("adds age and draft capital, and explains each piece", () => {
     renderBoard([...PROSPECTS.map((p) => (p.id === "qb1" ? { ...p, draft_round: 1, birthday: "2005-06-01" } : p)), ...POOL]);
-    const ae = Number(cell("Quarter One", "AE Score"));
-    const dyn = Number(cell("Quarter One", "Dynasty"));
+    const { ae, dyn, full } = qbDynasty();
     const plus = Number(cell("Quarter One", "Dynasty+"));
     // 22.25 as a rookie: a hair under the typical 22-year-old's window → small minus.
-    expect(dyn).toBeLessThan(ae);
-    expect(dyn).toBeGreaterThan(ae - 0.1);
-    // Round 1 adds +2.00 at the default 2× draft weight.
-    expect(plus).toBeCloseTo(dyn + 2, 2);
+    expect(full).toBeLessThan(ae);
+    expect(full).toBeGreaterThan(ae - 0.1);
+    // The pre-draft discount: 80% of his AE Score counts in Dynasty.
+    near(dyn, full - (1 - QB_PREDRAFT_SCALE) * ae);
+    // A QB's round 1 with no pick is his tapered curve's average (qbRoundAverage(1) ≈ 0.585), ×2.
+    near(plus, full + 2 * 0.5854);
     const title = scoreCellOf("Quarter One", "Dynasty+").getAttribute("title")!;
     expect(title).toContain("AE Score ");
     expect(title).toContain("Age 22.3 as a rookie");
-    expect(title).toContain("Drafted: 1st round (no pick set, the round's average) → +2.00");
+    expect(title).toContain("QB pre-draft: before the draft 80% of a QB's AE Score counts");
+    expect(title).toContain("QB pre-draft discount comes off (the pick prices it in) → +");
+    expect(title).toContain("Drafted: 1st round (no pick set, the round's average), on the QB scale (QBs fall faster after the top 5 picks) → +1.17");
   });
 
   it("reads draft capital from the overall pick once one is set", () => {
     renderBoard([...PROSPECTS.map((p) => (p.id === "qb1" ? { ...p, draft_round: 1, draft_pick: 3, birthday: "2005-06-01" } : p)), ...POOL]);
-    const dyn = Number(cell("Quarter One", "Dynasty"));
+    const { full } = qbDynasty();
     const plus = Number(cell("Quarter One", "Dynasty+"));
     // Pick 3 sits above the 1st round's middle: 1.0 + 13.5 × 0.0125 = 1.16875, × 2.
-    // Both cells show 2 decimals, so their gap can be off by up to 0.01.
-    expect(Math.abs(plus - (dyn + 2 * 1.16875))).toBeLessThan(0.0101);
+    near(plus, full + 2 * 1.16875);
     expect(scoreCellOf("Quarter One", "Dynasty+").getAttribute("title")).toContain("Drafted: 1st round, pick 3 → +2.34");
   });
 
   it("re-weights from the sliders", () => {
     renderBoard([...PROSPECTS.map((p) => (p.id === "qb1" ? { ...p, draft_round: 8 } : p)), ...POOL]);
-    const dyn = Number(cell("Quarter One", "Dynasty"));
-    expect(Number(cell("Quarter One", "Dynasty+"))).toBeCloseTo(dyn - 2, 2); // Undrafted −2.00 at 2×
+    const { full } = qbDynasty();
+    near(Number(cell("Quarter One", "Dynasty+")), full - 2); // Undrafted −2.00 at 2×
     fireEvent.change(screen.getByRole("slider", { name: "Draft weight" }), { target: { value: "0.5" } });
-    expect(Number(cell("Quarter One", "Dynasty+"))).toBeCloseTo(dyn - 0.5, 2);
+    near(Number(cell("Quarter One", "Dynasty+")), full - 0.5);
     expect(JSON.parse(localStorage.getItem("dynastyScoreWeights")!)).toMatchObject({ draft: 0.5 });
   });
 
@@ -684,7 +695,10 @@ describe("BigBoard saves the draft board's scores", () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(save).toHaveBeenCalledTimes(2);
     expect(savesOf(save)[1].qb1.weights).toEqual({ age: 1, size: 1, draft: 0.5 });
-    expect(savesOf(save)[1].qb1.plus).toBeCloseTo(savesOf(save)[1].qb1.dynasty! + 0.5, 2);
+    // A QB's round-1 average at 0.5×, on his Dynasty without the pre-draft discount.
+    const ae = Number(cell("Quarter One", "AE Score"));
+    const { dynasty, plus } = savesOf(save)[1].qb1;
+    expect(Math.abs(plus! - (dynasty! + (1 - QB_PREDRAFT_SCALE) * ae + 0.5 * 0.5854))).toBeLessThan(0.003);
     // Moved, then left before it settled: saved on the way out.
     fireEvent.change(screen.getByRole("slider", { name: "Draft weight" }), { target: { value: "1" } });
     unmount();
@@ -726,11 +740,12 @@ describe("BigBoard drafted classes", () => {
   it("scores a rookie's age as of the rookie season, so years later nothing moves", () => {
     const board = [...PROSPECTS.map((p) => (p.id === "qb1" ? { ...p, birthday: "2005-06-01" } : p)), ...POOL];
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
+    // After his class's draft both times, so the QB pre-draft discount is off in each.
+    vi.setSystemTime(new Date("2027-10-01T12:00:00Z"));
     const first = renderBoard(board);
     const then = { dyn: cell("Quarter One", "Dynasty"), age: cell("Quarter One", "Age") };
     first.unmount();
-    vi.setSystemTime(new Date("2031-10-01T12:00:00Z"));
+    vi.setSystemTime(new Date("2032-10-01T12:00:00Z"));
     renderBoard(board);
     expect(cell("Quarter One", "Dynasty")).toBe(then.dyn);
     expect(Number(cell("Quarter One", "Age"))).toBe(Number(then.age) + 5); // only the display ages

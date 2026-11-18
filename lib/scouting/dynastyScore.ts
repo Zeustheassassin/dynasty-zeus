@@ -4,7 +4,9 @@
 //   Dynasty Score      = AE Score + age weight × career window + size weight × size flags
 //                        + speed weight × an RB's speed floor (speedFloor.ts; off once his class is drafted)
 //                        + rushing weight × a QB's rushing bonus (qbRushing.ts)
-//   Dynasty Score Plus = Dynasty Score + draft weight × draft capital (once a round is set)
+//                        + a QB's pre-draft discount (QB_PREDRAFT_SCALE; off once his class is drafted)
+//   Dynasty Score Plus = Dynasty Score, less the QB pre-draft discount (his pick prices that in)
+//                        + draft weight × draft capital (once a round is set)
 //                        + landing weight × (rookie competition + vets ahead + path by year 2)
 //                        + role weight × role standing
 //                        + offense weight × (QB + pass/run offense)
@@ -143,18 +145,39 @@ const CAPITAL_ANCHORS: readonly [number, number][] = [1, 2, 3, 4, 5, 6, 7].map((
 // table's 0.05. So a 2nd-round QB hits about as often as a 3rd/4th-round RB or
 // WR, and a 4th-rounder about as often as a 7th.
 //
-// Round 1 stays as it is for every position, through its last pick (the user:
-// "I'd be more willing to gamble on Carr with the first round value"; a
-// first-round QB hits at least as often as the RB/WR curve credits, top picks
-// more). The cliff comes after it: from pick 32 down to the 2nd round's middle.
 // The user's check: a 4th-round QB they like (Drake Lindsey at pick 109 in the
 // 2027 mock) belongs in the middle to late 3rd round of a rookie draft, not the
-// 2nd; this puts him about 31st.
+// 2nd; this puts him about 31st. Round 1 isn't in this table: it goes by slot
+// (QB_SLOT_RATES below).
 export const QB_DRAFT_CAPITAL: Record<number, number> = {
-  1: 1.0, 2: 0.05, 3: -0.15, 4: -0.6, 5: -0.7, 6: -0.75, 7: -0.8, [UNDRAFTED_ROUND]: -1.0,
+  2: 0.05, 3: -0.15, 4: -0.6, 5: -0.7, 6: -0.75, 7: -0.8, [UNDRAFTED_ROUND]: -1.0,
 };
-/** Round 1's last pick, through which a QB's capital is everyone's. */
-export const QB_ROUND1_LAST = 32;
+
+// Inside round 1 a QB's value tapers by slot (the user, 2026-11-18, with a table
+// of QBs who started 8+ years, 2000s drafts): picks 1–5 ~35–40%, 6–10 ~25–30%,
+// 11–15 ~20–25%, 16–32 ~10–15%, round 2 ~8–12%. Until then round 1 was
+// everyone's through pick 32. Starting 8+ years is a stricter bar than the
+// RB/WR curve's (a top-24 season), so only the table's shape is used, not its
+// level: picks 1–5 keep everyone's value, round 2's middle keeps
+// QB_DRAFT_CAPITAL's, and each slot in between sits at its middle pick where
+// its rate falls between those two on log-odds: 6–10 ≈ +0.87 (pick 8), 11–15
+// ≈ +0.69 (pick 13), 16–32 ≈ +0.22 (pick 24). So a late first-round QB is
+// valued near a 2nd-rounder: NFL teams pay a premium to take QBs early, so
+// pick 24 says less about a QB than about a WR. On the user's 2027 test board
+// (consensus big board as the draft, 2026-11-18) the Dynasty+ top 12 went from
+// 5 QBs to 4 and the top 24 from 8 to 6, and Carr at pick 6 kept most of his
+// first-round value (−0.16 at the Draft slider's 2×), as the user wanted.
+/** The last pick through which a QB's capital is everyone's. */
+export const QB_FULL_CAPITAL_LAST = 5;
+/** The user's 8+ year starter rates by round-1 slot (each range's middle), first slot = picks 1–5. */
+export const QB_SLOT_RATES: readonly { first: number; last: number; rate: number }[] = [
+  { first: 1, last: 5, rate: 0.375 },
+  { first: 6, last: 10, rate: 0.275 },
+  { first: 11, last: 15, rate: 0.225 },
+  { first: 16, last: 32, rate: 0.125 },
+];
+/** Round 2's rate on the same table, the bottom of the taper. */
+export const QB_ROUND2_RATE = 0.1;
 
 function anchorValue(a: readonly [number, number][], pick: number): number {
   let i = 0;
@@ -164,13 +187,25 @@ function anchorValue(a: readonly [number, number][], pick: number): number {
   return y0 + ((pick - x0) * (y1 - y0)) / (x1 - x0);
 }
 
+const logit = (p: number) => Math.log(p / (1 - p));
+const slotMiddle = (s: { first: number; last: number }) => (s.first + s.last) / 2;
+
+/** A round-1 QB slot's value: where its rate falls between picks 1–5 (everyone's) and round 2 (QB table), on log-odds. */
+export function qbSlotValue(rate: number): number {
+  const topSlot = QB_SLOT_RATES[0];
+  const top = anchorValue(CAPITAL_ANCHORS, slotMiddle(topSlot));
+  const share = (logit(topSlot.rate) - logit(rate)) / (logit(topSlot.rate) - logit(QB_ROUND2_RATE));
+  return top - share * (top - QB_DRAFT_CAPITAL[2]);
+}
+
 const QB_CAPITAL_ANCHORS: readonly [number, number][] = [
-  [ROUND_MIDDLE_PICK[1], QB_DRAFT_CAPITAL[1]],
-  [QB_ROUND1_LAST, anchorValue(CAPITAL_ANCHORS, QB_ROUND1_LAST)],
+  [1, anchorValue(CAPITAL_ANCHORS, 1)],
+  [QB_FULL_CAPITAL_LAST, anchorValue(CAPITAL_ANCHORS, QB_FULL_CAPITAL_LAST)],
+  ...QB_SLOT_RATES.slice(1).map((s): [number, number] => [slotMiddle(s), qbSlotValue(s.rate)]),
   ...[2, 3, 4, 5, 6, 7].map((r): [number, number] => [ROUND_MIDDLE_PICK[r], QB_DRAFT_CAPITAL[r]]),
 ];
 
-/** Draft capital at an overall pick (1 = first pick), on the round table's scale; a QB's falls faster after round 1. */
+/** Draft capital at an overall pick (1 = first pick), on the round table's scale; a QB's falls faster from pick 6 (QB_SLOT_RATES). */
 export function draftCapitalForPick(pick: number, pos?: string | null): number {
   const v = anchorValue(pos === "QB" ? QB_CAPITAL_ANCHORS : CAPITAL_ANCHORS, pick);
   // Never below going undrafted.
@@ -185,7 +220,8 @@ export const ROUND_PICKS: Record<number, readonly [number, number]> = {
 /**
  * A QB's average capital over a round, for a round with no pick set. (The
  * RB/WR table's values are their rounds' averages already, within 0.025; a
- * QB's round 2 isn't, since the cliff after round 1 runs into it.)
+ * QB's rounds 1 and 2 aren't: round 1 tapers by slot, and the taper's last
+ * stretch runs into round 2.)
  */
 export function qbRoundAverage(round: number): number | null {
   const range = ROUND_PICKS[round];
@@ -199,7 +235,7 @@ export function qbRoundAverage(round: number): number | null {
  * Draft capital for Dynasty+: by overall pick when one is set, else the round's
  * average. Undrafted is −1 whatever the pick (the Rookie Draft Hub writes an
  * undrafted rookie as pick 300). Null before a round is set. A QB's falls
- * faster after round 1 (QB_DRAFT_CAPITAL).
+ * faster from pick 6 (QB_SLOT_RATES, QB_DRAFT_CAPITAL).
  */
 export function draftCapitalAt(round: number | null, pick: number | null, pos?: string | null): number | null {
   if (round == null) return null;
@@ -303,6 +339,32 @@ export interface DynastyWeights { age: number; size: number; speed: number; draf
 // a round of draft capital at the Draft slider's 2× (speedFloor.ts), until his
 // class is drafted.
 export const DEFAULT_DYNASTY_WEIGHTS: DynastyWeights = { age: 1, size: 1, speed: 1, draft: 2, landing: 1, role: 1, offense: 1, rushing: 1 };
+
+// ── QB pre-draft discount ──────────────────────────────────────────────────
+// Before the draft a QB's Dynasty Score counts 80% of his AE Score (the user,
+// 2026-11-18). The AE Score puts every position on its own footing, so the
+// board read the kth-best QB as worth the kth-best WR, and the 2027 top 12
+// carried 4 QBs. A QB's dynasty value swings far more on where he's picked:
+// inside round 1 his capital falls from everyone's at pick 5 to near a
+// 2nd-rounder's by pick 24 (QB_SLOT_RATES). Before the pick is known, trusting
+// his college edge 20% less stands in for that: the top QBs lose 0.20–0.33,
+// middling ones barely move, and below-average ones come up a little toward 0.
+// On the 2027 board the top 12 went from 4 QBs to 3 and the top 36 kept 7.
+// Off once his class is drafted (like the RB speed floor), and never in
+// Dynasty+, where his pick takes over, so it can't stack with the QB curve.
+// No slider: a fixed call, not a weight.
+export const QB_PREDRAFT_SCALE = 0.8;
+
+/** A QB's pre-draft discount, (scale − 1) × his AE Score; null off QB, once his class is drafted, or at 0. */
+export function qbPredraftDiscount(pos: CompositePos, aeScore: number, classDrafted: boolean): { value: number; label: string } | null {
+  if (pos !== "QB" || classDrafted) return null;
+  const value = (QB_PREDRAFT_SCALE - 1) * aeScore;
+  if (value === 0) return null;
+  return {
+    value,
+    label: `before the draft ${Math.round(QB_PREDRAFT_SCALE * 100)}% of a QB's AE Score counts (his value swings most on his pick; Dynasty+ uses the pick instead)`,
+  };
+}
 export const WEIGHT_MIN = 0;
 export const WEIGHT_MAX = 3;
 export const WEIGHT_STEP = 0.25;
@@ -338,6 +400,8 @@ export interface DynastyBreakdown {
   speed: SpeedFlag | null;
   /** A QB's rushing bonus before the Rushing slider; null without one. */
   rushing: { value: number; label: string } | null;
+  /** A QB's pre-draft discount, already in `dynasty` and backed out of `plus` (no slider); null when it doesn't apply. */
+  qbDiscount: { value: number; label: string } | null;
   dynasty: number;
   /** Before the draft weight; null when no round is set. */
   draftCapital: number | null;
@@ -353,8 +417,9 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
   const size = flags.reduce((s, f) => s + f.value, 0);
   const speed = speedFlag(inp.pos, inp.forty, inp.weightLb, inp.classDrafted ?? false);
   const rushing = inp.pos === "QB" ? inp.rushing ?? null : null;
+  const qbDiscount = qbPredraftDiscount(inp.pos, inp.aeScore, inp.classDrafted ?? false);
   const dynasty = inp.aeScore + w.age * (window ?? 0) + w.size * size + (w.speed ?? 0) * (speed?.value ?? 0)
-    + (w.rushing ?? 0) * (rushing?.value ?? 0);
+    + (w.rushing ?? 0) * (rushing?.value ?? 0) + (qbDiscount?.value ?? 0);
   const draftCapital = draftCapitalAt(inp.draftRound, inp.draftPick, inp.pos);
   let landing: LandingBreakdown | null = null;
   if (inp.landing && draftCapital != null) {
@@ -371,9 +436,11 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
     flags,
     speed,
     rushing,
+    qbDiscount,
     dynasty,
     draftCapital,
-    plus: draftCapital != null ? dynasty + w.draft * draftCapital + landingTotal(landing, w) : null,
+    // The QB discount stands in for an unknown pick, so Dynasty+ (which has the pick) backs it out.
+    plus: draftCapital != null ? dynasty - (qbDiscount?.value ?? 0) + w.draft * draftCapital + landingTotal(landing, w) : null,
     landing,
   };
 }

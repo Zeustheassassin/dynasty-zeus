@@ -7,7 +7,7 @@ import {
   QB_FULL_TRUST, RB_FULL_TRUST, WR_ALL_FULL_TRUST, WR_CORE_FULL_TRUST, POSITION_BASELINE,
 } from "../../lib/scouting/aeComposite";
 import {
-  PRIME_END_AGE, REFERENCE_ROOKIE_AGE,
+  PRIME_END_AGE, REFERENCE_ROOKIE_AGE, QB_PREDRAFT_SCALE,
   WEIGHT_MIN, WEIGHT_MAX, WEIGHT_STEP,
   type DynastyBreakdown, type DynastyWeights,
 } from "../../lib/scouting/dynastyScore";
@@ -849,8 +849,10 @@ export default function BigBoard({
       lines.push(`Speed: no 40 time yet${proj} → +0.00`);
     }
     if (d.rushing) lines.push(`Rushing: ${d.rushing.label} → ${signed(weights.rushing * d.rushing.value, 2)}`);
+    if (d.qbDiscount) lines.push(`QB pre-draft: ${d.qbDiscount.label} → ${signed(d.qbDiscount.value, 2)}`);
     lines.push(`= Dynasty ${signed(d.dynasty, 2)}`);
     if (plus && d.draftCapital != null) {
+      if (d.qbDiscount) lines.push(`QB pre-draft discount comes off (the pick prices it in) → ${signed(-d.qbDiscount.value, 2)}`);
       lines.push(`Drafted: ${draftCapitalLabel(p.draft_round!, p.draft_pick, p.position)} → ${signed(weights.draft * d.draftCapital, 2)}`);
       lines.push(...landingLines(d.landing, p.draft_class_year, weights));
       lines.push(`= Dynasty+ ${signed(d.plus!, 2)}`);
@@ -943,7 +945,8 @@ export default function BigBoard({
     "Dynasty Score: the AE Score plus a career-window adjustment for age (prime seasons left at rookie " +
     `age vs a typical ${REFERENCE_ROOKIE_AGE}-year-old rookie; primes end RB ${PRIME_END_AGE.RB}, WR ${PRIME_END_AGE.WR}, ` +
     `TE ${PRIME_END_AGE.TE}, QB ${PRIME_END_AGE.QB}), size (RB and WR pounds per inch of height vs the position's typical, plus WRs under 175 lb), ` +
-    `an RB's speed floor (Speed Score under ${RB_SPEED_FLOOR.none}, never a bonus, off once his class is drafted) and a QB's rushing. Weighted by the sliders.`;
+    `an RB's speed floor (Speed Score under ${RB_SPEED_FLOOR.none}, never a bonus, off once his class is drafted) and a QB's rushing. Weighted by the sliders. ` +
+    `Before the draft a QB counts ${Math.round(QB_PREDRAFT_SCALE * 100)}% of his AE Score (no slider; off once his class is drafted and never in Dynasty+, where his pick takes over).`;
   const preGradeTooltip =
     `Pre-draft grade: mirrors the Dynasty Score on a curve (${dynastyGradeCurveText()}, straight lines between) ` +
     "until the class is drafted, then stays as it stood. Read only while it mirrors. " +
