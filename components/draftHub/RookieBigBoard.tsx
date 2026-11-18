@@ -6,9 +6,11 @@ import { useAuth } from "../../lib/AuthContext";
 import { getFcValuesRaw } from "../../lib/fcValuesStore";
 import { useDraftBoardClass } from "../../hooks/useDraftBoardClass";
 import { SAMPLE_TIERS } from "../../lib/scouting/sampleTiers";
+import { classDraftedBy } from "../../lib/scouting/scoreLock";
 import {
   DRAFT_BOARD_COLUMNS, DRAFT_BOARD_POSITIONS, sortDraftBoard, nflDraftLabel, latestScoresSavedAt,
-  fcClassValues, fcValueFor, draftBoardSnapshotRows, readTiers, readNotes, type DraftBoardProspect,
+  fcClassValues, fcValueFor, draftBoardSnapshotRows, readNotes, draftBoardTiers, tierRangeLabel, TIER_STEP,
+  type DraftBoardProspect,
 } from "../../lib/helpers/draftBoard";
 import type { BoardScores, SleeperNFLState } from "../../lib/types";
 import { posBadge, normalizeRookieName } from "./shared";
@@ -17,13 +19,13 @@ const log = logger("components/draftHub/RookieBigBoard");
 
 // The rookie board for the class the Draft Hub is on (useDraftBoardClass):
 // the user's Scouting prospects in the Big Board's OVR order, with the scores
-// that board saved (lib/helpers/draftBoard.ts). Tiers and notes are the one
-// thing edited here, keyed by prospect id on the user's rookie_board_tiers row
-// for the class year.
+// that board saved (lib/helpers/draftBoard.ts). Tiers fill themselves from
+// those scores in 0.25 brackets (draftBoardTiers). Notes are the one thing
+// edited here, keyed by prospect id on the user's rookie_board_tiers row for
+// the class year.
 
 // How long typing must pause before a note saves to the account.
 const NOTE_SYNC_DELAY_MS = 800;
-const TIER_CHOICES = Array.from({ length: 15 }, (_, i) => i + 1);
 const SAMPLE_UNIT: Record<string, string> = { QB: "throws", RB: "runs", WR: "routes", TE: "routes" };
 
 // One grid for the header and every row, so the columns line up:
@@ -46,7 +48,6 @@ interface LoadedBoard {
   year: number;
   error: boolean;
   rows: DraftBoardProspect[];
-  tiers: Record<string, number>;
   notes: Record<string, string>;
 }
 
@@ -107,7 +108,7 @@ export default function RookieBigBoard({
   const [snapshotError, setSnapshotError] = useState(false);
 
   // ── Load ────────────────────────────────────────────────────
-  // The class's prospects and the year's tiers and notes, fresh on every
+  // The class's prospects and the year's notes, fresh on every
   // visit (this mounts each time the board is opened). Waits for the class
   // to settle, so it doesn't load one class and then the other.
   const loadKey = userId && ready ? `${userId}|${classYear}|${reloads}` : null;
@@ -119,7 +120,7 @@ export default function RookieBigBoard({
     const fail = (err: string) => {
       if (cancelled) return;
       log.error("draft board load failed", { err });
-      setLoaded({ key: loadKey, year, error: true, rows: [], tiers: {}, notes: {} });
+      setLoaded({ key: loadKey, year, error: true, rows: [], notes: {} });
     };
     Promise.all([
       supabase
@@ -130,7 +131,7 @@ export default function RookieBigBoard({
         .in("position", [...DRAFT_BOARD_POSITIONS]),
       supabase
         .from("rookie_board_tiers")
-        .select("tiers,notes")
+        .select("notes")
         .eq("user_id", userId)
         .eq("year", String(year))
         .maybeSingle(),
@@ -143,7 +144,6 @@ export default function RookieBigBoard({
         year,
         error: false,
         rows: sortDraftBoard((prospects.data ?? []) as DraftBoardProspect[]),
-        tiers: readTiers(saved.data?.tiers),
         notes: readNotes(saved.data?.notes),
       });
     }, (e: unknown) => fail(String(e)));
@@ -170,11 +170,11 @@ export default function RookieBigBoard({
   }, [rows, fcMap]);
 
   // ── Saves ───────────────────────────────────────────────────
-  // Tiers and notes ride the user's rookie_board_tiers row for the year; an
-  // upsert of one column leaves the other alone. One write at a time, so an
-  // older map can't land after a newer one.
+  // Notes ride the user's rookie_board_tiers row for the year; the upsert
+  // leaves the row's old hand-picked `tiers` column alone. One write at a
+  // time, so an older map can't land after a newer one.
   const writeChainRef = useRef<Promise<void>>(Promise.resolve());
-  const saveYearRow = useCallback((year: number, patch: { tiers?: Record<string, number>; notes?: Record<string, string> }) => {
+  const saveYearRow = useCallback((year: number, patch: { notes: Record<string, string> }) => {
     if (!userId) return;
     const row = { user_id: userId, year: String(year), ...patch, updated_at: new Date().toISOString() };
     writeChainRef.current = writeChainRef.current
@@ -202,15 +202,6 @@ export default function RookieBigBoard({
   }, [saveYearRow]);
   useEffect(() => () => flushNotes(), [flushNotes]);
 
-  const setTier = (id: string, tier: number | null) => {
-    if (!board) return;
-    const next = { ...board.tiers };
-    if (tier == null) delete next[id];
-    else next[id] = tier;
-    setLoaded((prev) => (prev && prev.key === board.key ? { ...prev, tiers: next } : prev));
-    saveYearRow(board.year, { tiers: next });
-  };
-
   const saveNote = (id: string, text: string) => {
     if (!board) return;
     const next = { ...board.notes, [id]: text };
@@ -225,7 +216,7 @@ export default function RookieBigBoard({
     if (!userId || !board || !snapshotName.trim()) return;
     setSaving(true);
     setSnapshotError(false);
-    const snapshotData = draftBoardSnapshotRows(board.rows, board.tiers, (p) => fcById.get(p.id) ?? 0);
+    const snapshotData = draftBoardSnapshotRows(board.rows, tiers, (p) => fcById.get(p.id) ?? 0);
     try {
       const { error } = await supabase
         .from("big_board_snapshots")
@@ -255,6 +246,12 @@ export default function RookieBigBoard({
   const ranked = useMemo(() => (rows ?? []).filter((p) => p.overall_rank != null).length, [rows]);
   const savedAt = useMemo(() => latestScoresSavedAt(rows ?? []), [rows]);
   const unscored = useMemo(() => (rows ?? []).filter((p) => !p.board_scores).length, [rows]);
+
+  // Tiers off Dynasty until the class is drafted, Dynasty+ after (draftBoardTiers).
+  const boardYear = board?.year;
+  const drafted = useMemo(() => boardYear != null && classDraftedBy(boardYear, new Date()), [boardYear]);
+  const tiers = useMemo(() => draftBoardTiers(rows ?? [], drafted), [rows, drafted]);
+  const tierScoreName = drafted ? "Dynasty+" : "Dynasty";
 
   if (!supabaseUser) {
     return (
@@ -474,11 +471,12 @@ export default function RookieBigBoard({
           ? `Scores from your last Big Board visit, ${new Date(savedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.`
           : "No saved scores yet."}
         {unscored > 0 && ` ${unscored} without scores: open Scouting → Big Board to save them.`}
+        {` Tiers step down ${TIER_STEP.toFixed(2)} of ${tierScoreName} from the top score; an empty step skips its tier.`}
       </p>
 
       {saveFailed && (
         <p role="alert" className="text-xs text-red-400 bg-red-950/30 border border-red-900/50 rounded-lg px-3 py-2 mb-2">
-          Couldn&apos;t save your last tier or note change. It&apos;ll try again with your next edit.
+          Couldn&apos;t save your last note change. It&apos;ll try again with your next edit.
         </p>
       )}
 
@@ -490,7 +488,7 @@ export default function RookieBigBoard({
         <span className="text-right" title={DYN_TOOLTIP}>Dyn</span>
         <span className="text-right" title={PLUS_TOOLTIP}>Dyn+</span>
         <span className="text-right" title={FC_TOOLTIP}>FC</span>
-        <span className="text-center">Tier</span>
+        <span className="text-center" title={`Tier: ${TIER_STEP.toFixed(2)} brackets of ${tierScoreName}, T1 holding the class's top score. Filled automatically.`}>Tier</span>
         <span aria-hidden="true" />
       </div>
 
@@ -500,9 +498,10 @@ export default function RookieBigBoard({
 
       {visible.map((p, i) => {
         const prev = i > 0 ? visible[i - 1] : null;
-        const myTier = board.tiers[p.id];
+        const myTier = tiers.get(p.id);
         const unrankedStart = p.overall_rank == null && (!prev || prev.overall_rank != null);
-        const showTierDivider = !searching && !!prev && myTier !== board.tiers[prev.id];
+        // A divider wherever the tier changes, and above the first row when it has one.
+        const showTierDivider = !searching && (prev ? myTier?.tier !== tiers.get(prev.id)?.tier : !!myTier);
         const hasNote = !!(board.notes[p.id] || "").trim();
         const fc = fcById.get(p.id) ?? 0;
         const nfl = nflDraftLabel(p);
@@ -528,8 +527,10 @@ export default function RookieBigBoard({
             {showTierDivider && (
               <div className="flex items-center gap-3 my-2 px-1">
                 <div className="flex-1 h-px bg-slate-600/50" />
-                {myTier !== undefined && (
-                  <span className="text-[10px] font-bold tracking-widest text-slate-500 uppercase">Tier {myTier}</span>
+                {myTier && (
+                  <span className="text-[10px] font-bold tracking-widest text-slate-500 uppercase">
+                    Tier {myTier.tier} <span className="font-semibold tracking-normal normal-case tabular-nums">· {tierRangeLabel(myTier)}</span>
+                  </span>
                 )}
                 <div className="flex-1 h-px bg-slate-600/50" />
               </div>
@@ -560,24 +561,19 @@ export default function RookieBigBoard({
               <span className="text-right text-[10px] font-mono text-slate-400 tabular-nums" title={FC_TOOLTIP}>
                 {fc > 0 ? fc.toLocaleString() : "—"}
               </span>
-              <select
-                aria-label={`Tier for ${p.name}`}
-                value={myTier ?? ""}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  setTier(p.id, Number.isNaN(val) ? null : val);
-                }}
-                className={`w-full appearance-none text-center text-[10px] font-bold rounded px-0.5 py-0.5 outline-none cursor-pointer border transition ${
-                  myTier !== undefined
+              <span
+                title={myTier
+                  ? `Tier ${myTier.tier}: ${tierScoreName} ${tierRangeLabel(myTier)}`
+                  : drafted ? "No tier: Dynasty+ shows once his NFL draft round is set on the Scouting Big Board"
+                  : "No tier: no Dynasty Score yet"}
+                className={`w-full text-center text-[10px] font-bold rounded px-0.5 py-0.5 border ${
+                  myTier
                     ? "bg-blue-900/40 border-blue-800/60 text-blue-300"
-                    : "bg-slate-700/50 border-slate-700 text-slate-500"
+                    : "border-transparent text-slate-600"
                 }`}
               >
-                <option value="">Tier</option>
-                {TIER_CHOICES.map((n) => (
-                  <option key={n} value={n}>T{n}</option>
-                ))}
-              </select>
+                {myTier ? `T${myTier.tier}` : "—"}
+              </span>
               <button
                 onClick={() => setExpandedNoteId(p.id)}
                 aria-label={hasNote ? `Edit note on ${p.name}` : `Add note on ${p.name}`}

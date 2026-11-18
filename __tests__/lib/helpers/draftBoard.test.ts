@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   sortDraftBoard, nflDraftLabel, latestScoresSavedAt, fcClassValues, fcValueFor,
-  draftBoardSnapshotRows, readTiers, readNotes, draftBoardRookies, unionRookies, sameRookie, isDraftedRookie,
+  draftBoardSnapshotRows, readNotes, draftBoardRookies, unionRookies, sameRookie, isDraftedRookie,
+  draftBoardTiers, tierRangeLabel, tierScore,
   type DraftBoardProspect,
 } from "../../../lib/helpers/draftBoard";
 import { normalizeRookieName } from "../../../lib/helpers/formatting";
@@ -142,7 +143,7 @@ describe("draftBoardSnapshotRows", () => {
       prospect("p1", "Cy First", 1, scores(1.234, undefined, 3.234), { draft_team: "NYJ", draft_round: 1, draft_pick: 3 }),
       prospect("p2", "Al Unranked", null, scores(null), { school: "" }),
     ];
-    const rows = draftBoardSnapshotRows(board, { p1: 2 }, (p) => (p.id === "p1" ? 6500 : 0));
+    const rows = draftBoardSnapshotRows(board, new Map([["p1", { tier: 2 }]]), (p) => (p.id === "p1" ? 6500 : 0));
     expect(rows).toEqual([
       {
         prospect_id: "p1", player_id: null, name: "Cy First", position: "WR", school: "Ohio State", team: "NYJ",
@@ -157,15 +158,76 @@ describe("draftBoardSnapshotRows", () => {
   });
 });
 
-describe("readTiers / readNotes", () => {
-  it("keep only whole-number tiers and non-empty notes", () => {
-    expect(readTiers({ a: 1, b: 2.5, c: "3", d: 0, e: 15 })).toEqual({ a: 1, e: 15 });
+describe("draftBoardTiers (0.25 brackets from the top score)", () => {
+  const tierOf = (rows: DraftBoardProspect[], drafted = false) => {
+    const t = draftBoardTiers(rows, drafted);
+    return Object.fromEntries(rows.map((p) => [p.id, t.get(p.id)?.tier ?? null]));
+  };
+
+  it("starts T1 at the top score's bracket and steps down 0.25 a tier", () => {
+    // The 2027 board on 2026-11-17: Smith +2.199 shows +2.20, so T1 is +2.00 to +2.25.
+    const rows = [
+      prospect("smith", "Smith", 1, scores(2.199)),
+      prospect("baugh", "Baugh", 2, scores(2.019)),
+      prospect("overmyer", "Overmyer", 3, scores(1.843)),
+      prospect("mestemaker", "Mestemaker", 5, scores(1.569)),
+      prospect("mensah", "Mensah", 6, scores(1.409)),
+      prospect("marsh", "Marsh", 10, scores(1.13)),
+    ];
+    expect(tierOf(rows)).toEqual({ smith: 1, baugh: 1, overmyer: 2, mestemaker: 3, mensah: 4, marsh: 5 });
+    expect(draftBoardTiers(rows, false).get("smith")).toEqual({ tier: 1, low: 2, high: 2.25 });
+  });
+
+  it("skips the number of an empty bracket", () => {
+    const rows = [prospect("a", "A", 1, scores(2.1)), prospect("b", "B", 2, scores(1.8)), prospect("c", "C", 3, scores(1.3))];
+    expect(tierOf(rows)).toEqual({ a: 1, b: 2, c: 4 }); // nobody in +1.50 to +1.75, so no T3
+  });
+
+  it("puts a score on an edge in the bracket above, read at the board's two decimals", () => {
+    const rows = [
+      prospect("a", "A", 1, scores(2.2)),
+      prospect("edge", "Edge", 2, scores(2)),
+      prospect("shows200", "Shows 2.00", 3, scores(1.996)),
+      prospect("shows199", "Shows 1.99", 4, scores(1.994)),
+    ];
+    expect(tierOf(rows)).toEqual({ a: 1, edge: 1, shows200: 1, shows199: 2 });
+  });
+
+  it("follows the top score up into a higher bracket", () => {
+    const rows = [prospect("a", "A", 1, scores(2.6)), prospect("b", "B", 2, scores(2.2))];
+    expect(tierOf(rows)).toEqual({ a: 1, b: 3 }); // T1 +2.50 to +2.75; +2.00 to +2.25 is T3
+  });
+
+  it("carries on below zero", () => {
+    const rows = [prospect("a", "A", 1, scores(0.1)), prospect("b", "B", 2, scores(-0.1)), prospect("c", "C", 3, scores(-0.25))];
+    expect(tierOf(rows)).toEqual({ a: 1, b: 2, c: 2 });
+    expect(tierRangeLabel(draftBoardTiers(rows, false).get("b")!)).toBe("−0.25 to +0.00");
+  });
+
+  it("reads Dynasty before the draft and Dynasty+ after; no score, no tier", () => {
+    const rows = [
+      prospect("a", "A", 1, scores(1.1, undefined, 2.3)),
+      prospect("b", "B", 2, scores(2.1, undefined, null)),
+      prospect("c", "C", 3, scores(null)),
+      prospect("d", "D", 4, null),
+    ];
+    expect(tierOf(rows, false)).toEqual({ a: 5, b: 1, c: null, d: null });
+    expect(tierOf(rows, true)).toEqual({ a: 1, b: null, c: null, d: null });
+    expect(tierScore(rows[0], true)).toBe(2.3);
+    expect(draftBoardTiers([prospect("d", "D", 1, null)], false).size).toBe(0);
+  });
+
+  it("labels a bracket", () => {
+    expect(tierRangeLabel({ low: 1.75, high: 2 })).toBe("+1.75 to +2.00");
+  });
+});
+
+describe("readNotes", () => {
+  it("keeps only non-empty notes", () => {
     expect(readNotes({ a: "fast", b: "  ", c: 4 })).toEqual({ a: "fast" });
   });
 
-  it("read anything else as empty", () => {
-    expect(readTiers(null)).toEqual({});
-    expect(readTiers([1, 2])).toEqual({});
+  it("reads anything else as empty", () => {
     expect(readNotes("x")).toEqual({});
   });
 });

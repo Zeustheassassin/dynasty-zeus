@@ -18,7 +18,7 @@ import {
 describe("gradeFromDynasty (the Pre grade's Dynasty curve)", () => {
   it("hits the user's points exactly", () => {
     expect(gradeFromDynasty(2)).toBe(90);
-    expect(gradeFromDynasty(2.3)).toBe(95);
+    expect(gradeFromDynasty(2.25)).toBe(95);
     expect(gradeFromDynasty(3)).toBe(100);
     expect(gradeFromDynasty(-2.25)).toBe(50);
     expect(gradeFromDynasty(0)).toBe(75);
@@ -26,17 +26,18 @@ describe("gradeFromDynasty (the Pre grade's Dynasty curve)", () => {
 
   it("runs a straight line between them, to one decimal", () => {
     expect(gradeFromDynasty(1)).toBe(82.5); // halfway 0 → 2
-    expect(gradeFromDynasty(2.15)).toBe(92.5); // halfway 2 → 2.3
-    expect(gradeFromDynasty(2.65)).toBe(97.5); // halfway 2.3 → 3
+    expect(gradeFromDynasty(2.125)).toBe(92.5); // halfway 2 → 2.25
+    expect(gradeFromDynasty(2.625)).toBe(97.5); // halfway 2.25 → 3
     expect(gradeFromDynasty(-1.125)).toBe(62.5); // halfway −2.25 → 0
     expect(gradeFromDynasty(-6.125)).toBe(25); // halfway −10 → −2.25
     expect(gradeFromDynasty(0.5)).toBe(78.8); // 75 + 15 × 0.5 / 2 = 78.75
   });
 
-  it("puts +2.0 up to +2.3 in 90–94.9 and +2.3 up to +3.0 in 95–100", () => {
+  it("puts +2.0 up to +2.25 in 90–94.9 and +2.25 up to +3.0 in 95–100", () => {
     expect(gradeFromDynasty(1.99)).toBeLessThan(90);
-    expect(gradeFromDynasty(2.29)).toBe(94.8); // 90 + 5 × 0.29 / 0.3 = 94.83
-    expect(gradeFromDynasty(2.29)).toBeLessThan(95);
+    expect(gradeFromDynasty(2.24)).toBe(94.8); // 90 + 5 × 0.24 / 0.25 = 94.8
+    expect(gradeFromDynasty(2.24)).toBeLessThan(95);
+    expect(gradeFromDynasty(2.3)).toBe(95.3); // 95 + 5 × 0.05 / 0.75 = 95.33, Generational now
     expect(gradeFromDynasty(2.99)).toBeLessThan(100);
   });
 
@@ -58,7 +59,7 @@ describe("gradeFromDynasty (the Pre grade's Dynasty curve)", () => {
   });
 
   it("reads the curve for tooltips", () => {
-    expect(dynastyGradeCurveText()).toBe("−10 → 0 · −2.25 → 50 · 0 → 75 · +2 → 90 · +2.3 → 95 · +3 → 100");
+    expect(dynastyGradeCurveText()).toBe("−10 → 0 · −2.25 → 50 · 0 → 75 · +2 → 90 · +2.25 → 95 · +3 → 100");
   });
 });
 

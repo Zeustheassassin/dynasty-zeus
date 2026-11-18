@@ -140,6 +140,55 @@ export function fcValueFor(name: string, position: string, fc: ReadonlyMap<strin
   return best;
 }
 
+// ── Tiers (the user's call, 2026-11-17; they replace the tiers picked by hand) ──
+// Tiers fill themselves from the saved score in 0.25-wide brackets on whole
+// quarters (+2.00 to +2.25, +1.75 to +2.00, ...). T1 is the bracket holding
+// the class's top score, and every bracket below it is the next tier number
+// even when nobody is in it, so an empty bracket skips its number. A bracket
+// holds its lower edge (+2.00 is in +2.00 to +2.25), and a score is read at
+// the board's two decimals, so the tier always matches the number on the row.
+// The score is Dynasty until the class is drafted (scoreLock.ts
+// classDraftedBy, May 1 of the draft year) and Dynasty+ after; a prospect
+// without that score has no tier.
+
+export const TIER_STEP = 0.25;
+
+export interface DraftBoardTier {
+  tier: number;
+  /** The bracket: low edge included, high edge not. */
+  low: number;
+  high: number;
+}
+
+/** The saved score the tiers read: Dynasty+ once the class is drafted, else Dynasty. */
+export function tierScore(p: Pick<DraftBoardProspect, "board_scores">, drafted: boolean): number | null {
+  const v = drafted ? p.board_scores?.plus : p.board_scores?.dynasty;
+  return v != null && Number.isFinite(v) ? v : null;
+}
+
+/** The quarter a score sits in, counted from 0: +2.00 to +2.25 is 8, −0.25 to 0 is −1. */
+const bracketOf = (v: number) => Math.floor(Math.round(Number(v.toFixed(2)) * 100) / (TIER_STEP * 100));
+
+/** Each scored prospect's tier, across the whole class (a position filter doesn't renumber them). */
+export function draftBoardTiers(rows: readonly DraftBoardProspect[], drafted: boolean): Map<string, DraftBoardTier> {
+  const brackets = new Map<string, number>();
+  for (const p of rows) {
+    const v = tierScore(p, drafted);
+    if (v != null) brackets.set(p.id, bracketOf(v));
+  }
+  const out = new Map<string, DraftBoardTier>();
+  if (brackets.size === 0) return out;
+  const top = Math.max(...brackets.values());
+  for (const [id, b] of brackets) out.set(id, { tier: top - b + 1, low: b * TIER_STEP, high: (b + 1) * TIER_STEP });
+  return out;
+}
+
+/** "+1.75 to +2.00". */
+export function tierRangeLabel(t: Pick<DraftBoardTier, "low" | "high">): string {
+  const s = (v: number) => `${v < 0 ? "−" : "+"}${Math.abs(v).toFixed(2)}`;
+  return `${s(t.low)} to ${s(t.high)}`;
+}
+
 // ── Snapshots ───────────────────────────────────────────────
 
 /** One row of a saved board (big_board_snapshots.snapshot_data). */
@@ -165,7 +214,7 @@ export interface DraftBoardSnapshotRow {
 /** The board as a snapshot, in board order. */
 export function draftBoardSnapshotRows(
   board: readonly DraftBoardProspect[],
-  tiers: Readonly<Record<string, number>>,
+  tiers: ReadonlyMap<string, Pick<DraftBoardTier, "tier">>,
   fcFor: (p: DraftBoardProspect) => number,
 ): DraftBoardSnapshotRow[] {
   return board.map((p, i) => ({
@@ -177,7 +226,7 @@ export function draftBoardSnapshotRows(
     team: p.draft_team || null,
     rank: i + 1,
     ovr: p.overall_rank,
-    tier: tiers[p.id] ?? null,
+    tier: tiers.get(p.id)?.tier ?? null,
     fc_value: fcFor(p),
     dynasty: p.board_scores?.dynasty ?? null,
     plus: p.board_scores?.plus ?? null,
@@ -247,15 +296,9 @@ export function isDraftedRookie(r: Pick<RookieBoardPlayer, "player_id" | "name">
   return !!r.name && drafted.has(`name:${normalizeRookieName(r.name)}`);
 }
 
-// ── Tiers and notes (rookie_board_tiers, keyed by prospect id) ──
-
-/** A stored tiers map, keeping only whole-number tiers. */
-export function readTiers(raw: unknown): Record<string, number> {
-  const out: Record<string, number> = {};
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
-  for (const [k, v] of Object.entries(raw)) if (typeof v === "number" && Number.isInteger(v) && v > 0) out[k] = v;
-  return out;
-}
+// ── Notes (rookie_board_tiers.notes, keyed by prospect id) ──
+// The row's `tiers` column holds the tiers once picked by hand. Nothing reads
+// or writes it since the tiers fill themselves (2026-11-17); it's left as it was.
 
 /** A stored notes map, keeping only non-empty text. */
 export function readNotes(raw: unknown): Record<string, string> {
