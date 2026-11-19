@@ -79,10 +79,10 @@ export interface TeamCast {
   qbDropbacks: number | null;
 }
 
-const round1 = (x: number) => Math.round(x * 10) / 10;
+export const round1 = (x: number) => Math.round(x * 10) / 10;
 
 /** Snap-weighted mean grade; a 0 grade on a handful of snaps is PFF's "not graded", not a real 0. */
-function weightedGrade(rows: readonly PffOffenseRow[], snaps: (r: PffOffenseRow) => number | null, grade: (r: PffOffenseRow) => number | null) {
+export function weightedGrade<T>(rows: readonly T[], snaps: (r: T) => number | null, grade: (r: T) => number | null): { grade: number | null; snaps: number } {
   let s = 0, sg = 0;
   for (const r of rows) {
     const n = snaps(r) ?? 0, g = grade(r);

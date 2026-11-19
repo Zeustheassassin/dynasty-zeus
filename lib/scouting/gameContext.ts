@@ -3,8 +3,9 @@
 //
 // ScoutingHub loads three things (migration 065): the user's
 // scouting_game_context rows (his CFD game, the two teams, his supporting
-// cast from PFF), the shared cfd_games rows those point at (kickoff, venue,
-// score, weather) and cfd_team_seasons (SP+). resolveGameContexts joins
+// cast from PFF, and from migration 103 the season unit grades), the shared
+// cfd_games rows those point at (kickoff, venue, score, weather) and
+// cfd_team_seasons (SP+). resolveGameContexts joins
 // them per charted game; gameCovariates turns them into the numbers the
 // context effects are fit on (contextEffects.ts).
 //
@@ -15,6 +16,7 @@
 // extra FCS effect can be measured on top.
 import type { ScoutingGame } from "../types";
 import type { CfdGameWithWeather, CfdTeamSeasonRow, WeatherStatus } from "../cfd/types";
+import { seasonReportStale } from "../pff/teamUnits";
 import type { CovariateSpec, GameCovariates } from "./contextEffects";
 import type { OpponentTier } from "./opponentTier";
 
@@ -40,10 +42,55 @@ export interface GameContextRow {
   qb_pff_id: number | null;
   qb_dropbacks: number | null;
   fetched_at: string;
+  // Season unit grades (migration 103; absent until it's applied). Full-season
+  // PFF grades for that game's season, never the same game's.
+  opp_pff_franchise_id?: number | null;
+  /** His team's OL season run-block grade (RB games) and the snaps behind it. */
+  ol_run_block_season?: number | null;
+  ol_run_block_season_snaps?: number | null;
+  /** The opponent's front seven (DI + ED + LB) season run-defense grade. */
+  opp_front7_run_def?: number | null;
+  opp_front7_run_def_snaps?: number | null;
+  /** The opponent's season coverage grade by alignment (lib/pff/teamUnits.ts). */
+  opp_cov_outside?: number | null;
+  opp_cov_outside_snaps?: number | null;
+  opp_cov_slot?: number | null;
+  opp_cov_slot_snaps?: number | null;
+  opp_cov_box?: number | null;
+  opp_cov_box_snaps?: number | null;
+  /** The opponent's season missed-tackle rate (%) and the attempts behind it. */
+  opp_mt_rate?: number | null;
+  opp_tackle_attempts?: number | null;
+  season_units_status?: SeasonUnitsStatus | null;
+  /** When the oldest report behind them was read from PFF. */
+  season_units_at?: string | null;
 }
 
-export const CONTEXT_ROW_SELECT =
+/** ok; no_pff = not linked to PFF; no_team = a team unknown; no_data = PFF had no defense report; n/a = QB game. */
+export type SeasonUnitsStatus = "ok" | "no_pff" | "no_team" | "no_data" | "n/a";
+
+/** The context columns before migration 103 (the fallback load while it isn't applied). */
+export const CONTEXT_ROW_SELECT_BEFORE_103 =
   "game_id,prospect_id,cfd_game_id,cfd_match_status,cfd_match_note,team_school,opponent_school,cast_status,pff_franchise_id,team_snaps,his_snaps,ol_pass_block,ol_pass_block_snaps,ol_run_block,ol_run_block_snaps,qb_pass_grade,qb_name,qb_pff_id,qb_dropbacks,fetched_at";
+export const CONTEXT_ROW_SELECT = `${CONTEXT_ROW_SELECT_BEFORE_103},opp_pff_franchise_id,ol_run_block_season,ol_run_block_season_snaps,opp_front7_run_def,opp_front7_run_def_snaps,opp_cov_outside,opp_cov_outside_snaps,opp_cov_slot,opp_cov_slot_snaps,opp_cov_box,opp_cov_box_snaps,opp_mt_rate,opp_tackle_attempts,season_units_status,season_units_at`;
+
+/** True when a load failed only because migration 103's columns aren't there yet. */
+export function isMissingSeasonUnitColumns(err: unknown): boolean {
+  const s = String(err instanceof Error ? err.message : err);
+  return /(season_units_|opp_pff_franchise_id|ol_run_block_season|opp_front7|opp_cov_|opp_mt_rate|opp_tackle_attempts)/.test(s)
+    && /(does not exist|schema cache|not find)/i.test(s);
+}
+
+/**
+ * A game whose season units the context fill should (re)compute: linked to
+ * PFF and never looked up, or filled from a report of the season in progress
+ * that's now over a week old. Only meaningful once migration 103 is in.
+ */
+export function needsSeasonUnits(row: Pick<GameContextRow, "season_units_status" | "season_units_at">, season: number, now = Date.now()): boolean {
+  const s = row.season_units_status ?? null;
+  if (s == null) return true;
+  return (s === "ok" || s === "no_data") && seasonReportStale(season, row.season_units_at ?? null, now);
+}
 export const CFD_GAME_SELECT =
   "id,season,week,season_type,start_date,start_time_tbd,completed,neutral_site,venue_id,venue,home_team,home_classification,home_points,away_team,away_classification,away_points,weather_status,temperature_f,wind_mph,humidity,gust_mph,precip_in,snow_in,weather_code,weather_fetched_at";
 export const TEAM_SEASON_SELECT = "season,school,conference,sp_rating,sp_offense,sp_defense,sp_ranking,sp_defense_ranking";
@@ -52,6 +99,8 @@ export interface GameContextData {
   rows: readonly GameContextRow[];
   cfdGames: readonly CfdGameWithWeather[];
   teamSeasons: readonly CfdTeamSeasonRow[];
+  /** True when the rows carry the season-unit columns (migration 103 applied). */
+  seasonUnits?: boolean;
 }
 export const EMPTY_CONTEXT_DATA: GameContextData = { rows: [], cfdGames: [], teamSeasons: [] };
 

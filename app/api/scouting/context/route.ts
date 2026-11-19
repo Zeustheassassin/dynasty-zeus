@@ -2,11 +2,13 @@
 //
 // Fills the automatic game context for a few of the caller's prospects
 // (tape-grading expansion, Stage 5): each charted game's CollegeFootballData
-// game (venue, kickoff, opponent), its weather (Open-Meteo archive) and his
-// supporting cast (PFF's offense facet for that game). The shared CFD cache is
+// game (venue, kickoff, opponent), its weather (Open-Meteo archive), his
+// supporting cast (PFF's offense facet for that game) and, for RB / WR / TE
+// games, the season unit grades (PFF's season run-blocking and defense
+// reports for the two teams, migration 103). The shared CFD cache is
 // refreshed only when stale (lib/cfd/cache.ts); the per-user rows
-// (scouting_game_context, pff_game_offense) are written as the caller under
-// their own RLS. The Scouting → PFF Links panel calls it in small batches,
+// (scouting_game_context, pff_game_offense, pff_team_season) are written as
+// the caller under their own RLS. The Scouting → PFF Links panel calls it in small batches,
 // after matching and imports and when it opens; PFF's per-minute read budget
 // is paced inside the client.
 

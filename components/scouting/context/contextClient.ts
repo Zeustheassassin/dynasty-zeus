@@ -8,7 +8,7 @@ import { CONTEXT_FILL_BATCH, type ContextFillResponse } from "../../../lib/gameC
 import { logger } from "../../../lib/logger";
 import { fetchAllRows } from "../../../lib/scouting/fetchPlays";
 import {
-  CFD_GAME_SELECT, CONTEXT_ROW_SELECT, TEAM_SEASON_SELECT,
+  CFD_GAME_SELECT, CONTEXT_ROW_SELECT, CONTEXT_ROW_SELECT_BEFORE_103, isMissingSeasonUnitColumns, TEAM_SEASON_SELECT,
   type GameContextData, type GameContextRow,
 } from "../../../lib/scouting/gameContext";
 import { supabase } from "../../../lib/supabaseclient";
@@ -27,13 +27,25 @@ export function isMissingContextTables(err: unknown): boolean {
 
 type Page<T> = PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
 
-/** The user's context rows (all, or one prospect's), their CFD games and the SP+ of those seasons. Throws on error. */
-export async function fetchGameContextData(prospectId?: string): Promise<GameContextData> {
-  const rows = await fetchAllRows<GameContextRow>((from, to) => {
-    let q = supabase.from("scouting_game_context").select(CONTEXT_ROW_SELECT);
+const contextRows = (select: string, prospectId?: string) =>
+  fetchAllRows<GameContextRow>((from, to) => {
+    let q = supabase.from("scouting_game_context").select(select);
     if (prospectId) q = q.eq("prospect_id", prospectId);
     return q.order("game_id").range(from, to) as unknown as Page<GameContextRow>;
   });
+
+/** The user's context rows (all, or one prospect's), their CFD games and the SP+ of those seasons. Throws on error. */
+export async function fetchGameContextData(prospectId?: string): Promise<GameContextData> {
+  let rows: GameContextRow[];
+  let seasonUnits = true;
+  try {
+    rows = await contextRows(CONTEXT_ROW_SELECT, prospectId);
+  } catch (err) {
+    // Migration 103 not applied yet: everything else still loads.
+    if (!isMissingSeasonUnitColumns(err)) throw err;
+    seasonUnits = false;
+    rows = await contextRows(CONTEXT_ROW_SELECT_BEFORE_103, prospectId);
+  }
   const ids = [...new Set(rows.map((r) => r.cfd_game_id).filter((id): id is number => id != null))];
   const cfdGames: CfdGameWithWeather[] = [];
   for (let i = 0; i < ids.length; i += 200) {
@@ -46,7 +58,7 @@ export async function fetchGameContextData(prospectId?: string): Promise<GameCon
     ? await fetchAllRows<CfdTeamSeasonRow>((from, to) =>
       supabase.from("cfd_team_seasons").select(TEAM_SEASON_SELECT).in("season", seasons).order("season").order("school").range(from, to) as unknown as Page<CfdTeamSeasonRow>)
     : [];
-  return { rows, cfdGames, teamSeasons };
+  return { rows, cfdGames, teamSeasons, seasonUnits };
 }
 
 export interface ContextFillProgress {

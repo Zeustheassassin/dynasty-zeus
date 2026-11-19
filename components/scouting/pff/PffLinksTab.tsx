@@ -146,6 +146,11 @@ export default function PffLinksTab({ onStatsChanged }: { onStatsChanged?: () =>
             <span className={`rounded border px-1.5 py-0.5 ${STATUS_CLASSES.good}`} title="Games with his line's block grades and his QB's grade (PFF)">
               Cast {ctx.coverage.cast}
             </span>
+            {ctx.coverage.seasonUnits != null && (
+              <span className={`rounded border px-1.5 py-0.5 ${STATUS_CLASSES.good}`} title="RB / WR / TE games with the season unit grades (PFF full season): the opponent's front seven, coverage by alignment and missed-tackle rate, and an RB's own line">
+                Season units {ctx.coverage.seasonUnits}
+              </span>
+            )}
             {ctx.coverage.pending > 0 && (
               <span className={`rounded border px-1.5 py-0.5 ${MUTED}`} title="Recent games: the weather archive runs about five days behind; filled automatically later">
                 Weather pending {ctx.coverage.pending}

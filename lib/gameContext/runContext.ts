@@ -14,7 +14,14 @@
 //      venue's coordinates and the kickoff → the Open-Meteo archive; domes are
 //      skipped, a game from the last few days stays pending until the archive
 //      has it.
-//   4. One scouting_game_context row per charted game, written as the caller.
+//   4. Season units (line season grades plan, migration 103; RB / WR / TE
+//      games linked to PFF): PFF's FULL-SEASON report for the opponent's
+//      defense, and for an RB his own team's run blocking, of that game's
+//      season. Kept per user in pff_team_season (a finished season read once,
+//      the season in progress again once a week old) and boiled down by
+//      lib/pff/teamUnits.ts. Until migration 103 is applied this step is
+//      skipped and the rows are written without those columns.
+//   5. One scouting_game_context row per charted game, written as the caller.
 // Opponent defense SP+ is read by the app from cfd_team_seasons at display
 // time, so an in-season SP+ update reaches every game without a rewrite.
 // ============================================================
@@ -30,7 +37,11 @@ import type { CfdGameWithWeather, WeatherStatus } from "../cfd/types";
 import type { PffClient } from "../pff/client";
 import { teamCast, trimOffenseRows, type PffOffenseRow, type TeamCast } from "../pff/cast";
 import { isPostseasonGame, pffTeamSchool } from "../pff/match";
-import { gameOffense, seasonTeams } from "../pff/ncaa";
+import { gameOffense, seasonTeams, teamSeasonFacet } from "../pff/ncaa";
+import {
+  defenseUnits, olRunBlock, SEASON_REPORTS, seasonReportStale, trimDefenseRows, trimRunBlockingRows,
+  type PffDefenseRow, type PffRunBlockRow, type SeasonReport,
+} from "../pff/teamUnits";
 import { fetchLearnedOpponentNames } from "../scouting/learnedOpponentNames";
 import { opponentSchool } from "../scouting/opponentTier";
 import {
@@ -196,7 +207,22 @@ export async function fillGameContext(deps: ContextDeps, prospectIds: readonly s
     Object.assign(cfdGames.get(u.id)!, u.patch);
   }
 
-  // ── 4. Context rows ──
+  // ── 4. Season units ──
+  const unitGames = new Map(games.map((g): [string, UnitGame] => {
+    const franchise = franchiseOf.get(g.id) ?? null;
+    const info = isLinked(g) ? pffSeason.get(g.season_year)?.games.find((x) => x.id === g.pff_game_id) : undefined;
+    return [g.id, {
+      prospectId: g.prospect_id, season: g.season_year, position: prospects.get(g.prospect_id)?.position ?? "",
+      linked: isLinked(g), franchise,
+      opponent: isLinked(g) ? opponentFranchise(franchise, offense.get(g.pff_game_id!), info) : null,
+    }];
+  }));
+  const units = await seasonReports(deps, [...unitGames.values()].filter((u) => !unreached.has(u.prospectId)), now);
+  for (const u of unitGames.values()) {
+    if (reportsFor(u).some((r) => units.missing.has(reportKey(r.season, r.franchiseId, r.report)))) unreached.add(u.prospectId);
+  }
+
+  // ── 5. Context rows ──
   const fetchedAt = new Date(now).toISOString();
   const rows = games.filter((g) => !unreached.has(g.prospect_id)).map((g) => {
     const p = prospects.get(g.prospect_id);
@@ -218,6 +244,8 @@ export async function fillGameContext(deps: ContextDeps, prospectIds: readonly s
       qb_pass_grade: cast?.qbPassGrade ?? null, qb_name: cast?.qbName ?? null,
       qb_pff_id: cast?.qbPlayerId ?? null, qb_dropbacks: cast?.qbDropbacks ?? null,
       fetched_at: fetchedAt,
+      // Before migration 103 the columns don't exist: leave them out.
+      ...(units.ready ? seasonUnitColumns(unitGames.get(g.id)!, units.reports, deps.pff != null) : {}),
     };
   });
   for (let i = 0; i < rows.length; i += 200) {
@@ -226,6 +254,7 @@ export async function fillGameContext(deps: ContextDeps, prospectIds: readonly s
   }
 
   const castOk = new Set(rows.filter((x) => x.cast_status === "ok").map((x) => x.game_id));
+  const unitsOk = new Set(rows.filter((x) => (x as { season_units_status?: string }).season_units_status === "ok").map((x) => x.game_id));
   for (const g of games) {
     const r = results.get(g.prospect_id)!;
     if (unreached.has(g.prospect_id)) { r.error = "Not reached this batch; run again"; continue; }
@@ -238,8 +267,156 @@ export async function fillGameContext(deps: ContextDeps, prospectIds: readonly s
     if (ws === "ok" || ws === "dome") r.weather = (r.weather ?? 0) + 1;
     if (ws === "pending") r.weatherPending = (r.weatherPending ?? 0) + 1;
     if (castOk.has(g.id)) r.cast = (r.cast ?? 0) + 1;
+    if (unitsOk.has(g.id)) r.seasonUnits = (r.seasonUnits ?? 0) + 1;
   }
   return { results: [...results.values()], cfdFetched: cache.fetched, cfdRemaining: cache.remaining };
+}
+
+// ── Season units (line season grades plan, migration 103) ────
+
+/** One charted game, as the season-units step sees it. */
+export interface UnitGame {
+  prospectId: string;
+  season: number;
+  position: string;
+  /** Linked to its PFF game. */
+  linked: boolean;
+  /** His PFF franchise that day, and the opponent's. */
+  franchise: number | null;
+  opponent: number | null;
+}
+
+/**
+ * The other team in a PFF game: from the game's offense facet (both teams'
+ * players), else PFF's schedule. Null when neither says.
+ */
+export function opponentFranchise(
+  franchise: number | null,
+  facet: readonly PffOffenseRow[] | undefined,
+  scheduled: { home_franchise_id: number; away_franchise_id: number } | undefined,
+): number | null {
+  if (franchise == null) return null;
+  const teams = new Set((facet ?? []).map((r) => r.team));
+  if (teams.size === 2 && teams.has(franchise)) return [...teams].find((t) => t !== franchise)!;
+  if (scheduled?.home_franchise_id === franchise) return scheduled.away_franchise_id;
+  if (scheduled?.away_franchise_id === franchise) return scheduled.home_franchise_id;
+  return null;
+}
+
+export const reportKey = (season: number, franchiseId: number, report: SeasonReport) => `${season}|${franchiseId}|${report}`;
+
+export interface ReportNeed { season: number; franchiseId: number; report: SeasonReport }
+
+/** The season reports a game needs: an RB his team's run blocking and the opponent's defense; a WR / TE the opponent's defense; a QB none. */
+export function reportsFor(g: UnitGame): ReportNeed[] {
+  if (!g.linked || g.franchise == null || g.opponent == null) return [];
+  const pos = g.position.toUpperCase();
+  const defense: ReportNeed = { season: g.season, franchiseId: g.opponent, report: "defense" };
+  if (pos === "RB") return [{ season: g.season, franchiseId: g.franchise, report: "run_blocking" }, defense];
+  return pos === "WR" || pos === "TE" ? [defense] : [];
+}
+
+/** A stored report: its trimmed rows and when PFF was read. */
+export interface StoredReport { rows: readonly unknown[]; fetchedAt: string }
+
+const UNIT_POSITIONS = new Set(["RB", "WR", "TE"]);
+
+/** A game's season-unit columns on scouting_game_context (migration 103). */
+export function seasonUnitColumns(g: UnitGame, reports: ReadonlyMap<string, StoredReport>, pffOn: boolean): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    opp_pff_franchise_id: g.opponent,
+    ol_run_block_season: null, ol_run_block_season_snaps: null,
+    opp_front7_run_def: null, opp_front7_run_def_snaps: null,
+    opp_cov_outside: null, opp_cov_outside_snaps: null,
+    opp_cov_slot: null, opp_cov_slot_snaps: null,
+    opp_cov_box: null, opp_cov_box_snaps: null,
+    opp_mt_rate: null, opp_tackle_attempts: null,
+    season_units_status: null, season_units_at: null,
+  };
+  if (!UNIT_POSITIONS.has(g.position.toUpperCase())) return { ...out, season_units_status: "n/a" };
+  if (!g.linked || !pffOn) return { ...out, season_units_status: "no_pff" };
+  if (g.franchise == null || g.opponent == null) return { ...out, season_units_status: "no_team" };
+  const read: string[] = [];
+  const need = reportsFor(g);
+  for (const r of need) {
+    const rep = reports.get(reportKey(r.season, r.franchiseId, r.report));
+    if (!rep) continue;
+    read.push(rep.fetchedAt);
+    if (r.report === "run_blocking") {
+      const ol = olRunBlock(rep.rows as PffRunBlockRow[]);
+      out.ol_run_block_season = ol.grade; out.ol_run_block_season_snaps = ol.snaps;
+    } else if (rep.rows.length) {
+      const d = defenseUnits(rep.rows as PffDefenseRow[]);
+      out.opp_front7_run_def = d.frontSeven.grade; out.opp_front7_run_def_snaps = d.frontSeven.snaps;
+      out.opp_cov_outside = d.coverage.outside.grade; out.opp_cov_outside_snaps = d.coverage.outside.snaps;
+      out.opp_cov_slot = d.coverage.slot.grade; out.opp_cov_slot_snaps = d.coverage.slot.snaps;
+      out.opp_cov_box = d.coverage.box.grade; out.opp_cov_box_snaps = d.coverage.box.snaps;
+      out.opp_mt_rate = d.missedTackles.rate; out.opp_tackle_attempts = d.missedTackles.attempts;
+    }
+  }
+  const defense = reports.get(reportKey(g.season, g.opponent, "defense"));
+  out.season_units_status = defense?.rows.length ? "ok" : "no_data";
+  const oldest = read.map((t) => Date.parse(t)).filter(Number.isFinite).sort((a, b) => a - b)[0];
+  out.season_units_at = oldest != null ? new Date(oldest).toISOString() : null;
+  return out;
+}
+
+interface SeasonReportRow { season: number; franchise_id: number; report: SeasonReport; rows: unknown[]; fetched_at: string }
+
+// PostgREST reports a table it doesn't know (migration 103 not applied) as PGRST205 (or 42P01).
+const tableMissing = (e: { code?: string; message: string }) =>
+  e.code === "PGRST205" || e.code === "42P01" || (/pff_team_season/.test(e.message) && /schema cache|does not exist/i.test(e.message));
+
+/**
+ * The reports these games need: the stored copy while it's current, else a
+ * fresh PFF read (stored right away, empty or not, so a team PFF has nothing
+ * for isn't asked again until the copy goes stale). Past the deadline a stale
+ * copy still serves; a report never read is `missing` (its prospects wait for
+ * the next batch). `ready` = migration 103 is applied.
+ */
+async function seasonReports(
+  deps: ContextDeps, games: readonly UnitGame[], now: number,
+): Promise<{ ready: boolean; reports: Map<string, StoredReport>; missing: Set<string> }> {
+  const { supabase, userId } = deps;
+  const reports = new Map<string, StoredReport>();
+  const missing = new Set<string>();
+  const needed = new Map<string, ReportNeed>();
+  if (deps.pff) for (const g of games) for (const r of reportsFor(g)) needed.set(reportKey(r.season, r.franchiseId, r.report), r);
+
+  const seasons = [...new Set([...needed.values()].map((r) => r.season))];
+  const franchises = [...new Set([...needed.values()].map((r) => r.franchiseId))];
+  // With nothing to read this still asks once, to learn whether migration 103 is in.
+  const { data, error } = needed.size
+    ? await supabase.from("pff_team_season").select("season,franchise_id,report,rows,fetched_at").in("season", seasons).in("franchise_id", franchises)
+    : await supabase.from("pff_team_season").select("season").limit(1);
+  if (error) {
+    if (tableMissing(error)) return { ready: false, reports, missing };
+    throw new Error(error.message);
+  }
+  const stored = new Map<string, StoredReport>();
+  for (const r of (needed.size ? data ?? [] : []) as SeasonReportRow[]) {
+    stored.set(reportKey(r.season, r.franchise_id, r.report), { rows: r.rows ?? [], fetchedAt: r.fetched_at });
+  }
+
+  for (const [key, need] of needed) {
+    const have = stored.get(key);
+    if (have && !seasonReportStale(need.season, have.fetchedAt, now)) { reports.set(key, have); continue; }
+    if (deps.deadline != null && Date.now() > deps.deadline) {
+      if (have) reports.set(key, have); else missing.add(key);
+      continue;
+    }
+    const { path, key: bodyKey } = SEASON_REPORTS[need.report];
+    const raw = await teamSeasonFacet(deps.pff!, path, bodyKey, need.season, need.franchiseId);
+    const rows = need.report === "defense" ? trimDefenseRows(raw, need.franchiseId) : trimRunBlockingRows(raw, need.franchiseId);
+    const fetchedAt = new Date(now).toISOString();
+    const { error: upErr } = await supabase.from("pff_team_season").upsert(
+      { user_id: userId, season: need.season, franchise_id: need.franchiseId, report: need.report, rows, fetched_at: fetchedAt },
+      { onConflict: "user_id,season,franchise_id,report" },
+    );
+    if (upErr) throw new Error(upErr.message);
+    reports.set(key, { rows, fetchedAt });
+  }
+  return { ready: true, reports, missing };
 }
 
 interface WeatherUpdate { id: number; patch: Record<string, unknown> }

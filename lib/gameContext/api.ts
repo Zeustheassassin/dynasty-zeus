@@ -16,6 +16,8 @@ export interface ContextFillResult {
   weatherPending?: number;
   /** Games with the supporting cast in. */
   cast?: number;
+  /** Games with the season unit grades in (migration 103). */
+  seasonUnits?: number;
   unmatched?: { gameId: string; reason: string }[];
   error?: string;
 }

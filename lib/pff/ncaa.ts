@@ -229,6 +229,21 @@ export async function teamFacet(
   }, []);
 }
 
+/**
+ * Every player of one team over a WHOLE season (no week list), for the season
+ * unit grades (lib/pff/teamUnits.ts, migration 103). ~0.3–2 s and 20–50 KB
+ * per read (checked 2026-11-19). [] when PFF has none.
+ */
+export async function teamSeasonFacet(
+  client: PffClient, path: string, key: string, season: number, franchiseId: number,
+): Promise<PffStatRow[]> {
+  return getOrEmpty(async () => {
+    const body = await client.get(`/v1/facet/${path}`, { league: "ncaa", season, franchise_id: franchiseId });
+    const r = reportBody(body, key);
+    return Array.isArray(r) ? (r as PffStatRow[]) : [];
+  }, []);
+}
+
 /** Every offensive player of BOTH teams in one game, with that game's snaps
  *  and grades (Stage 5 supporting cast; PFF ignores franchise_id here). */
 export async function gameOffense(client: PffClient, gameId: number): Promise<PffStatRow[]> {

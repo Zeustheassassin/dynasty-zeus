@@ -2,14 +2,16 @@
 // Keeps every charted game's context filled in (Scouting → PFF Links,
 // tape-grading expansion Stage 5): works out which prospects need a fill (a
 // game with no context row, a game whose weather the archive can read now, a
-// game linked to PFF since its cast was looked up) and runs
+// game linked to PFF since its cast was looked up, a linked game whose season
+// unit grades were never looked up or came from a week-old report of the
+// season in progress, migration 103) and runs
 // /api/scouting/context for them: once when the tab opens, after every PFF
 // import, and on the button. It waits while matching or importing runs, so
 // the two never share PFF's read budget at once.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { logger } from "../../../lib/logger";
-import { EMPTY_CONTEXT_DATA, type GameContextData } from "../../../lib/scouting/gameContext";
+import { EMPTY_CONTEXT_DATA, needsSeasonUnits, type GameContextData } from "../../../lib/scouting/gameContext";
 import { archiveReady, kickoffMs } from "../../../lib/weather/openMeteo";
 import {
   CONTEXT_MIGRATION_HINT, fetchGameContextData, isMissingContextTables, runContextFill, type ContextFillProgress,
@@ -18,7 +20,7 @@ import {
 const log = logger("scouting/context/useContextFill");
 const LINKED = new Set(["auto", "confirmed"]);
 
-interface FillGame { id: string; prospect_id: string; pff_game_id: number | null; pff_match_status: string | null }
+interface FillGame { id: string; prospect_id: string; season_year: number; pff_game_id: number | null; pff_match_status: string | null }
 
 export interface ContextCoverage {
   games: number;
@@ -27,6 +29,8 @@ export interface ContextCoverage {
   weather: number;
   pending: number;
   cast: number;
+  /** Games with the season unit grades in; null before migration 103. */
+  seasonUnits: number | null;
 }
 
 /** Prospects with a game the fill would add something to. */
@@ -39,6 +43,7 @@ export function prospectsToFill(games: readonly FillGame[], data: GameContextDat
     if (!r) { out.add(g.prospect_id); continue; }
     const linked = g.pff_game_id != null && LINKED.has(g.pff_match_status ?? "");
     if (linked && r.cast_status !== "ok") { out.add(g.prospect_id); continue; }
+    if (linked && data.seasonUnits && needsSeasonUnits(r, g.season_year, now)) { out.add(g.prospect_id); continue; }
     const cg = r.cfd_game_id != null ? cfd.get(r.cfd_game_id) : undefined;
     const k = cg?.start_date ? kickoffMs(cg.start_date, cg.start_time_tbd) : null;
     if (cg && (cg.weather_status == null || (cg.weather_status === "pending" && k != null && archiveReady(k, now)))) out.add(g.prospect_id);
@@ -49,13 +54,14 @@ export function prospectsToFill(games: readonly FillGame[], data: GameContextDat
 export function coverage(games: readonly FillGame[], data: GameContextData): ContextCoverage {
   const rows = new Map(data.rows.map((r) => [r.game_id, r]));
   const cfd = new Map(data.cfdGames.map((g) => [g.id, g]));
-  const c: ContextCoverage = { games: games.length, filled: 0, matched: 0, weather: 0, pending: 0, cast: 0 };
+  const c: ContextCoverage = { games: games.length, filled: 0, matched: 0, weather: 0, pending: 0, cast: 0, seasonUnits: data.seasonUnits ? 0 : null };
   for (const g of games) {
     const r = rows.get(g.id);
     if (!r) continue;
     c.filled++;
     if (r.cfd_match_status === "auto") c.matched++;
     if (r.cast_status === "ok") c.cast++;
+    if (c.seasonUnits != null && r.season_units_status === "ok") c.seasonUnits++;
     const ws = r.cfd_game_id != null ? cfd.get(r.cfd_game_id)?.weather_status : null;
     if (ws === "ok" || ws === "dome") c.weather++;
     if (ws === "pending") c.pending++;
