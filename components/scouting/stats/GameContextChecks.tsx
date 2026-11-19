@@ -6,12 +6,19 @@
 // rerun on the current data. A switch in contextGrading.ts is flipped only
 // when its test passes: lower held-out error, most folds, and (the slow part,
 // on the button) better than 95% of shuffles. Supporting cast is tested and
-// shown, never applied (the user's call).
+// shown, never applied (the user's call). Season units (PFF full-season
+// grades, migration 103; line season grades plan Stage 2) have their own
+// table: each tested on top of what the metric is judged against now, nothing
+// switched on yet.
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Prospect, QBPlay, RBPlay, ScoutingGame, TEPlay } from "../../../lib/types";
 import type { GradingData } from "../../../lib/scouting/aeComponents";
 import type { ProspectGameRouteCellsRow } from "../../../lib/scouting/aggregateMerge";
-import { buildContextReport, contextMetrics, contextPValues, type ContextCheck, type ContextPValues } from "../../../lib/scouting/contextChecks";
+import {
+  buildContextReport, contextMetrics, contextPValues, SEASON_UNIT_TESTS, unitPValue,
+  type ContextCheck, type ContextPValues, type UnitCheck,
+} from "../../../lib/scouting/contextChecks";
+import { MIN_SEASON_GAMES } from "../../../lib/pff/teamUnits";
 import { CONTEXT_TEST_MIN_PROSPECTS, PERMUTATION_P, PERMUTATIONS } from "../../../lib/scouting/contextEffects";
 import { FLAG_TEST_MIN_PROSPECTS } from "../../../lib/scouting/gameFlags";
 import type { CompositePos } from "../../../lib/scouting/aeComposite";
@@ -48,9 +55,17 @@ function inUse(c: ContextCheck): string {
   return parts.join(" + ");
 }
 
-function effects(c: ContextCheck): string {
-  if (!c.applied.length) return "—";
-  return c.applied.map((a) => `${a.label} ${a.effect >= 0 ? "+" : ""}${a.effect.toFixed(Math.abs(a.effect) < 0.1 ? 3 : 2)} per ${a.unit}`).join(" · ");
+function effectText(list: readonly { label: string; unit: string; effect: number }[]): string {
+  if (!list.length) return "—";
+  return list.map((a) => `${a.label} ${a.effect >= 0 ? "+" : ""}${a.effect.toFixed(Math.abs(a.effect) < 0.1 ? 3 : 2)} per ${a.unit}`).join(" · ");
+}
+const effects = (c: ContextCheck) => effectText(c.applied);
+
+/** Green when it beats its base held out (and, once run, the chance check). */
+function unitTone(u: UnitCheck, p: number | null | undefined): string {
+  if (!u.beatsBase || (u.improvement ?? 0) <= 0) return "";
+  if (p == null) return "text-emerald-300/70";
+  return p <= PERMUTATION_P ? "text-emerald-300 font-semibold" : "";
 }
 
 export default function GameContextChecks(props: Props) {
@@ -60,6 +75,7 @@ export default function GameContextChecks(props: Props) {
     [prospects, games, qbPlays, rbPlays, tePlays, gameRouteCells, gradingData],
   );
   const [pvals, setPvals] = useState<Map<string, ContextPValues>>(new Map());
+  const [unitP, setUnitP] = useState<Map<string, number | null>>(new Map());
   const [running, setRunning] = useState<string | null>(null);
   const cancel = useRef(false);
 
@@ -69,6 +85,8 @@ export default function GameContextChecks(props: Props) {
     const { metrics, cc } = contextMetrics({ prospects, games, qbPlays, rbPlays, tePlays, gameRouteCells, gradingData });
     const testable = new Set(report.metrics.filter((c) => c.testable).map((c) => c.key));
     const out = new Map<string, ContextPValues>();
+    const unitOut = new Map<string, number | null>();
+    const unitTestable = new Set(report.units.filter((u) => u.testable).map((u) => u.id));
     for (const m of metrics) {
       if (cancel.current) break;
       if (!testable.has(m.key)) continue;
@@ -76,6 +94,12 @@ export default function GameContextChecks(props: Props) {
       await new Promise((r) => setTimeout(r, 0));
       out.set(m.key, contextPValues(m, cc));
       setPvals(new Map(out));
+      for (const t of SEASON_UNIT_TESTS) {
+        const id = `${t.key}|${t.input}`;
+        if (t.key !== m.key || !unitTestable.has(id)) continue;
+        unitOut.set(id, unitPValue(m, t.input, cc));
+      }
+      setUnitP(new Map(unitOut));
     }
     setRunning(null);
   }, [prospects, games, qbPlays, rbPlays, tePlays, gameRouteCells, gradingData, report]);
@@ -138,6 +162,49 @@ export default function GameContextChecks(props: Props) {
                   <td className={`${td} text-right text-slate-400`} title={c.castLabel}>{pct(c.cast)}{pv(p?.cast)}</td>
                   <td className={`${td} ${c.opponent === "sp" || c.weatherOn ? "text-emerald-400" : "text-slate-500"}`}>{inUse(c)}</td>
                   <td className={`${td} text-slate-400`}>{effects(c)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Section>
+
+      <Section
+        title="Season units (PFF full season)"
+        note={
+          <p>
+            {cov.seasonUnits} charted games have PFF&apos;s full-season reports for the opponent ({MIN_SEASON_GAMES}+ games behind them;
+            a team PFF charted only once or twice, like an FCS opponent, isn&apos;t used: that grade is close to the same game&apos;s).
+            Each input is tested on top of what the metric is judged against now, the same way as above. Coverage is the
+            opponent&apos;s season coverage grade at the spots he ran his routes from that game (outside / slot / box). For metrics
+            judged against SP+, &quot;Instead of SP+&quot; is the input on its own vs no opponent model, next to SP+&apos;s own number.
+            Nothing here is in any score yet: an input goes in only after it passes and you OK it.
+          </p>
+        }
+      >
+        <table className="min-w-full text-xs">
+          <thead><tr>
+            <th className={th}>Pos</th><th className={th}>Metric</th><th className={th}>Input</th><th className={th}>On top of</th>
+            <th className={`${th} text-right`}>Prospects / games</th><th className={`${th} text-right`}>Held out</th>
+            <th className={`${th} text-right`}>Instead of SP+</th><th className={th}>Effect (fit on all)</th>
+          </tr></thead>
+          <tbody>
+            {report.units.map((u) => {
+              const p = unitP.get(u.id);
+              return (
+                <tr key={u.id} className="border-t border-slate-800/60">
+                  <td className={td}>{u.pos}</td>
+                  <td className={td}>{u.label}</td>
+                  <td className={td}>{u.inputLabel}</td>
+                  <td className={`${td} text-slate-500`}>{u.base}</td>
+                  <td className={`${td} text-right`}>{u.testable ? `${u.prospects} / ${u.games}` : `${u.prospects}/${CONTEXT_TEST_MIN_PROSPECTS}`}</td>
+                  <td className={`${td} text-right ${unitTone(u, p)}`} title={u.beatsBase ? "Lower held-out error overall and in most folds" : "Doesn't beat the base held out"}>
+                    {pct(u.improvement)}{pv(p)}
+                  </td>
+                  <td className={`${td} text-right ${u.replace?.beatsSp ? "text-emerald-300" : "text-slate-400"}`} title={u.replace ? (u.replace.beatsSp ? "Beats SP+ held out" : "Doesn't beat SP+ held out") : "Not judged against SP+"}>
+                    {u.replace ? `${pct(u.replace.improvement)} vs ${pct(u.replace.sp)}` : "—"}
+                  </td>
+                  <td className={`${td} text-slate-400`}>{effectText(u.effects)}</td>
                 </tr>
               );
             })}

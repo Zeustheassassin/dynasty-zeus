@@ -30,6 +30,12 @@
 --                                  defender's corner / slot / box snaps
 --      opp_mt_rate                 the opponent's missed-tackle rate, % (all defenders)
 --      opp_tackle_attempts         tackles + assists + misses behind that rate
+--      opp_season_games            games PFF charted the opponent that season
+--      team_season_games           and his team (RB games): a report from one
+--                                  or two games (an FCS team PFF saw only
+--                                  against FBS teams, maybe only this game) is
+--                                  really a same-game grade, so the grading
+--                                  needs a full season behind each
 --      season_units_status         ok / no_pff / no_team / no_data / n/a (QB games)
 --      season_units_at             when the oldest report used was read
 --    The _snaps columns are the snap weight behind each grade, so a thin
@@ -86,6 +92,8 @@ ALTER TABLE public.scouting_game_context ADD COLUMN IF NOT EXISTS opp_cov_box   
 ALTER TABLE public.scouting_game_context ADD COLUMN IF NOT EXISTS opp_cov_box_snaps         integer;
 ALTER TABLE public.scouting_game_context ADD COLUMN IF NOT EXISTS opp_mt_rate               numeric(4,1);
 ALTER TABLE public.scouting_game_context ADD COLUMN IF NOT EXISTS opp_tackle_attempts       integer;
+ALTER TABLE public.scouting_game_context ADD COLUMN IF NOT EXISTS opp_season_games          integer;
+ALTER TABLE public.scouting_game_context ADD COLUMN IF NOT EXISTS team_season_games         integer;
 ALTER TABLE public.scouting_game_context ADD COLUMN IF NOT EXISTS season_units_status       text;
 ALTER TABLE public.scouting_game_context ADD COLUMN IF NOT EXISTS season_units_at           timestamptz;
 
@@ -108,6 +116,8 @@ COMMENT ON COLUMN public.scouting_game_context.opp_cov_outside IS
   'The opponent''s coverage grade over that season, weighted by each defender''s snaps at corner; _slot and _box likewise (migration 103).';
 COMMENT ON COLUMN public.scouting_game_context.opp_mt_rate IS
   'The opponent''s missed-tackle rate over that season, %: misses / (tackles + assists + misses), all defenders (migration 103).';
+COMMENT ON COLUMN public.scouting_game_context.opp_season_games IS
+  'Games PFF charted the opponent that season (the most any of its defenders played); team_season_games likewise for his own team (migration 103).';
 COMMENT ON COLUMN public.scouting_game_context.season_units_status IS
   'ok = season units filled; no_pff = game not linked to PFF; no_team = his team or the opponent unknown; no_data = PFF had no defense report for the opponent that season; n/a = a QB game (not used). NULL = not looked up yet (migration 103).';
 
@@ -122,7 +132,7 @@ BEGIN
     WHERE table_schema = 'public' AND table_name = 'applied_migrations'
   ) THEN
     INSERT INTO public.applied_migrations (migration, note)
-    VALUES ('103_pff_team_season_units', 'pff_team_season (PFF season run_blocking / defense reports per team) and season unit grades on scouting_game_context: own OL run block, opp front seven run D, opp coverage outside / slot / box, opp MT rate')
+    VALUES ('103_pff_team_season_units', 'pff_team_season (PFF season run_blocking / defense reports per team) and season unit grades on scouting_game_context: own OL run block, opp front seven run D, opp coverage outside / slot / box, opp MT rate, games behind each')
     ON CONFLICT (migration) DO NOTHING;
   END IF;
 END $$;

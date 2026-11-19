@@ -19,6 +19,7 @@ import { CONTEXT_FILL_BATCH, type ContextFillResponse } from "../../../../lib/ga
 import { fillGameContext } from "../../../../lib/gameContext/runContext";
 import { logger } from "../../../../lib/logger";
 import { getPffClient, PffError } from "../../../../lib/pff/client";
+import { isMissingSeasonUnitColumns } from "../../../../lib/scouting/gameContext";
 import { checkRateLimit } from "../../../../lib/rateLimit";
 import { requireUser } from "../../../../lib/server/requireUser";
 
@@ -31,6 +32,7 @@ const log = logger("api/scouting/context");
 const TIME_BUDGET_MS = 200_000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MIGRATION_HINT = "Apply migration 065 (supabase/migrations/065_game_context.sql) first.";
+const MIGRATION_103_HINT = "Run migration 103 (supabase/migrations/103_pff_team_season_units.sql) again: it gained columns, and it's safe to run twice.";
 
 // PostgREST reports a table that doesn't exist yet as PGRST205 (or 42P01).
 const missingTable = (msg: string) => /PGRST205|42P01|cfd_|scouting_game_context|pff_game_offense/.test(msg) && /exist|schema cache|relation/i.test(msg);
@@ -65,6 +67,8 @@ export async function POST(req: NextRequest) {
     }
     const msg = err instanceof Error ? err.message : String(err);
     log.error("context fill failed", { err: msg });
+    // A 103 column missing while its table exists: an earlier copy of 103 was applied.
+    if (isMissingSeasonUnitColumns(msg)) return apiError(MIGRATION_103_HINT, 500, "MIGRATION_MISSING");
     return apiError(missingTable(msg) ? MIGRATION_HINT : msg, 500, missingTable(msg) ? "MIGRATION_MISSING" : "CONTEXT_FAILED");
   }
 }

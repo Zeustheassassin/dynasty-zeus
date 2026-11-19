@@ -46,6 +46,8 @@ export interface PffRunBlockRow {
   id: number;
   name: string;
   pos: string;
+  /** Games he played that season (PFF's player_game_count). Optional: absent on copies trimmed before it was kept. */
+  gp?: number | null;
   /** Run-block snaps and grade; gap and zone splits kept for a later scheme match. */
   rb: number | null;
   g_rb: number | null;
@@ -60,6 +62,8 @@ export interface PffDefenseRow {
   id: number;
   name: string;
   pos: string;
+  /** Games he played that season (PFF's player_game_count). */
+  gp?: number | null;
   snaps: number | null;
   /** Run-defense snaps and grade. */
   rd: number | null;
@@ -102,6 +106,7 @@ export function trimRunBlockingRows(raw: readonly Record<string, unknown>[], fra
     id: num(r.player_id)!,
     name: text(r.player),
     pos: text(r.position),
+    gp: num(r.player_game_count),
     rb: num(r.snap_counts_run_block),
     g_rb: num(r.grades_run_block),
     gap: num(r.gap_snap_counts_run_block),
@@ -116,6 +121,7 @@ export function trimDefenseRows(raw: readonly Record<string, unknown>[], franchi
     id: num(r.player_id)!,
     name: text(r.player),
     pos: text(r.position),
+    gp: num(r.player_game_count),
     snaps: num(r.snap_counts_defense),
     rd: num(r.snap_counts_run_defense),
     g_rd: num(r.grades_run_defense),
@@ -207,6 +213,24 @@ export interface DefenseUnits {
 export function defenseUnits(rows: readonly PffDefenseRow[]): DefenseUnits {
   return { frontSeven: frontSevenRunDefense(rows), coverage: coverageByAlignment(rows), missedTackles: missedTackleRate(rows) };
 }
+
+/**
+ * Games PFF charted the team that season: the most any of its players
+ * played. PFF charts every FBS game, so an FCS team's report covers only its
+ * games against FBS teams (one or two, maybe just the charted game itself).
+ */
+export function reportGames(rows: readonly { gp?: number | null }[]): number | null {
+  let most = 0;
+  for (const r of rows) if ((r.gp ?? 0) > most) most = r.gp!;
+  return most > 0 ? most : null;
+}
+
+/**
+ * A season grade from fewer games than this isn't used as context: from one
+ * or two games it's close to the same game's grade (the thing the plan
+ * avoids), and early in a season it's noise. FBS teams play 12–15.
+ */
+export const MIN_SEASON_GAMES = 6;
 
 // ── When to read a report again ──────────────────────────────
 

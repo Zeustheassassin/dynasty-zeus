@@ -19,7 +19,12 @@ const ctx = (gameId: string, extra: Partial<GameContext> = {}): GameContext => (
   neutral: false, teamPoints: 24, oppPoints: 17,
   weather: { status: "ok", temperatureF: 38, windMph: 16, gustMph: 28, precipIn: 0.12, snowIn: 0, code: 63 },
   cast: { olPassBlock: 68, olRunBlock: 61, qbPassGrade: 72.4, qbName: "Mark Gronowski" },
-  hisSnaps: 30, teamSnaps: 70, snapShare: 30 / 70, ...extra,
+  hisSnaps: 30, teamSnaps: 70, snapShare: 30 / 70, units: null, ...extra,
+});
+
+const units = (over: Partial<NonNullable<GameContext["units"]>> = {}): NonNullable<GameContext["units"]> => ({
+  olRunBlock: 56.6, teamGames: 12, oppFront7: 64.6, oppCoverage: { outside: 67.8, slot: 66.1, box: 57.6 },
+  oppMtRate: 15.7, oppGames: 12, teamFull: true, oppFull: true, ...over,
 });
 
 function log(over: Partial<GameContextLog> = {}): GameContextLog {
@@ -41,6 +46,20 @@ describe("Games tab: game context", () => {
     expect(row.textContent).toContain("68 / 61");
     expect(row.textContent).toContain("Gronowski 72");
     expect(row.textContent).toContain("30/70 (43%)");
+  });
+
+  it("shows the season units for his position, greyed when a report is too thin", () => {
+    const g = [game("r", "A", "2026-04-01T00:00:00Z")];
+    render(<GameContextPanel position="RB" games={g} log={log({ contexts: new Map([["r", ctx("r", { units: units() })]]) })} />);
+    expect(screen.getAllByRole("row")[1].textContent).toContain("OL 57 · F7 65 · MT 15.7%");
+    cleanup();
+    render(<GameContextPanel position="WR" games={g} log={log({ contexts: new Map([["r", ctx("r", { units: units() })]]) })} />);
+    expect(screen.getAllByRole("row")[1].textContent).toContain("Cov 68/66/58 · MT 15.7%");
+    cleanup();
+    render(<GameContextPanel position="TE" games={g} log={log({ contexts: new Map([["r", ctx("r", { units: units({ oppGames: 2, oppFull: false }) })]]) })} />);
+    const cell = screen.getByText("Cov 68/66/58 · F7 65 · MT 15.7%");
+    expect(cell.className).toContain("text-slate-600");
+    expect(cell.getAttribute("title")).toContain("(2 games charted)");
   });
 
   it("left early: confirm or dismiss a suggestion; mark one by hand; undo a call", () => {
@@ -87,7 +106,7 @@ describe("Analysis → Grading checks: game context", () => {
         gameRouteCells={null} gradingData={EMPTY_GRADING_DATA}
       />,
     );
-    for (const h of ["Game context", "Left early and played hurt"]) {
+    for (const h of ["Game context", "Season units (PFF full season)", "Left early and played hurt"]) {
       expect(screen.getByRole("heading", { name: h })).toBeTruthy();
     }
     expect(screen.queryByRole("heading", { name: "Trait grades" })).toBeNull();

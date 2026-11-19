@@ -39,7 +39,7 @@ import { teamCast, trimOffenseRows, type PffOffenseRow, type TeamCast } from "..
 import { isPostseasonGame, pffTeamSchool } from "../pff/match";
 import { gameOffense, seasonTeams, teamSeasonFacet } from "../pff/ncaa";
 import {
-  defenseUnits, olRunBlock, SEASON_REPORTS, seasonReportStale, trimDefenseRows, trimRunBlockingRows,
+  defenseUnits, olRunBlock, reportGames, SEASON_REPORTS, seasonReportStale, trimDefenseRows, trimRunBlockingRows,
   type PffDefenseRow, type PffRunBlockRow, type SeasonReport,
 } from "../pff/teamUnits";
 import { fetchLearnedOpponentNames } from "../scouting/learnedOpponentNames";
@@ -331,6 +331,7 @@ export function seasonUnitColumns(g: UnitGame, reports: ReadonlyMap<string, Stor
     opp_cov_slot: null, opp_cov_slot_snaps: null,
     opp_cov_box: null, opp_cov_box_snaps: null,
     opp_mt_rate: null, opp_tackle_attempts: null,
+    opp_season_games: null, team_season_games: null,
     season_units_status: null, season_units_at: null,
   };
   if (!UNIT_POSITIONS.has(g.position.toUpperCase())) return { ...out, season_units_status: "n/a" };
@@ -345,8 +346,10 @@ export function seasonUnitColumns(g: UnitGame, reports: ReadonlyMap<string, Stor
     if (r.report === "run_blocking") {
       const ol = olRunBlock(rep.rows as PffRunBlockRow[]);
       out.ol_run_block_season = ol.grade; out.ol_run_block_season_snaps = ol.snaps;
+      out.team_season_games = reportGames(rep.rows as PffRunBlockRow[]);
     } else if (rep.rows.length) {
       const d = defenseUnits(rep.rows as PffDefenseRow[]);
+      out.opp_season_games = reportGames(rep.rows as PffDefenseRow[]);
       out.opp_front7_run_def = d.frontSeven.grade; out.opp_front7_run_def_snaps = d.frontSeven.snaps;
       out.opp_cov_outside = d.coverage.outside.grade; out.opp_cov_outside_snaps = d.coverage.outside.snaps;
       out.opp_cov_slot = d.coverage.slot.grade; out.opp_cov_slot_snaps = d.coverage.slot.snaps;

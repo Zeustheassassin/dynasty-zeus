@@ -16,7 +16,8 @@
 // extra FCS effect can be measured on top.
 import type { ScoutingGame } from "../types";
 import type { CfdGameWithWeather, CfdTeamSeasonRow, WeatherStatus } from "../cfd/types";
-import { seasonReportStale } from "../pff/teamUnits";
+import { MIN_SEASON_GAMES, seasonReportStale, type CoverageSpot } from "../pff/teamUnits";
+import { blendCoverage, type AlignmentMix } from "./alignmentMix";
 import type { CovariateSpec, GameCovariates } from "./contextEffects";
 import type { OpponentTier } from "./opponentTier";
 
@@ -61,6 +62,9 @@ export interface GameContextRow {
   /** The opponent's season missed-tackle rate (%) and the attempts behind it. */
   opp_mt_rate?: number | null;
   opp_tackle_attempts?: number | null;
+  /** Games PFF charted the opponent / his team that season (thin reports aren't used). */
+  opp_season_games?: number | null;
+  team_season_games?: number | null;
   season_units_status?: SeasonUnitsStatus | null;
   /** When the oldest report behind them was read from PFF. */
   season_units_at?: string | null;
@@ -72,12 +76,12 @@ export type SeasonUnitsStatus = "ok" | "no_pff" | "no_team" | "no_data" | "n/a";
 /** The context columns before migration 103 (the fallback load while it isn't applied). */
 export const CONTEXT_ROW_SELECT_BEFORE_103 =
   "game_id,prospect_id,cfd_game_id,cfd_match_status,cfd_match_note,team_school,opponent_school,cast_status,pff_franchise_id,team_snaps,his_snaps,ol_pass_block,ol_pass_block_snaps,ol_run_block,ol_run_block_snaps,qb_pass_grade,qb_name,qb_pff_id,qb_dropbacks,fetched_at";
-export const CONTEXT_ROW_SELECT = `${CONTEXT_ROW_SELECT_BEFORE_103},opp_pff_franchise_id,ol_run_block_season,ol_run_block_season_snaps,opp_front7_run_def,opp_front7_run_def_snaps,opp_cov_outside,opp_cov_outside_snaps,opp_cov_slot,opp_cov_slot_snaps,opp_cov_box,opp_cov_box_snaps,opp_mt_rate,opp_tackle_attempts,season_units_status,season_units_at`;
+export const CONTEXT_ROW_SELECT = `${CONTEXT_ROW_SELECT_BEFORE_103},opp_pff_franchise_id,ol_run_block_season,ol_run_block_season_snaps,opp_front7_run_def,opp_front7_run_def_snaps,opp_cov_outside,opp_cov_outside_snaps,opp_cov_slot,opp_cov_slot_snaps,opp_cov_box,opp_cov_box_snaps,opp_mt_rate,opp_tackle_attempts,opp_season_games,team_season_games,season_units_status,season_units_at`;
 
 /** True when a load failed only because migration 103's columns aren't there yet. */
 export function isMissingSeasonUnitColumns(err: unknown): boolean {
   const s = String(err instanceof Error ? err.message : err);
-  return /(season_units_|opp_pff_franchise_id|ol_run_block_season|opp_front7|opp_cov_|opp_mt_rate|opp_tackle_attempts)/.test(s)
+  return /(season_units_|opp_pff_franchise_id|ol_run_block_season|opp_front7|opp_cov_|opp_mt_rate|opp_tackle_attempts|_season_games)/.test(s)
     && /(does not exist|schema cache|not find)/i.test(s);
 }
 
@@ -145,6 +149,23 @@ export interface GameContext {
   teamSnaps: number | null;
   /** His snaps ÷ the team's offensive snaps. */
   snapShare: number | null;
+  /** PFF FULL-SEASON unit grades for that game's season (migration 103); null when not filled. */
+  units: SeasonUnits | null;
+}
+
+/** A game's season units, each with the games behind its report. */
+export interface SeasonUnits {
+  /** His team's OL run block (RB games). */
+  olRunBlock: number | null;
+  teamGames: number | null;
+  /** The opponent's front seven run defense, coverage by alignment, missed-tackle rate (%). */
+  oppFront7: number | null;
+  oppCoverage: Record<CoverageSpot, number | null>;
+  oppMtRate: number | null;
+  oppGames: number | null;
+  /** Each report covers MIN_SEASON_GAMES+ games (thin ones aren't used as inputs). */
+  teamFull: boolean;
+  oppFull: boolean;
 }
 
 const n = (v: unknown): number | null => (v == null || v === "" ? null : Number.isFinite(Number(v)) ? Number(v) : null);
@@ -195,9 +216,23 @@ export function resolveGameContexts(
       } : null,
       hisSnaps, teamSnaps,
       snapShare: hisSnaps != null && teamSnaps ? hisSnaps / teamSnaps : null,
+      units: seasonUnitsOf(r),
     });
   }
   return out;
+}
+
+function seasonUnitsOf(r: GameContextRow): SeasonUnits | null {
+  if (r.season_units_status !== "ok" && r.season_units_status !== "no_data") return null;
+  const teamGames = n(r.team_season_games), oppGames = n(r.opp_season_games);
+  return {
+    olRunBlock: n(r.ol_run_block_season), teamGames,
+    oppFront7: n(r.opp_front7_run_def),
+    oppCoverage: { outside: n(r.opp_cov_outside), slot: n(r.opp_cov_slot), box: n(r.opp_cov_box) },
+    oppMtRate: n(r.opp_mt_rate), oppGames,
+    teamFull: (teamGames ?? 0) >= MIN_SEASON_GAMES,
+    oppFull: (oppGames ?? 0) >= MIN_SEASON_GAMES,
+  };
 }
 
 // ── Covariates for the context effects ───────────────────────────────────
@@ -218,6 +253,11 @@ export const COV = {
   olPassBlock: "ol_pass_block",
   olRunBlock: "ol_run_block",
   qbGrade: "qb_grade",
+  // Season units (migration 103): FULL-SEASON PFF grades for that game's season.
+  seasonOlRunBlock: "season_ol_rb",
+  oppFront7: "opp_front7",
+  oppCoverage: "opp_coverage",
+  oppMtRate: "opp_mt_rate",
 } as const;
 
 /** The SP+ opponent model: the opponent's defensive SP+ (a worse defense = easier reps), FCS flagged. */
@@ -241,6 +281,28 @@ export const CAST_SPECS = {
   qbGrade: { key: COV.qbGrade, label: "QB passing grade", sign: 1, ref: "mean", unit: "PFF grade pt" } as CovariateSpec,
 };
 
+/**
+ * The season unit inputs (line season grades plan). Signs: a better line makes
+ * his runs easier; a better front seven or coverage makes reps harder; a
+ * defense that misses more tackles makes yards after contact / missed tackles
+ * forced easier.
+ */
+export const SEASON_UNIT_SPECS = {
+  olRunBlock: { key: COV.seasonOlRunBlock, label: "Own OL run block (season)", sign: 1, ref: "mean", unit: "PFF grade pt" } as CovariateSpec,
+  oppFront7: { key: COV.oppFront7, label: "Opp. front seven run D (season)", sign: -1, ref: "mean", unit: "PFF grade pt" } as CovariateSpec,
+  oppCoverage: { key: COV.oppCoverage, label: "Opp. coverage at his spots (season)", sign: -1, ref: "mean", unit: "PFF grade pt" } as CovariateSpec,
+  oppMtRate: { key: COV.oppMtRate, label: "Opp. missed-tackle rate (season)", sign: 1, ref: "mean", unit: "pt of MT rate" } as CovariateSpec,
+};
+
+/** The season unit tests: "line" = his OL and the opponent's front seven together. */
+export type SeasonUnitInput = "line" | "front7" | "coverage" | "mt";
+export const SEASON_UNIT_INPUTS: Record<SeasonUnitInput, { label: string; specs: CovariateSpec[] }> = {
+  line: { label: "Own OL + opp. front seven", specs: [SEASON_UNIT_SPECS.olRunBlock, SEASON_UNIT_SPECS.oppFront7] },
+  front7: { label: "Opp. front seven", specs: [SEASON_UNIT_SPECS.oppFront7] },
+  coverage: { label: "Opp. coverage", specs: [SEASON_UNIT_SPECS.oppCoverage] },
+  mt: { label: "Opp. missed-tackle rate", specs: [SEASON_UNIT_SPECS.oppMtRate] },
+};
+
 export interface ContextCovariates {
   cov: GameCovariates;
   /** Mean defensive SP+ of the charted FBS opponents: the level SP+ lifts are measured from. */
@@ -253,12 +315,16 @@ export interface ContextCovariates {
  * Every game's covariates. Opponent SP+ needs a matched FBS opponent with SP+
  * (an FCS one gets the flag and the SP+ reference); tiers come from the
  * charted opponent like today's adjustment; weather needs a reading or a dome
- * (calm, dry, mild); cast needs the PFF facet.
+ * (calm, dry, mild); cast needs the PFF facet. Season units need a report of
+ * MIN_SEASON_GAMES+ games behind them; the opponent's coverage is blended by
+ * `alignmentMix` (his routes that game by spot, alignmentMix.ts), so a game
+ * without one has no coverage input.
  */
 export function gameCovariates(
   games: readonly Pick<ScoutingGame, "id">[],
   contexts: ReadonlyMap<string, GameContext>,
   tierByGame: ReadonlyMap<string, OpponentTier>,
+  alignmentMix: ReadonlyMap<string, AlignmentMix> = new Map(),
 ): ContextCovariates {
   const fbs = games.filter((g) => { const c = contexts.get(g.id); return c?.matched && !c.opponentFcs && c.oppDefSp != null; });
   const sps = fbs.map((g) => contexts.get(g.id)!.oppDefSp!);
@@ -286,6 +352,15 @@ export function gameCovariates(
       if (c.cast.olPassBlock != null) v[COV.olPassBlock] = c.cast.olPassBlock;
       if (c.cast.olRunBlock != null) v[COV.olRunBlock] = c.cast.olRunBlock;
       if (c.cast.qbPassGrade != null) v[COV.qbGrade] = c.cast.qbPassGrade;
+    }
+    const u = c?.units;
+    if (u?.teamFull && u.olRunBlock != null) v[COV.seasonOlRunBlock] = u.olRunBlock;
+    if (u?.oppFull) {
+      if (u.oppFront7 != null) v[COV.oppFront7] = u.oppFront7;
+      if (u.oppMtRate != null) v[COV.oppMtRate] = u.oppMtRate;
+      const mix = alignmentMix.get(g.id);
+      const blended = mix ? blendCoverage(mix, u.oppCoverage) : null;
+      if (blended != null) v[COV.oppCoverage] = blended;
     }
     if (Object.keys(v).length) cov.set(g.id, v);
   }

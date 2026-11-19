@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import {
   coverageByAlignment, coverageSnapsAt, defenseUnits, frontSevenRunDefense, isDefender, isFrontSeven, missedTackleRate,
-  olRunBlock, seasonReportFinal, seasonReportStale, trimDefenseRows, trimRunBlockingRows,
+  MIN_SEASON_GAMES, olRunBlock, reportGames, seasonReportFinal, seasonReportStale, trimDefenseRows, trimRunBlockingRows,
 } from "@/lib/pff/teamUnits";
 import { trimOffenseRows } from "@/lib/pff/cast";
 import {
@@ -13,7 +13,7 @@ import { isMissingSeasonUnitColumns, needsSeasonUnits } from "@/lib/scouting/gam
 // Shaped like PFF's /v1/facet/defense/summary rows (2025 Maryland, checked 2026-11-19).
 const D = (o: Record<string, unknown>) => ({ franchise_id: 215, ...o });
 const rawDefense = [
-  D({ player_id: 1, player: "Cam Rice", position: "DI", snap_counts_defense: 566, snap_counts_run_defense: 274, grades_run_defense: 67.4,
+  D({ player_id: 1, player: "Cam Rice", position: "DI", player_game_count: 12, snap_counts_defense: 566, snap_counts_run_defense: 274, grades_run_defense: 67.4,
     snap_counts_coverage: 6, grades_coverage_defense: 57.3, snap_counts_corner: 0, snap_counts_slot: 0, snap_counts_box: 0, snap_counts_fs: 0, snap_counts_dl: 566,
     missed_tackles: 5, tackles: 19, assists: 16, missed_tackle_rate: 12.5 }),
   D({ player_id: 2, player: "Jamare Glasker", position: "CB", snap_counts_defense: 616, snap_counts_run_defense: 293, grades_run_defense: 68.4,
@@ -34,7 +34,7 @@ const defense = trimDefenseRows(rawDefense, 215);
 
 // Shaped like /v1/facet/offense/run_blocking rows (2025 Virginia Tech).
 const rawRunBlocking = [
-  { player_id: 11, player: "Kyle Altuner", position: "C", franchise_id: 337, snap_counts_run_block: 379, grades_run_block: 64,
+  { player_id: 11, player: "Kyle Altuner", position: "C", franchise_id: 337, player_game_count: 12, snap_counts_run_block: 379, grades_run_block: 64,
     gap_snap_counts_run_block: 129, gap_grades_run_block: 65.4, zone_snap_counts_run_block: 232, zone_grades_run_block: 61.7 },
   { player_id: 12, player: "Tomas Rimac", position: "G", franchise_id: 337, snap_counts_run_block: 374, grades_run_block: 53.9 },
   { player_id: 13, player: "Ungraded Tackle", position: "T", franchise_id: 337, snap_counts_run_block: 100, grades_run_block: 0 },
@@ -46,7 +46,7 @@ describe("trimming PFF's season reports", () => {
   it("keeps this team's players with an id, in short keys", () => {
     expect(defense.map((r) => r.id)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(defense[1]).toMatchObject({ pos: "CB", snaps: 616, cov: 322, g_cov: 62.8, corner: 530, slot: 32, box: 46, fs: 8, dl: 0, mt: 7, tk: 30, ast: 7 });
-    expect(runBlocking[0]).toEqual({ id: 11, name: "Kyle Altuner", pos: "C", rb: 379, g_rb: 64, gap: 129, g_gap: 65.4, zone: 232, g_zone: 61.7 });
+    expect(runBlocking[0]).toEqual({ id: 11, name: "Kyle Altuner", pos: "C", gp: 12, rb: 379, g_rb: 64, gap: 129, g_gap: 65.4, zone: 232, g_zone: 61.7 });
   });
 
   it("knows the front seven and the defenders", () => {
@@ -80,6 +80,13 @@ describe("season units", () => {
     expect(missedTackleRate(defense.slice(0, 1))).toEqual({ rate: 12.5, attempts: 40 }); // PFF said 12.5
     expect(missedTackleRate(defense)).toEqual({ rate: 12.5, attempts: 208 });
     expect(missedTackleRate([])).toEqual({ rate: null, attempts: 0 });
+  });
+
+  it("counts the games behind a report (the most any player played)", () => {
+    expect(reportGames(defense)).toBe(12);
+    expect(reportGames(runBlocking)).toBe(12);
+    expect(reportGames([])).toBeNull();
+    expect(MIN_SEASON_GAMES).toBe(6);
   });
 
   it("gives nulls for an empty report", () => {
@@ -147,6 +154,7 @@ describe("season units per charted game", () => {
       opp_cov_slot: 71.8, opp_cov_slot_snaps: 95,
       opp_cov_box: 71.3, opp_cov_box_snaps: 321,
       opp_mt_rate: 12.5, opp_tackle_attempts: 208,
+      opp_season_games: 12, team_season_games: 12,
       season_units_status: "ok", season_units_at: "2026-02-15T00:00:00.000Z",
     });
   });

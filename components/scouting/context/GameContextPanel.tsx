@@ -3,7 +3,9 @@
 // expansion, Stage 5), shared by the WR, RB, QB and TE boards:
 //   - each charted game's automatic context: the opponent's defensive SP+,
 //     the weather, his line's block grades and his QB's passing grade (PFF),
-//     his snap share;
+//     his snap share, and (RB / WR / TE, migration 103) the PFF FULL-SEASON
+//     unit grades for that game's season: his line, the opponent's front
+//     seven, coverage by spot and missed-tackle rate;
 //   - the user's calls: confirm or dismiss a left-early suggestion, mark a
 //     game played hurt (old games too).
 // Per-game trait grades (1–10) lived here too until the user removed them on
@@ -15,6 +17,31 @@ import { weatherCodeLabel } from "../../../lib/weather/openMeteo";
 import type { LeftEarlySuggestion } from "../../../lib/scouting/gameFlags";
 import { opponentSchool } from "../../../lib/scouting/opponentTier";
 import type { GameContextLog } from "./useGameContextLog";
+import { MIN_SEASON_GAMES } from "../../../lib/pff/teamUnits";
+
+const g0 = (x: number | null) => (x == null ? "—" : x.toFixed(0));
+
+/** The season units for his position: RB his line + their front seven + MT; WR coverage + MT; TE coverage + front seven + MT. */
+function unitsCell(c: GameContext | undefined, position: string) {
+  const u = c?.units;
+  if (!u) return <span className="text-slate-600">—</span>;
+  const pos = position.toUpperCase();
+  const cov = `${g0(u.oppCoverage.outside)}/${g0(u.oppCoverage.slot)}/${g0(u.oppCoverage.box)}`;
+  const mt = u.oppMtRate != null ? `${u.oppMtRate.toFixed(1)}%` : "—";
+  const parts = pos === "RB"
+    ? [`OL ${g0(u.olRunBlock)}`, `F7 ${g0(u.oppFront7)}`, `MT ${mt}`]
+    : pos === "TE" ? [`Cov ${cov}`, `F7 ${g0(u.oppFront7)}`, `MT ${mt}`] : [`Cov ${cov}`, `MT ${mt}`];
+  const thin = !u.oppFull || (pos === "RB" && !u.teamFull);
+  const opp = c?.opponentSchool ?? "The opponent";
+  const title = [
+    `PFF full-season grades for ${c?.opponentSchool ? `${opp}'s` : "the opponent's"} defense that season (${u.oppGames ?? 0} games charted):`,
+    `front seven run D ${u.oppFront7?.toFixed(1) ?? "—"}, coverage outside ${u.oppCoverage.outside?.toFixed(1) ?? "—"} / slot ${u.oppCoverage.slot?.toFixed(1) ?? "—"} / box ${u.oppCoverage.box?.toFixed(1) ?? "—"}, missed-tackle rate ${mt}.`,
+    pos === "RB" ? `His line's run blocking that season: ${u.olRunBlock?.toFixed(1) ?? "—"} (${u.teamGames ?? 0} games).` : "",
+    thin ? `Fewer than ${MIN_SEASON_GAMES} games behind a report: too close to a same-game grade, not used.` : "",
+    "Tested in Analysis → Grading checks; not in any score.",
+  ].filter(Boolean).join(" ");
+  return <span className={thin ? "text-slate-600" : "text-slate-300"} title={title}>{parts.join(" · ")}</span>;
+}
 
 const btn = "rounded border border-slate-700 px-1.5 py-0.5 text-[11px] text-slate-300 hover:border-slate-500 hover:text-white disabled:opacity-40";
 
@@ -123,6 +150,7 @@ export default function GameContextPanel({ position, games, log }: {
               <th className="pb-2 pr-3" title="Game-window weather (Open-Meteo archive)">Weather</th>
               <th className="pb-2 pr-3 text-right" title="His offensive line's PFF pass-block / run-block grade that game (snap-weighted). Shown only: not in any score.">OL PB / RB</th>
               {!isQB && <th className="pb-2 pr-3" title="His quarterback's PFF passing grade that game. Shown only: not in any score.">QB</th>}
+              {!isQB && <th className="pb-2 pr-3" title="PFF FULL-season grades for that game's season (never the same game's): his line (RB), the opponent's front seven (F7), coverage outside / slot / box (Cov) and missed-tackle rate (MT). Tested in Grading checks; not in any score.">Season (PFF)</th>}
               <th className="pb-2 pr-3 text-right" title="His PFF snaps / the team's offensive snaps">Snaps</th>
               <th className="pb-2 pr-3" title="Suggested when his snap share is well under his usual; you confirm">Left early</th>
               <th className="pb-2 pr-3" title="Your call: he played this game hurt">Hurt</th>
@@ -150,6 +178,7 @@ export default function GameContextPanel({ position, games, log }: {
                       {c?.cast?.qbPassGrade != null ? <>{c.cast.qbName?.split(" ").slice(-1)[0]} <span className="text-sky-300">{c.cast.qbPassGrade.toFixed(0)}</span></> : <span className="text-slate-600">—</span>}
                     </td>
                   )}
+                  {!isQB && <td className="py-1.5 pr-3 whitespace-nowrap">{unitsCell(c, position)}</td>}
                   <td className="py-1.5 pr-3 text-right whitespace-nowrap text-slate-300">
                     {c?.hisSnaps != null && c.teamSnaps ? `${c.hisSnaps}/${c.teamSnaps} (${Math.round((c.snapShare ?? 0) * 100)}%)` : <span className="text-slate-600">—</span>}
                   </td>
