@@ -7,8 +7,9 @@ import {
 } from "@/lib/pff/teamUnits";
 import { trimOffenseRows } from "@/lib/pff/cast";
 import {
-  opponentFranchise, reportKey, reportsFor, seasonUnitColumns, type StoredReport, type UnitGame,
+  emptyUnitColumns, opponentFranchise, reportKey, reportsFor, seasonUnitColumns, skipIfFlaky, type StoredReport, type UnitGame,
 } from "@/lib/gameContext/runContext";
+import { PffError } from "@/lib/pff/client";
 import { isMissingSeasonUnitColumns, needsSeasonUnits } from "@/lib/scouting/gameContext";
 
 // Shaped like PFF's /v1/facet/defense/summary rows (2025 Maryland, checked 2026-11-19).
@@ -151,6 +152,19 @@ describe("leaving his game out", () => {
     expect(gameSettledBy("2026-11-01T17:00:00Z", "2026-11-12T00:00:00Z")).toBe(true);
     expect(gameSettledBy("2026-11-08T17:00:00Z", "2026-11-12T00:00:00Z")).toBe(false);
     expect(gameSettledBy(null, "2026-11-12T00:00:00Z")).toBe(true); // no kickoff known: an old game
+  });
+});
+
+describe("a flaky PFF read", () => {
+  it("is skipped for this fill, while PFF's read budget still stops the batch", async () => {
+    expect(await skipIfFlaky(async () => [1], {})).toEqual([1]);
+    expect(await skipIfFlaky(async () => { throw new PffError("unexpected condition", 500); }, { pffGameId: 31026 })).toBeNull();
+    expect(await skipIfFlaky(async () => { throw new PffError("PFF request failed", 0, "network_error"); }, {})).toBeNull();
+    await expect(skipIfFlaky(async () => { throw new PffError("slow down", 429, "rate_limited"); }, {})).rejects.toMatchObject({ status: 429 });
+  });
+
+  it("leaves a skipped game's season units empty and not looked up", () => {
+    expect(emptyUnitColumns(215)).toMatchObject({ opp_pff_franchise_id: 215, season_units_status: null, opp_front7_run_def: null });
   });
 });
 

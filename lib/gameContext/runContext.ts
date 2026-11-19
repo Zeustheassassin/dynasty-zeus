@@ -37,7 +37,7 @@ import {
 } from "../cfd/cache";
 import { matchCfdGame, type CfdMatch } from "../cfd/match";
 import type { CfdGameWithWeather, WeatherStatus } from "../cfd/types";
-import type { PffClient } from "../pff/client";
+import { PffError, type PffClient } from "../pff/client";
 import { teamCast, trimOffenseRows, type PffOffenseRow, type TeamCast } from "../pff/cast";
 import { isPostseasonGame, pffTeamSchool } from "../pff/match";
 import { gameDefense, gameOffense, seasonTeams, teamSeasonFacet } from "../pff/ncaa";
@@ -108,6 +108,9 @@ export async function fillGameContext(deps: ContextDeps, prospectIds: readonly s
 
   const results = new Map<string, ContextFillResult>(prospectIds.map((id) => [id, { prospectId: id, games: 0 }]));
   const unreached = new Set<string>();
+  // PFF games whose own facet PFF wouldn't give this run (a 5xx after the
+  // client's retries, 2026-11-19): their season units wait for the next fill.
+  const flakyGames = new Set<number>();
 
   // ── 1. PFF offense facets (cast + his team that day) ──
   const offense = new Map<number, PffOffenseRow[]>();
@@ -122,7 +125,9 @@ export async function fillGameContext(deps: ContextDeps, prospectIds: readonly s
         for (const g of games) if (g.pff_game_id === id) unreached.add(g.prospect_id);
         continue;
       }
-      const rows = trimOffenseRows(await gameOffense(deps.pff, id));
+      const raw = await skipIfFlaky(() => gameOffense(deps.pff!, id), { pffGameId: id });
+      if (raw == null) { flakyGames.add(id); continue; }
+      const rows = trimOffenseRows(raw);
       offense.set(id, rows);
       if (rows.length) {
         const { error: upErr } = await supabase.from("pff_game_offense").upsert(
@@ -229,8 +234,14 @@ export async function fillGameContext(deps: ContextDeps, prospectIds: readonly s
     if (reportsFor(u).some((r) => units.missing.has(reportKey(r.season, r.franchiseId, r.report)))) unreached.add(u.prospectId);
   }
   // Each game's own defense facet, to take the game back out of the season.
-  const gameDef = units.ready ? await gameDefenses(deps, reachable(), now) : { rows: new Map<number, PffGameDefenseRow[]>(), missing: new Set<number>() };
+  const gameDef = units.ready
+    ? await gameDefenses(deps, reachable(), now)
+    : { rows: new Map<number, PffGameDefenseRow[]>(), missing: new Set<number>(), flaky: new Set<number>() };
   for (const u of unitGames.values()) if (u.pffGameId != null && gameDef.missing.has(u.pffGameId)) unreached.add(u.prospectId);
+  for (const id of gameDef.flaky) flakyGames.add(id);
+  // A game a flaky read touched gets no season units this run (left "not looked up", so the next fill takes it).
+  const unitsWait = (u: UnitGame) =>
+    (u.pffGameId != null && flakyGames.has(u.pffGameId)) || reportsFor(u).some((r) => units.flaky.has(reportKey(r.season, r.franchiseId, r.report)));
 
   // ── 5. Context rows ──
   const fetchedAt = new Date(now).toISOString();
@@ -255,10 +266,10 @@ export async function fillGameContext(deps: ContextDeps, prospectIds: readonly s
       qb_pff_id: cast?.qbPlayerId ?? null, qb_dropbacks: cast?.qbDropbacks ?? null,
       fetched_at: fetchedAt,
       // Before migration 103 the columns don't exist: leave them out.
-      ...(units.ready ? seasonUnitColumns(unitGames.get(g.id)!, units.reports, deps.pff != null, {
+      ...(!units.ready ? {} : unitsWait(unitGames.get(g.id)!) ? emptyUnitColumns(unitGames.get(g.id)!.opponent) : seasonUnitColumns(unitGames.get(g.id)!, units.reports, deps.pff != null, {
         defense: isLinked(g) ? gameDef.rows.get(g.pff_game_id!) : undefined,
         offense: facet,
-      }) : {}),
+      })),
     };
   });
   for (let i = 0; i < rows.length; i += 200) {
@@ -281,6 +292,8 @@ export async function fillGameContext(deps: ContextDeps, prospectIds: readonly s
     if (ws === "pending") r.weatherPending = (r.weatherPending ?? 0) + 1;
     if (castOk.has(g.id)) r.cast = (r.cast ?? 0) + 1;
     if (unitsOk.has(g.id)) r.seasonUnits = (r.seasonUnits ?? 0) + 1;
+    const u = unitGames.get(g.id)!;
+    if (units.ready && unitsWait(u)) r.pffSkipped = (r.pffSkipped ?? 0) + 1;
   }
   return { results: [...results.values()], cfdFetched: cache.fetched, cfdRemaining: cache.remaining };
 }
@@ -349,9 +362,10 @@ export interface GameRows {
  * defenseWithoutGame / runBlockingWithoutGame), once the game has settled and
  * the report was read after that (an earlier copy may not hold the game yet).
  */
-export function seasonUnitColumns(g: UnitGame, reports: ReadonlyMap<string, StoredReport>, pffOn: boolean, game: GameRows = {}): Record<string, unknown> {
-  const out: Record<string, unknown> = {
-    opp_pff_franchise_id: g.opponent,
+/** Every season-unit column empty, status NULL = "not looked up" (the next fill takes it). */
+export function emptyUnitColumns(opponent: number | null): Record<string, unknown> {
+  return {
+    opp_pff_franchise_id: opponent,
     ol_run_block_season: null, ol_run_block_season_snaps: null,
     opp_front7_run_def: null, opp_front7_run_def_snaps: null,
     opp_cov_outside: null, opp_cov_outside_snaps: null,
@@ -361,6 +375,10 @@ export function seasonUnitColumns(g: UnitGame, reports: ReadonlyMap<string, Stor
     opp_season_games: null, team_season_games: null,
     season_units_status: null, season_units_at: null,
   };
+}
+
+export function seasonUnitColumns(g: UnitGame, reports: ReadonlyMap<string, StoredReport>, pffOn: boolean, game: GameRows = {}): Record<string, unknown> {
+  const out = emptyUnitColumns(g.opponent);
   if (!UNIT_POSITIONS.has(g.position.toUpperCase())) return { ...out, season_units_status: "n/a" };
   if (!g.linked || !pffOn) return { ...out, season_units_status: "no_pff" };
   if (g.franchise == null || g.opponent == null) return { ...out, season_units_status: "no_team" };
@@ -411,10 +429,11 @@ const tableMissing = (e: { code?: string; message: string }) =>
  */
 async function seasonReports(
   deps: ContextDeps, games: readonly UnitGame[], now: number,
-): Promise<{ ready: boolean; reports: Map<string, StoredReport>; missing: Set<string> }> {
+): Promise<{ ready: boolean; reports: Map<string, StoredReport>; missing: Set<string>; flaky: Set<string> }> {
   const { supabase, userId } = deps;
   const reports = new Map<string, StoredReport>();
   const missing = new Set<string>();
+  const flaky = new Set<string>();
   const needed = new Map<string, ReportNeed>();
   if (deps.pff) for (const g of games) for (const r of reportsFor(g)) needed.set(reportKey(r.season, r.franchiseId, r.report), r);
 
@@ -425,7 +444,7 @@ async function seasonReports(
     ? await supabase.from("pff_team_season").select("season,franchise_id,report,rows,fetched_at").in("season", seasons).in("franchise_id", franchises)
     : await supabase.from("pff_team_season").select("season").limit(1);
   if (error) {
-    if (tableMissing(error)) return { ready: false, reports, missing };
+    if (tableMissing(error)) return { ready: false, reports, missing, flaky };
     throw new Error(error.message);
   }
   const stored = new Map<string, StoredReport>();
@@ -441,7 +460,12 @@ async function seasonReports(
       continue;
     }
     const { path, key: bodyKey } = SEASON_REPORTS[need.report];
-    const raw = await teamSeasonFacet(deps.pff!, path, bodyKey, need.season, need.franchiseId);
+    const raw = await skipIfFlaky(() => teamSeasonFacet(deps.pff!, path, bodyKey, need.season, need.franchiseId), { report: key });
+    if (raw == null) {
+      // A stale copy still serves; with none, its games wait for the next fill.
+      if (have) reports.set(key, have); else flaky.add(key);
+      continue;
+    }
     const rows = need.report === "defense" ? trimDefenseRows(raw, need.franchiseId) : trimRunBlockingRows(raw, need.franchiseId);
     const fetchedAt = new Date(now).toISOString();
     const { error: upErr } = await supabase.from("pff_team_season").upsert(
@@ -451,7 +475,7 @@ async function seasonReports(
     if (upErr) throw new Error(upErr.message);
     reports.set(key, { rows, fetchedAt });
   }
-  return { ready: true, reports, missing };
+  return { ready: true, reports, missing, flaky };
 }
 
 /**
@@ -463,13 +487,14 @@ async function seasonReports(
  */
 async function gameDefenses(
   deps: ContextDeps, games: readonly UnitGame[], now: number,
-): Promise<{ rows: Map<number, PffGameDefenseRow[]>; missing: Set<number> }> {
+): Promise<{ rows: Map<number, PffGameDefenseRow[]>; missing: Set<number>; flaky: Set<number> }> {
   const rows = new Map<number, PffGameDefenseRow[]>();
   const missing = new Set<number>();
+  const flaky = new Set<number>();
   const ids = [...new Set(games
     .filter((g) => g.pffGameId != null && reportsFor(g).length > 0 && gameSettledBy(g.kickoff, now))
     .map((g) => g.pffGameId!))];
-  if (!deps.pff || ids.length === 0) return { rows, missing };
+  if (!deps.pff || ids.length === 0) return { rows, missing, flaky };
   for (let i = 0; i < ids.length; i += 200) {
     const { data, error } = await deps.supabase.from("pff_game_defense").select("pff_game_id,rows").in("pff_game_id", ids.slice(i, i + 200));
     if (error) throw new Error(error.message);
@@ -478,14 +503,33 @@ async function gameDefenses(
   for (const id of ids) {
     if (rows.has(id)) continue;
     if (deps.deadline != null && Date.now() > deps.deadline) { missing.add(id); continue; }
-    const trimmed = trimGameDefenseRows(await gameDefense(deps.pff, id));
+    const raw = await skipIfFlaky(() => gameDefense(deps.pff!, id), { pffGameId: id });
+    if (raw == null) { flaky.add(id); continue; }
+    const trimmed = trimGameDefenseRows(raw);
     const { error } = await deps.supabase.from("pff_game_defense").upsert(
       { user_id: deps.userId, pff_game_id: id, rows: trimmed, fetched_at: new Date(now).toISOString() }, { onConflict: "user_id,pff_game_id" },
     );
     if (error) throw new Error(error.message);
     rows.set(id, trimmed);
   }
-  return { rows, missing };
+  return { rows, missing, flaky };
+}
+
+/**
+ * One PFF read that may come back as a server error even after the client's
+ * retries (2026-11-19: one game's facet answered 502 / "unexpected condition"
+ * for a minute, then fine, and it stopped the whole 204-prospect fill). Null
+ * on such a failure, so only what needed it waits for the next fill; PFF's
+ * read budget (429) still stops the batch, which the route turns into a wait.
+ */
+export async function skipIfFlaky<T>(read: () => Promise<T>, what: Record<string, unknown>): Promise<T | null> {
+  try {
+    return await read();
+  } catch (err) {
+    if (err instanceof PffError && err.status === 429) throw err;
+    log.warn("PFF read failed; skipped this fill", { ...what, status: err instanceof PffError ? err.status : null, err: String(err) });
+    return null;
+  }
 }
 
 interface WeatherUpdate { id: number; patch: Record<string, unknown> }

@@ -18,6 +18,8 @@ export interface ContextFillResult {
   cast?: number;
   /** Games with the season unit grades in (migration 103). */
   seasonUnits?: number;
+  /** Games whose season units wait for the next fill: PFF gave a server error on a read they need. */
+  pffSkipped?: number;
   unmatched?: { gameId: string; reason: string }[];
   error?: string;
 }

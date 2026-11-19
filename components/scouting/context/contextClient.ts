@@ -77,6 +77,8 @@ export interface ContextFillOutcome {
   cfdFetched: string[];
   cfdRemaining: number | null;
   cancelled: boolean;
+  /** Games whose season units wait for the next fill (PFF gave a server error on a read they need). */
+  pffSkipped: number;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -89,7 +91,7 @@ export async function runContextFill(
   ids: readonly string[],
   opts: { onProgress?: (p: ContextFillProgress) => void; isCancelled?: () => boolean } = {},
 ): Promise<ContextFillOutcome> {
-  const outcome: ContextFillOutcome = { errors: new Map(), unmatched: new Map(), cfdFetched: [], cfdRemaining: null, cancelled: false };
+  const outcome: ContextFillOutcome = { errors: new Map(), unmatched: new Map(), cfdFetched: [], cfdRemaining: null, cancelled: false, pffSkipped: 0 };
   const queue = [...ids];
   let done = 0;
   const report = (note: string | null) => opts.onProgress?.({ done, total: ids.length, failed: outcome.errors.size, note });
@@ -117,6 +119,7 @@ export async function runContextFill(
       if (r.error?.startsWith("Not reached")) continue;
       for (const u of r.unmatched ?? []) outcome.unmatched.set(u.gameId, u.reason);
       if (r.error) { outcome.errors.set(r.prospectId, r.error); log.warn("game context failed for a prospect", { prospectId: r.prospectId, err: r.error }); }
+      outcome.pffSkipped += r.pffSkipped ?? 0;
     }
     outcome.cfdFetched.push(...body.cfdFetched);
     if (body.cfdRemaining != null) outcome.cfdRemaining = body.cfdRemaining;

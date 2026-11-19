@@ -114,6 +114,7 @@ export function useContextFill(games: readonly FillGame[], busy: boolean, onFill
       await load();
       const errors = [...out.errors.values()];
       if (errors.length) setError(`Game context: ${errors[0]}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ""}`);
+      else if (out.pffSkipped) setError(`PFF didn't answer for ${out.pffSkipped} game${out.pffSkipped === 1 ? "" : "s"} this run; they're still in To fill. Run Fill context again in a few minutes.`);
       onFilled?.();
     } catch (err) {
       log.error("game context fill failed", { err: String(err) });
