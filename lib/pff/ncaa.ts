@@ -254,6 +254,17 @@ export async function gameOffense(client: PffClient, gameId: number): Promise<Pf
   }, []);
 }
 
+/** Every defender of BOTH teams in one game, at his game spot (checked
+ *  2026-11-19: ~40 rows, ~2 s), so a season grade can have the game taken
+ *  back out (lib/pff/teamUnits.ts defenseWithoutGame, migration 103). */
+export async function gameDefense(client: PffClient, gameId: number): Promise<PffStatRow[]> {
+  return getOrEmpty(async () => {
+    const body = await client.get("/v1/facet/defense/summary", { league: "ncaa", game_id: gameId });
+    const r = reportBody(body, "defense_summary");
+    return Array.isArray(r) ? (r as PffStatRow[]) : [];
+  }, []);
+}
+
 /** A team's game(s) in one week, with whether PFF has charted them. */
 export async function weekGames(client: PffClient, season: number, week: number, franchiseId: number): Promise<PffGameInfo[]> {
   const body = await client.get<{ games?: PffGameInfo[] }>("/v1/games", {

@@ -55,6 +55,13 @@ export interface CovariateSpec {
   ref: "mean" | "zero" | number;
   /** Units for display, e.g. "pts of defensive SP+". */
   unit: string;
+  /**
+   * Apply the effect fit on `key` to this covariate's values instead (both
+   * set on the same games). The line matchup: the effect is measured on the
+   * opponent's front seven (it changes game to game), then applied to the
+   * whole gap, his line included at equal weight (the user's call, untested).
+   */
+  applyKey?: string;
 }
 
 /** game id → its covariate values; a missing key = unknown for that game. */
@@ -198,6 +205,8 @@ export function fitContext(
   };
 }
 
+const appliedKey = (s: CovariateSpec) => s.applyKey ?? s.key;
+
 /** A prospect's lift from his games' context, in the outcome's units (fraction). */
 export function contextLift(byGame: ByGame | undefined, cov: GameCovariates, fit: ContextFit | null): number {
   if (!byGame || !fit || fit.specs.length === 0) return 0;
@@ -205,8 +214,8 @@ export function contextLift(byGame: ByGame | undefined, cov: GameCovariates, fit
   for (const [gid, g] of Object.entries(byGame)) {
     w += g.w;
     const vals = cov.get(gid);
-    if (!known(vals, fit.specs)) continue;
-    for (const s of fit.specs) lift += g.w * fit.beta[s.key] * (vals![s.key] - fit.ref[s.key]);
+    if (!vals || !fit.specs.every((s) => Number.isFinite(vals[appliedKey(s)]))) continue;
+    for (const s of fit.specs) lift += g.w * fit.beta[s.key] * (vals[appliedKey(s)] - fit.ref[s.key]);
   }
   return w > 0 ? lift / w : 0;
 }

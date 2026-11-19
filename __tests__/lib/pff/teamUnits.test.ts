@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import {
-  coverageByAlignment, coverageSnapsAt, defenseUnits, frontSevenRunDefense, isDefender, isFrontSeven, missedTackleRate,
+  coverageByAlignment, coverageSnapsAt, defenseUnits, defenseWithoutGame, frontSevenRunDefense, gameSettledBy, gradeWithout,
+  isDefender, isFrontSeven, missedTackleRate, runBlockingWithoutGame, trimGameDefenseRows,
   MIN_SEASON_GAMES, olRunBlock, reportGames, seasonReportFinal, seasonReportStale, trimDefenseRows, trimRunBlockingRows,
 } from "@/lib/pff/teamUnits";
 import { trimOffenseRows } from "@/lib/pff/cast";
@@ -112,6 +113,47 @@ describe("when to read a season report again", () => {
   });
 });
 
+describe("leaving his game out", () => {
+  it("takes a game back out of a season grade's snap-weighted mean", () => {
+    expect(gradeWithout(100, 70, 20, 50)).toBe(75);
+    expect(gradeWithout(100, 70, 0, null)).toBe(70); // he didn't play that game
+    expect(gradeWithout(100, 70, 20, 0)).toBe(70); // a 0 is "not graded"
+    expect(gradeWithout(20, 70, 20, 50)).toBeNull(); // nothing left
+    expect(gradeWithout(100, 98, 90, 10)).toBe(100); // clamped
+  });
+
+  it("subtracts the opponent's game from its season, player by player", () => {
+    const game = trimGameDefenseRows([
+      { player_id: 1, franchise_id: 215, position: "DRT", snap_counts_defense: 60, snap_counts_run_defense: 30, grades_run_defense: 40,
+        snap_counts_dl: 60, missed_tackles: 3, tackles: 2, assists: 1 },
+      { player_id: 99, franchise_id: 337, position: "LE", snap_counts_defense: 50 },
+      { franchise_id: 215, position: "LB" },
+    ]);
+    expect(game.map((r) => [r.id, r.team])).toEqual([[1, 215], [99, 337]]);
+    const out = defenseWithoutGame(defense, game.filter((r) => r.team === 215));
+    // Cam Rice: 274 run snaps at 67.4 minus 30 at 40 → 244 at 70.8; misses 5 → 2 of 40 → 34 attempts.
+    expect(out[0]).toMatchObject({ gp: 11, snaps: 506, rd: 244, mt: 2, tk: 17, ast: 15, dl: 506 });
+    expect(out[0].g_rd).toBeCloseTo((274 * 67.4 - 30 * 40) / 244, 6);
+    expect(out[1]).toBe(defense[1]); // not in the game: unchanged
+    expect(missedTackleRate(out).attempts).toBe(208 - 6);
+    expect(reportGames(out)).toBe(11);
+  });
+
+  it("subtracts his own line's game from its season run blocking", () => {
+    const off = trimOffenseRows([{ player_id: 11, franchise_id: 337, position: "C", snap_counts_total: 70, snap_counts_run_block: 30, grades_run_block: 90 }]);
+    const out = runBlockingWithoutGame(runBlocking, off);
+    expect(out[0]).toMatchObject({ gp: 11, rb: 349 });
+    expect(out[0].g_rb).toBeCloseTo((379 * 64 - 30 * 90) / 349, 6);
+    expect(olRunBlock(out).grade).toBeLessThan(olRunBlock(runBlocking).grade!);
+  });
+
+  it("waits for PFF's grading of a game to settle before taking it out", () => {
+    expect(gameSettledBy("2026-11-01T17:00:00Z", "2026-11-12T00:00:00Z")).toBe(true);
+    expect(gameSettledBy("2026-11-08T17:00:00Z", "2026-11-12T00:00:00Z")).toBe(false);
+    expect(gameSettledBy(null, "2026-11-12T00:00:00Z")).toBe(true); // no kickoff known: an old game
+  });
+});
+
 describe("season units per charted game", () => {
   const offense = trimOffenseRows([
     { player_id: 1, position: "HB", franchise_id: 337 },
@@ -157,6 +199,15 @@ describe("season units per charted game", () => {
       opp_season_games: 12, team_season_games: 12,
       season_units_status: "ok", season_units_at: "2026-02-15T00:00:00.000Z",
     });
+  });
+
+  it("takes the game out once it has settled and the report was read after", () => {
+    const gameDef = trimGameDefenseRows([{ player_id: 3, franchise_id: 215, position: "MLB", snap_counts_defense: 70, snap_counts_run_defense: 40, grades_run_defense: 95 }]);
+    const settled = seasonUnitColumns(game({ kickoff: "2025-10-01T17:00:00Z", pffGameId: 7 }), reports, true, { defense: gameDef });
+    const fresh = seasonUnitColumns(game({ kickoff: "2026-02-10T17:00:00Z", pffGameId: 7 }), reports, true, { defense: gameDef });
+    // The linebacker's 95 game comes out: his 80 on 250 snaps → 77.1 on 210, the front seven 73.4 → 71.6.
+    expect(settled.opp_front7_run_def as number).toBeLessThan(73.4);
+    expect(fresh.opp_front7_run_def).toBe(73.4); // the report (read 2026-02-15) predates the game settling
   });
 
   it("gives a WR no line grade, and says why when it can't fill", () => {

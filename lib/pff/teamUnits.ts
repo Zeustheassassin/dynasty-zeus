@@ -232,6 +232,94 @@ export function reportGames(rows: readonly { gp?: number | null }[]): number | n
  */
 export const MIN_SEASON_GAMES = 6;
 
+// ── Leaving his game out ─────────────────────────────────────
+// A season grade still holds the charted game itself (~1/12 of it), and his
+// play moves it: a back who breaks tackles raises the opponent's missed-tackle
+// rate and lowers its front seven's grades. The read-only run of 2026-11-19
+// showed it inflating every effect (RB MTF vs MT rate: +8.2% held out with the
+// game in, +1.5% with it out). So each game's units come from the season
+// MINUS that game, player by player: counts subtract; a grade comes back out
+// of its snap-weighted mean, (S·gS − s·gs) / (S − s). PFF's season grade
+// isn't exactly that mean, so it's a close approximation.
+//
+// The game's rows: `/v1/facet/defense/summary?game_id=` (both teams' defenders,
+// at their GAME spots, so they're matched to the season rows by player id),
+// kept per user in pff_game_defense; his own line's from the offense facet
+// already kept for the cast (pff_game_offense).
+
+/** One defender's game, as stored: the season row's fields plus his team. */
+export interface PffGameDefenseRow extends PffDefenseRow {
+  team: number;
+}
+
+export function trimGameDefenseRows(raw: readonly Record<string, unknown>[]): PffGameDefenseRow[] {
+  const out: PffGameDefenseRow[] = [];
+  for (const r of raw) {
+    const team = num(r.franchise_id);
+    const [row] = trimDefenseRows([r]);
+    if (team == null || !row) continue;
+    out.push({ ...row, team });
+  }
+  return out;
+}
+
+/** A season mean grade with one game taken back out; null when nothing's left. */
+export function gradeWithout(S: number | null, gS: number | null, s: number | null, gs: number | null): number | null {
+  const SS = S ?? 0, ss = s ?? 0;
+  if (gS == null || !(SS > 0)) return null;
+  if (!(ss > 0) || gs == null || gs <= 0) return gS;
+  if (SS - ss <= 0) return null;
+  return Math.min(100, Math.max(0, (SS * gS - ss * gs) / (SS - ss)));
+}
+
+const minus = (a: number | null, b: number | null | undefined) => (a == null ? null : Math.max(0, a - (b ?? 0)));
+const gpWithout = (gp: number | null | undefined, played: boolean) => (gp == null ? gp : played ? Math.max(0, gp - 1) : gp);
+
+/** The opponent's season defense with one game's rows taken out (match by player id). */
+export function defenseWithoutGame(season: readonly PffDefenseRow[], game: readonly PffDefenseRow[]): PffDefenseRow[] {
+  const inGame = new Map(game.map((r) => [r.id, r]));
+  return season.map((x) => {
+    const y = inGame.get(x.id);
+    if (!y) return x;
+    return {
+      ...x,
+      gp: gpWithout(x.gp, (y.snaps ?? 0) > 0),
+      snaps: minus(x.snaps, y.snaps),
+      rd: minus(x.rd, y.rd), g_rd: gradeWithout(x.rd, x.g_rd, y.rd, y.g_rd),
+      cov: minus(x.cov, y.cov), g_cov: gradeWithout(x.cov, x.g_cov, y.cov, y.g_cov),
+      corner: minus(x.corner, y.corner), slot: minus(x.slot, y.slot), box: minus(x.box, y.box), fs: minus(x.fs, y.fs), dl: minus(x.dl, y.dl),
+      mt: minus(x.mt, y.mt), tk: minus(x.tk, y.tk), ast: minus(x.ast, y.ast),
+      pr: minus(x.pr, y.pr), g_pr: gradeWithout(x.pr, x.g_pr, y.pr, y.g_pr), press: minus(x.press, y.press),
+    };
+  });
+}
+
+/** His team's season run blocking with one game taken out (the game's offense facet rows, cast.ts). */
+export function runBlockingWithoutGame(
+  season: readonly PffRunBlockRow[],
+  game: readonly { id: number; snaps: number | null; rb: number | null; g_rb: number | null }[],
+): PffRunBlockRow[] {
+  const inGame = new Map(game.map((r) => [r.id, r]));
+  return season.map((x) => {
+    const y = inGame.get(x.id);
+    if (!y) return x;
+    return { ...x, gp: gpWithout(x.gp, (y.snaps ?? 0) > 0), rb: minus(x.rb, y.rb), g_rb: gradeWithout(x.rb, x.g_rb, y.rb, y.g_rb) };
+  });
+}
+
+/**
+ * PFF's grading of a game settles within days; a game is taken out only once
+ * it's this old, and only from a season report read after that (an earlier
+ * copy may not hold it yet, so there's nothing to take out).
+ */
+export const GAME_SETTLED_MS = 10 * 86_400_000;
+
+export function gameSettledBy(kickoff: string | null | undefined, at: string | number): boolean {
+  if (!kickoff) return true;
+  const k = Date.parse(kickoff), t = typeof at === "number" ? at : Date.parse(at);
+  return !Number.isFinite(k) || (Number.isFinite(t) && t >= k + GAME_SETTLED_MS);
+}
+
 // ── When to read a report again ──────────────────────────────
 
 /** A season's reports stop changing once its bowls are played: a copy read on or after Feb 1 of the next year is final. */

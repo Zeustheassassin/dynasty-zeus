@@ -178,6 +178,8 @@ export default function GameContextChecks(props: Props) {
             Each input is tested on top of what the metric is judged against now, the same way as above. Coverage is the
             opponent&apos;s season coverage grade at the spots he ran his routes from that game (outside / slot / box). For metrics
             judged against SP+, &quot;Instead of SP+&quot; is the input on its own vs no opponent model, next to SP+&apos;s own number.
+            The line matchup (an RB&apos;s line vs that game&apos;s front seven, each against its own average) is tested on its D-line
+            half, the part that changes game to game; his line gets the same weight by your call, untested.
             Nothing here is in any score yet: an input goes in only after it passes and you OK it.
           </p>
         }

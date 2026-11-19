@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { alignmentMixByGame, blendCoverage, teRoutesBySpot, wrRoutesBySpot } from "@/lib/scouting/alignmentMix";
-import { COV, gameCovariates, resolveGameContexts, type GameContextData, type GameContextRow } from "@/lib/scouting/gameContext";
+import { COV, gameCovariates, lineMatchup, lineRefOf, SEASON_UNIT_SPECS, resolveGameContexts, type GameContext, type GameContextData, type GameContextRow, type SeasonUnits } from "@/lib/scouting/gameContext";
 import { SEASON_UNIT_TESTS, seasonUnitCheck, type ContextMetric } from "@/lib/scouting/contextChecks";
-import { addGameResidual, type ByGame } from "@/lib/scouting/contextEffects";
+import { addGameResidual, contextLift, type ByGame } from "@/lib/scouting/contextEffects";
 import type { TEPlay } from "@/lib/types";
 
 describe("where he ran his routes", () => {
@@ -81,11 +81,53 @@ describe("season units as covariates", () => {
   });
 });
 
+describe("the line matchup", () => {
+  const u = (ol: number | null, f7: number | null, over: Partial<SeasonUnits> = {}): SeasonUnits => ({
+    olRunBlock: ol, teamGames: 12, oppFront7: f7, oppCoverage: { outside: null, slot: null, box: null }, oppMtRate: null, oppGames: 12,
+    teamFull: true, oppFull: true, ...over,
+  });
+  const ref = { ol: 65, olSd: 5, front7: 69, front7Sd: 4.5 };
+
+  it("is 0 for average vs average, tough for a bad line against a great front, each on its own scale", () => {
+    expect(lineMatchup(u(65, 69), ref)).toBe(0);
+    expect(lineMatchup(u(55, 75), ref)).toBeCloseTo(6 / 4.5 + 2, 6); // 55 line −2 steps, 75 front +1.33
+    expect(lineMatchup(u(55, 55), ref)! < 0).toBe(true); // a 55 front is further below its average than a 55 line
+  });
+
+  it("counts a thin line report as an average line so the D-line still counts; skips a thin front or a non-RB game", () => {
+    expect(lineMatchup(u(55, 78, { teamFull: false }), ref)).toBe(2);
+    expect(lineMatchup(u(55, 78, { oppFull: false }), ref)).toBeNull();
+    expect(lineMatchup(u(null, 78, { teamGames: null }), ref)).toBeNull(); // a WR / TE game: no line report read
+  });
+
+  it("fits on the D-line half and applies the effect to the whole gap", () => {
+    const ctx = new Map<string, GameContext>([
+      ["a", { units: u(55, 78) } as unknown as GameContext],
+      ["b", { units: u(75, 72) } as unknown as GameContext],
+    ]);
+    const cc = gameCovariates([{ id: "a" }, { id: "b" }], ctx, new Map());
+    expect(cc.lineRef).toEqual({ ol: 65, olSd: 10, front7: 75, front7Sd: 3 });
+    expect(cc.cov.get("a")![COV.lineFront7]).toBeCloseTo(1, 9); // a front one spread above average
+    expect(cc.cov.get("a")![COV.lineMatchup]).toBeCloseTo(2, 9); // ...against a line one spread below: tough
+    expect(cc.cov.get("b")![COV.lineMatchup]).toBeCloseTo(-2, 9);
+    // One effect of −0.02 per step, fit on the D-line: a game's lift reads the whole gap.
+    const fit = { specs: [SEASON_UNIT_SPECS.lineMatchup], beta: { [COV.lineFront7]: -0.02 }, ref: { [COV.lineFront7]: 0 }, prospects: 10, games: 20, reps: 400 };
+    const byGame = { a: { n: 10, resid: 0, w: 10 } };
+    expect(contextLift(byGame, cc.cov, fit)).toBeCloseTo(-0.02 * cc.cov.get("a")![COV.lineMatchup], 9);
+  });
+
+  it("measures the yardsticks over RB games with full reports", () => {
+    const c = (units: SeasonUnits) => ({ units }) as unknown as GameContext;
+    const r = lineRefOf([c(u(60, 66)), c(u(70, 72)), c(u(null, 99, { teamGames: null })), c(u(99, 99, { teamFull: false, oppFull: false }))])!;
+    expect(r).toMatchObject({ ol: 65, olSd: 5, front7: 69, front7Sd: 3 });
+  });
+});
+
 describe("the season unit tests", () => {
   it("tests coverage only for WR and TE, and every planned input", () => {
     expect(SEASON_UNIT_TESTS).toHaveLength(18);
     expect(SEASON_UNIT_TESTS.filter((t) => t.input === "coverage").every((t) => /^(wr_|te_|pff_wr_|pff_te_)/.test(t.key))).toBe(true);
-    expect(SEASON_UNIT_TESTS.filter((t) => t.key.includes("rb")).map((t) => t.input).sort()).toEqual(["line", "line", "line", "line", "line", "mt", "mt"]);
+    expect(SEASON_UNIT_TESTS.filter((t) => t.key.includes("rb")).map((t) => t.input).sort()).toEqual(["matchup", "matchup", "matchup", "matchup", "matchup", "mt", "mt"]);
     expect(SEASON_UNIT_TESTS.find((t) => t.key === "te_saeb")?.input).toBe("front7");
   });
 

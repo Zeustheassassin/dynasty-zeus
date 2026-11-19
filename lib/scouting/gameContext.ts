@@ -258,6 +258,9 @@ export const COV = {
   oppFront7: "opp_front7",
   oppCoverage: "opp_coverage",
   oppMtRate: "opp_mt_rate",
+  lineMatchup: "line_matchup",
+  /** The matchup's D-line half alone, in front-seven spreads: what its effect is measured on. */
+  lineFront7: "line_front7_z",
 } as const;
 
 /** The SP+ opponent model: the opponent's defensive SP+ (a worse defense = easier reps), FCS flagged. */
@@ -292,12 +295,30 @@ export const SEASON_UNIT_SPECS = {
   oppFront7: { key: COV.oppFront7, label: "Opp. front seven run D (season)", sign: -1, ref: "mean", unit: "PFF grade pt" } as CovariateSpec,
   oppCoverage: { key: COV.oppCoverage, label: "Opp. coverage at his spots (season)", sign: -1, ref: "mean", unit: "PFF grade pt" } as CovariateSpec,
   oppMtRate: { key: COV.oppMtRate, label: "Opp. missed-tackle rate (season)", sign: 1, ref: "mean", unit: "pt of MT rate" } as CovariateSpec,
+  /**
+   * The line matchup (the user, 2026-11-19: "if its like a 75 dline vs a 55
+   * oline and that back had a great game then it should be multipled as he
+   * perfomed way above expectations with a bad oline vs a great dline";
+   * applied as added credit like every context input, since a multiplier
+   * would make a bad game in a tough matchup count worse): how
+   * far the opponent's front seven sits above the average front seven, minus
+   * how far his line sits above the average line, each in its own spread
+   * (PFF grades fronts higher and tighter). Average vs average = 0. The
+   * effect is measured on the front seven alone (it changes game to game)
+   * and applied to the whole gap, so the line weighs the same as the D-line:
+   * the user's call ("I dont see a world where the Oline counts as half the
+   * Dline", 2026-11-19), not a tested one. Fitting one effect on the gap
+   * itself was tried: the ~13 backs whose line changed between seasons
+   * didn't move with it in SRAE / YCO, which dragged the D-line's effect down
+   * too (SRAE 4.5% held out → 1.8%).
+   */
+  lineMatchup: { key: COV.lineFront7, applyKey: COV.lineMatchup, label: "Line matchup (their front 7 vs his OL)", sign: -1, ref: 0, unit: "step of matchup" } as CovariateSpec,
 };
 
-/** The season unit tests: "line" = his OL and the opponent's front seven together. */
-export type SeasonUnitInput = "line" | "front7" | "coverage" | "mt";
+/** The season unit tests. */
+export type SeasonUnitInput = "matchup" | "front7" | "coverage" | "mt";
 export const SEASON_UNIT_INPUTS: Record<SeasonUnitInput, { label: string; specs: CovariateSpec[] }> = {
-  line: { label: "Own OL + opp. front seven", specs: [SEASON_UNIT_SPECS.olRunBlock, SEASON_UNIT_SPECS.oppFront7] },
+  matchup: { label: "Line matchup", specs: [SEASON_UNIT_SPECS.lineMatchup] },
   front7: { label: "Opp. front seven", specs: [SEASON_UNIT_SPECS.oppFront7] },
   coverage: { label: "Opp. coverage", specs: [SEASON_UNIT_SPECS.oppCoverage] },
   mt: { label: "Opp. missed-tackle rate", specs: [SEASON_UNIT_SPECS.oppMtRate] },
@@ -309,6 +330,45 @@ export interface ContextCovariates {
   spRef: number;
   /** The defensive SP+ an FCS opponent counts as: the mean of the charted G5 opponents (else the weakest FBS one). */
   fcsSp: number;
+  /** The line matchup's yardsticks: the average and spread of his line and of their front seven over RB games (null with none). */
+  lineRef?: LineRef | null;
+}
+
+export interface LineRef { ol: number; olSd: number; front7: number; front7Sd: number }
+
+const meanSd = (v: readonly number[]) => {
+  const m = v.reduce((s, x) => s + x, 0) / v.length;
+  return { m, sd: Math.sqrt(v.reduce((s, x) => s + (x - m) ** 2, 0) / v.length) };
+};
+
+/**
+ * The averages and spreads the line matchup is measured from, over RB games
+ * (the games with his own line's report read): his line over those with a
+ * full report, their front seven over those with a full opponent report.
+ */
+export function lineRefOf(contexts: Iterable<GameContext>): LineRef | null {
+  const ol: number[] = [], f7: number[] = [];
+  for (const c of contexts) {
+    const u = c.units;
+    if (!u || u.teamGames == null) continue;
+    if (u.teamFull && u.olRunBlock != null) ol.push(u.olRunBlock);
+    if (u.oppFull && u.oppFront7 != null) f7.push(u.oppFront7);
+  }
+  if (ol.length < 2 || f7.length < 2) return null;
+  const a = meanSd(ol), b = meanSd(f7);
+  return a.sd > 0 && b.sd > 0 ? { ol: a.m, olSd: a.sd, front7: b.m, front7Sd: b.sd } : null;
+}
+
+/**
+ * One game's line matchup: + = tougher for him. His line counts as average
+ * when its report is thin (an FCS team PFF saw once or twice), so the D-line
+ * still counts (the user: "Dline always has to be accounted for for each
+ * specific game"). Null for a non-RB game or a thin opponent report.
+ */
+export function lineMatchup(u: SeasonUnits | null | undefined, ref: LineRef | null | undefined): number | null {
+  if (!u || !ref || u.teamGames == null || !u.oppFull || u.oppFront7 == null) return null;
+  const line = u.teamFull && u.olRunBlock != null ? (u.olRunBlock - ref.ol) / ref.olSd : 0;
+  return (u.oppFront7 - ref.front7) / ref.front7Sd - line;
 }
 
 /**
@@ -331,6 +391,7 @@ export function gameCovariates(
   const spRef = sps.length ? sps.reduce((s, x) => s + x, 0) / sps.length : 0;
   const g5 = fbs.filter((g) => tierByGame.get(g.id) === "G5").map((g) => contexts.get(g.id)!.oppDefSp!);
   const fcsSp = g5.length ? g5.reduce((s, x) => s + x, 0) / g5.length : sps.length ? Math.max(...sps) : 0;
+  const lineRef = lineRefOf(games.map((g) => contexts.get(g.id)).filter((c): c is GameContext => c != null));
   const cov = new Map<string, Record<string, number>>();
   for (const g of games) {
     const v: Record<string, number> = {};
@@ -362,7 +423,12 @@ export function gameCovariates(
       const blended = mix ? blendCoverage(mix, u.oppCoverage) : null;
       if (blended != null) v[COV.oppCoverage] = blended;
     }
+    const mu = lineMatchup(u, lineRef);
+    if (mu != null) {
+      v[COV.lineMatchup] = mu;
+      v[COV.lineFront7] = (u!.oppFront7! - lineRef!.front7) / lineRef!.front7Sd;
+    }
     if (Object.keys(v).length) cov.set(g.id, v);
   }
-  return { cov, spRef, fcsSp };
+  return { cov, spRef, fcsSp, lineRef };
 }

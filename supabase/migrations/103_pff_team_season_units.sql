@@ -20,8 +20,17 @@
 --    RLS like pff_game_offense (065): PFF data never leaves the user who
 --    imported it.
 --
--- 2. scouting_game_context gets each game's season units, computed from those
---    reports for THAT game's season and the two teams that played it:
+-- 2. pff_game_defense — PFF's defense facet for one charted PFF game
+--    (/v1/facet/defense/summary?game_id=, both teams' defenders, trimmed),
+--    read once: the season with THIS game taken back out, so his own play in
+--    it can't move the context it's judged against (a read-only run on
+--    2026-11-19: with the game left in, RB missed tackles forced vs the
+--    opponent's MT rate tested +8.2% held out; with it out, +1.5%). Owner-only
+--    like pff_game_offense, whose rows give his own line's game the same way.
+--
+-- 3. scouting_game_context gets each game's season units, computed from those
+--    reports for THAT game's season and the two teams that played it, with
+--    the game itself taken out once PFF's grading of it has settled:
 --      opp_pff_franchise_id        the opponent's PFF franchise
 --      ol_run_block_season(_snaps) his team's OL season run-block grade (RB games)
 --      opp_front7_run_def(_snaps)  the opponent's front seven (DI + ED + LB) run defense
@@ -78,7 +87,36 @@ GRANT ALL ON public.pff_team_season TO service_role;
 COMMENT ON TABLE public.pff_team_season IS
   'PFF season report for one team (run_blocking: its line; defense: its defense summary), players trimmed (lib/pff/teamUnits.ts). Per user; never in shared views (migration 103).';
 
--- ── 2. Season units on each charted game ─────────────────────
+-- ── 2. Per-game defense facets (to leave the game out) ───────
+CREATE TABLE IF NOT EXISTS public.pff_game_defense (
+  user_id     uuid        NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
+  pff_game_id integer     NOT NULL,
+  rows        jsonb       NOT NULL,
+  fetched_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, pff_game_id)
+);
+
+ALTER TABLE public.pff_game_defense ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'pff_game_defense' AND policyname = 'pff_game_defense_self'
+  ) THEN
+    CREATE POLICY "pff_game_defense_self" ON public.pff_game_defense FOR ALL
+      USING      (auth.uid()::text = user_id::text)
+      WITH CHECK (auth.uid()::text = user_id::text);
+  END IF;
+END $$;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.pff_game_defense TO authenticated;
+GRANT ALL ON public.pff_game_defense TO service_role;
+
+COMMENT ON TABLE public.pff_game_defense IS
+  'PFF defense facet for one charted PFF game, both teams'' defenders trimmed (lib/pff/teamUnits.ts), so the game can be taken back out of the season grades. Per user; never in shared views (migration 103).';
+
+-- ── 3. Season units on each charted game ─────────────────────
 ALTER TABLE public.scouting_game_context ADD COLUMN IF NOT EXISTS opp_pff_franchise_id      integer;
 ALTER TABLE public.scouting_game_context ADD COLUMN IF NOT EXISTS ol_run_block_season       numeric(4,1);
 ALTER TABLE public.scouting_game_context ADD COLUMN IF NOT EXISTS ol_run_block_season_snaps integer;
@@ -132,7 +170,7 @@ BEGIN
     WHERE table_schema = 'public' AND table_name = 'applied_migrations'
   ) THEN
     INSERT INTO public.applied_migrations (migration, note)
-    VALUES ('103_pff_team_season_units', 'pff_team_season (PFF season run_blocking / defense reports per team) and season unit grades on scouting_game_context: own OL run block, opp front seven run D, opp coverage outside / slot / box, opp MT rate, games behind each')
+    VALUES ('103_pff_team_season_units', 'pff_team_season (PFF season run_blocking / defense reports per team), pff_game_defense (per-game defense facets, to leave the game out) and season unit grades on scouting_game_context: own OL run block, opp front seven run D, opp coverage outside / slot / box, opp MT rate, games behind each')
     ON CONFLICT (migration) DO NOTHING;
   END IF;
 END $$;

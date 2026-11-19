@@ -19,8 +19,11 @@
 //      defense, and for an RB his own team's run blocking, of that game's
 //      season. Kept per user in pff_team_season (a finished season read once,
 //      the season in progress again once a week old) and boiled down by
-//      lib/pff/teamUnits.ts. Until migration 103 is applied this step is
-//      skipped and the rows are written without those columns.
+//      lib/pff/teamUnits.ts, with the game itself taken back out: its own
+//      defense facet (pff_game_defense, one read per PFF game, ever) and its
+//      offense facet from step 1 for his line. Until migration 103 is
+//      applied this step is skipped and the rows are written without those
+//      columns.
 //   5. One scouting_game_context row per charted game, written as the caller.
 // Opponent defense SP+ is read by the app from cfd_team_seasons at display
 // time, so an in-season SP+ update reaches every game without a rewrite.
@@ -37,10 +40,11 @@ import type { CfdGameWithWeather, WeatherStatus } from "../cfd/types";
 import type { PffClient } from "../pff/client";
 import { teamCast, trimOffenseRows, type PffOffenseRow, type TeamCast } from "../pff/cast";
 import { isPostseasonGame, pffTeamSchool } from "../pff/match";
-import { gameOffense, seasonTeams, teamSeasonFacet } from "../pff/ncaa";
+import { gameDefense, gameOffense, seasonTeams, teamSeasonFacet } from "../pff/ncaa";
 import {
-  defenseUnits, olRunBlock, reportGames, SEASON_REPORTS, seasonReportStale, trimDefenseRows, trimRunBlockingRows,
-  type PffDefenseRow, type PffRunBlockRow, type SeasonReport,
+  defenseUnits, defenseWithoutGame, gameSettledBy, olRunBlock, reportGames, runBlockingWithoutGame, SEASON_REPORTS,
+  seasonReportStale, trimDefenseRows, trimGameDefenseRows, trimRunBlockingRows,
+  type PffDefenseRow, type PffGameDefenseRow, type PffRunBlockRow, type SeasonReport,
 } from "../pff/teamUnits";
 import { fetchLearnedOpponentNames } from "../scouting/learnedOpponentNames";
 import { opponentSchool } from "../scouting/opponentTier";
@@ -215,12 +219,18 @@ export async function fillGameContext(deps: ContextDeps, prospectIds: readonly s
       prospectId: g.prospect_id, season: g.season_year, position: prospects.get(g.prospect_id)?.position ?? "",
       linked: isLinked(g), franchise,
       opponent: isLinked(g) ? opponentFranchise(franchise, offense.get(g.pff_game_id!), info) : null,
+      pffGameId: isLinked(g) ? g.pff_game_id : null,
+      kickoff: info?.start || null,
     }];
   }));
-  const units = await seasonReports(deps, [...unitGames.values()].filter((u) => !unreached.has(u.prospectId)), now);
+  const reachable = () => [...unitGames.values()].filter((u) => !unreached.has(u.prospectId));
+  const units = await seasonReports(deps, reachable(), now);
   for (const u of unitGames.values()) {
     if (reportsFor(u).some((r) => units.missing.has(reportKey(r.season, r.franchiseId, r.report)))) unreached.add(u.prospectId);
   }
+  // Each game's own defense facet, to take the game back out of the season.
+  const gameDef = units.ready ? await gameDefenses(deps, reachable(), now) : { rows: new Map<number, PffGameDefenseRow[]>(), missing: new Set<number>() };
+  for (const u of unitGames.values()) if (u.pffGameId != null && gameDef.missing.has(u.pffGameId)) unreached.add(u.prospectId);
 
   // ── 5. Context rows ──
   const fetchedAt = new Date(now).toISOString();
@@ -245,7 +255,10 @@ export async function fillGameContext(deps: ContextDeps, prospectIds: readonly s
       qb_pff_id: cast?.qbPlayerId ?? null, qb_dropbacks: cast?.qbDropbacks ?? null,
       fetched_at: fetchedAt,
       // Before migration 103 the columns don't exist: leave them out.
-      ...(units.ready ? seasonUnitColumns(unitGames.get(g.id)!, units.reports, deps.pff != null) : {}),
+      ...(units.ready ? seasonUnitColumns(unitGames.get(g.id)!, units.reports, deps.pff != null, {
+        defense: isLinked(g) ? gameDef.rows.get(g.pff_game_id!) : undefined,
+        offense: facet,
+      }) : {}),
     };
   });
   for (let i = 0; i < rows.length; i += 200) {
@@ -284,6 +297,9 @@ export interface UnitGame {
   /** His PFF franchise that day, and the opponent's. */
   franchise: number | null;
   opponent: number | null;
+  /** The PFF game and its kickoff (PFF's schedule), for taking the game back out of the season. */
+  pffGameId?: number | null;
+  kickoff?: string | null;
 }
 
 /**
@@ -321,8 +337,19 @@ export interface StoredReport { rows: readonly unknown[]; fetchedAt: string }
 
 const UNIT_POSITIONS = new Set(["RB", "WR", "TE"]);
 
-/** A game's season-unit columns on scouting_game_context (migration 103). */
-export function seasonUnitColumns(g: UnitGame, reports: ReadonlyMap<string, StoredReport>, pffOn: boolean): Record<string, unknown> {
+/** The game itself: both teams' defenders (pff_game_defense) and offensive players (pff_game_offense). */
+export interface GameRows {
+  defense?: readonly PffGameDefenseRow[];
+  offense?: readonly PffOffenseRow[];
+}
+
+/**
+ * A game's season-unit columns on scouting_game_context (migration 103):
+ * the season reports with THIS game taken back out (teamUnits.ts
+ * defenseWithoutGame / runBlockingWithoutGame), once the game has settled and
+ * the report was read after that (an earlier copy may not hold the game yet).
+ */
+export function seasonUnitColumns(g: UnitGame, reports: ReadonlyMap<string, StoredReport>, pffOn: boolean, game: GameRows = {}): Record<string, unknown> {
   const out: Record<string, unknown> = {
     opp_pff_franchise_id: g.opponent,
     ol_run_block_season: null, ol_run_block_season_snaps: null,
@@ -343,13 +370,18 @@ export function seasonUnitColumns(g: UnitGame, reports: ReadonlyMap<string, Stor
     const rep = reports.get(reportKey(r.season, r.franchiseId, r.report));
     if (!rep) continue;
     read.push(rep.fetchedAt);
+    const takeOut = gameSettledBy(g.kickoff, rep.fetchedAt);
     if (r.report === "run_blocking") {
-      const ol = olRunBlock(rep.rows as PffRunBlockRow[]);
+      const own = game.offense?.filter((x) => x.team === g.franchise);
+      const rows = takeOut && own?.length ? runBlockingWithoutGame(rep.rows as PffRunBlockRow[], own) : rep.rows as PffRunBlockRow[];
+      const ol = olRunBlock(rows);
       out.ol_run_block_season = ol.grade; out.ol_run_block_season_snaps = ol.snaps;
-      out.team_season_games = reportGames(rep.rows as PffRunBlockRow[]);
+      out.team_season_games = reportGames(rows);
     } else if (rep.rows.length) {
-      const d = defenseUnits(rep.rows as PffDefenseRow[]);
-      out.opp_season_games = reportGames(rep.rows as PffDefenseRow[]);
+      const theirs = game.defense?.filter((x) => x.team === g.opponent);
+      const rows = takeOut && theirs?.length ? defenseWithoutGame(rep.rows as PffDefenseRow[], theirs) : rep.rows as PffDefenseRow[];
+      const d = defenseUnits(rows);
+      out.opp_season_games = reportGames(rows);
       out.opp_front7_run_def = d.frontSeven.grade; out.opp_front7_run_def_snaps = d.frontSeven.snaps;
       out.opp_cov_outside = d.coverage.outside.grade; out.opp_cov_outside_snaps = d.coverage.outside.snaps;
       out.opp_cov_slot = d.coverage.slot.grade; out.opp_cov_slot_snaps = d.coverage.slot.snaps;
@@ -420,6 +452,40 @@ async function seasonReports(
     reports.set(key, { rows, fetchedAt });
   }
   return { ready: true, reports, missing };
+}
+
+/**
+ * Each settled game's defense facet (both teams), the stored copy else one
+ * PFF read, stored right away (empty too, so it's never asked again). A
+ * settled game's grading doesn't change, so a copy is kept for good. Past the
+ * deadline a game never read is `missing` (its prospects wait for the next
+ * batch), so a game's units are never written with the game still inside.
+ */
+async function gameDefenses(
+  deps: ContextDeps, games: readonly UnitGame[], now: number,
+): Promise<{ rows: Map<number, PffGameDefenseRow[]>; missing: Set<number> }> {
+  const rows = new Map<number, PffGameDefenseRow[]>();
+  const missing = new Set<number>();
+  const ids = [...new Set(games
+    .filter((g) => g.pffGameId != null && reportsFor(g).length > 0 && gameSettledBy(g.kickoff, now))
+    .map((g) => g.pffGameId!))];
+  if (!deps.pff || ids.length === 0) return { rows, missing };
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await deps.supabase.from("pff_game_defense").select("pff_game_id,rows").in("pff_game_id", ids.slice(i, i + 200));
+    if (error) throw new Error(error.message);
+    for (const r of (data ?? []) as { pff_game_id: number; rows: PffGameDefenseRow[] }[]) rows.set(r.pff_game_id, r.rows ?? []);
+  }
+  for (const id of ids) {
+    if (rows.has(id)) continue;
+    if (deps.deadline != null && Date.now() > deps.deadline) { missing.add(id); continue; }
+    const trimmed = trimGameDefenseRows(await gameDefense(deps.pff, id));
+    const { error } = await deps.supabase.from("pff_game_defense").upsert(
+      { user_id: deps.userId, pff_game_id: id, rows: trimmed, fetched_at: new Date(now).toISOString() }, { onConflict: "user_id,pff_game_id" },
+    );
+    if (error) throw new Error(error.message);
+    rows.set(id, trimmed);
+  }
+  return { rows, missing };
 }
 
 interface WeatherUpdate { id: number; patch: Record<string, unknown> }

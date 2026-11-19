@@ -14,8 +14,8 @@
 //
 // Season units (line season grades plan, Stage 2, migration 103): PFF's
 // FULL-SEASON grades for that game's season, each tested on top of what its
-// metric is judged against now (SEASON_UNIT_TESTS: an RB's own line + the
-// opponent's front seven, the opponent's missed-tackle rate, a WR / TE's
+// metric is judged against now (SEASON_UNIT_TESTS: an RB's line matchup, his
+// line vs the opponent's front seven, the opponent's missed-tackle rate, a WR / TE's
 // opponent coverage at the spots he ran routes from, TE-SAEB vs the front
 // seven). For SP+ metrics, coverage is also tested in SP+'s place. Nothing is
 // switched on here (Stage 3, the user OKs each).
@@ -36,7 +36,7 @@ import {
 } from "./contextGrading";
 import { alignmentMixByGame, teRoutesBySpot, wrRoutesBySpot, type AlignmentMix } from "./alignmentMix";
 import {
-  gameCovariates, OPPONENT_SP_SPECS, OPPONENT_TIER_SPECS, resolveGameContexts, SEASON_UNIT_INPUTS, WEATHER_SPECS,
+  gameCovariates, OPPONENT_SP_SPECS, OPPONENT_TIER_SPECS, resolveGameContexts, SEASON_UNIT_INPUTS, SEASON_UNIT_SPECS, WEATHER_SPECS,
   type ContextCovariates, type SeasonUnitInput,
 } from "./gameContext";
 import { flaggedGameTest, LEFT_EARLY_WEIGHT, PLAYED_HURT_WEIGHT, type FlagWeightTest } from "./gameFlags";
@@ -81,7 +81,7 @@ export interface ContextCheck {
  * routes are mostly open releases from the backfield).
  */
 export const SEASON_UNIT_TESTS: readonly { key: string; input: SeasonUnitInput }[] = [
-  ...["rb_srae", "pff_rb_yco", "pff_rb_mtf", "pff_rb_10p", "pff_rb_15of10"].map((key) => ({ key, input: "line" as const })),
+  ...["rb_srae", "pff_rb_yco", "pff_rb_mtf", "pff_rb_10p", "pff_rb_15of10"].map((key) => ({ key, input: "matchup" as const })),
   { key: "pff_rb_mtf", input: "mt" }, { key: "pff_rb_yco", input: "mt" },
   ...["wr_csae", "wr_sae", "pff_wr_yprr", "pff_wr_cc"].map((key) => ({ key, input: "coverage" as const })),
   { key: "pff_wr_yac", input: "mt" }, { key: "pff_wr_mtf", input: "mt" },
@@ -205,6 +205,15 @@ export function seasonUnitCheck(m: ContextMetric, input: SeasonUnitInput, cc: Co
   }
   const fit = fitContext(m.samples, cc.cov, [...base, ...added]);
   const keys = new Set(added.map((s) => s.key));
+  const effects = fit ? fit.specs.filter((s) => keys.has(s.key)).map((s) => ({ label: s.label, unit: s.unit, effect: fit.beta[s.key] * m.scale })) : [];
+  // The matchup's one effect, read per grade point of each side.
+  const step = effects.find((e) => e.label === SEASON_UNIT_SPECS.lineMatchup.label);
+  if (step && cc.lineRef) {
+    effects.push(
+      { label: "= their front 7", unit: "front-7 grade pt", effect: step.effect / cc.lineRef.front7Sd },
+      { label: "= his OL (equal weight, your call)", unit: "OL grade pt", effect: -step.effect / cc.lineRef.olSd },
+    );
+  }
   return {
     id: `${m.key}|${input}`, key: m.key, label: m.label, pos: m.pos,
     input, inputLabel: SEASON_UNIT_INPUTS[input].label, base: label,
@@ -212,7 +221,7 @@ export function seasonUnitCheck(m: ContextMetric, input: SeasonUnitInput, cc: Co
     improvement: improvement(t.models[1], t.models[0]),
     beatsBase: beats(t.models[1], t.models[0]),
     replace,
-    effects: fit ? fit.specs.filter((s) => keys.has(s.key)).map((s) => ({ label: s.label, unit: s.unit, effect: fit.beta[s.key] * m.scale })) : [],
+    effects,
   };
 }
 
