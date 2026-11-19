@@ -1008,7 +1008,7 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
                 <div>
                   <div className="text-xs text-slate-500 mb-2">Result</div>
                   <div className="flex gap-3">
-                    <button onClick={() => setSuccess(true)}
+                    <button onClick={() => { setSuccess(true); setRunStuff(false); }}
                       className={`flex-1 py-3 rounded-lg text-sm font-bold transition ${success === true ? "bg-green-600 text-white ring-2 ring-green-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       ✓ SUCCESS
                     </button>
@@ -1023,7 +1023,8 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
                 <div className="space-y-2">
                   <div className="text-xs text-slate-500">Play Flags <span className="text-slate-700">(select if yes)</span></div>
                   <div className="flex gap-2">
-                    <button onClick={() => setRunStuff(!runStuff)} aria-pressed={runStuff}
+                    {/* A stuffed run is always a Fail (the user, 2026-11-19): checking it flips the result. */}
+                    <button onClick={() => { if (!runStuff) setSuccess(false); setRunStuff(!runStuff); }} aria-pressed={runStuff}
                       className={`flex-1 py-2 rounded text-xs font-medium transition ${runStuff ? "bg-red-800 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}>
                       Run Stuff
                     </button>
