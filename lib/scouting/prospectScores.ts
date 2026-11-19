@@ -134,6 +134,11 @@ export function computeAEScores(
   const rbSlices = computeRBRunSliceSRAE(prospects, games, rbPlays);
   const compositeInputs: CompositeInputs = {
     qb: qbC.samples, rb: rbC.samples, wr: wrC.samples, wrCore: wrCoreC.samples, teRoute: teRouteC.samples, teBlock: teBlockC.samples,
+    // Each metric's spread is measured before its season units (contextAdjust).
+    spreadFrom: Object.fromEntries(
+      ([["qb", qbC], ["rb", rbC], ["wr", wrC], ["wrCore", wrCoreC], ["teRoute", teRouteC], ["teBlock", teBlockC]] as const)
+        .filter(([, c]) => c.spreadSamples).map(([k, c]) => [k, c.spreadSamples!]),
+    ),
     // The per-player components: the user's charting no AE reads yet, PFF's
     // results where the user doesn't chart, and the tag-only stats.
     extra: buildComponents({

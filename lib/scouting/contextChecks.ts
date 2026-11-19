@@ -200,12 +200,15 @@ export function seasonUnitCheck(m: ContextMetric, input: SeasonUnitInput, cc: Co
   const fit = fitContext(m.samples, cc.cov, [...base, ...added]);
   const keys = new Set(added.map((s) => s.key));
   const effects = fit ? fit.specs.filter((s) => keys.has(s.key)).map((s) => ({ label: s.label, unit: s.unit, effect: fit.beta[s.key] * m.scale })) : [];
-  // The matchup's one effect, read per grade point of each side.
+  // The matchup's one effect, read per grade point of each side as it's
+  // applied (LINE_MATCHUP_WEIGHT of the measured step).
   const step = effects.find((e) => e.label === SEASON_UNIT_SPECS.lineMatchup.label);
   if (step && cc.lineRef) {
+    const w = SEASON_UNIT_SPECS.lineMatchup.applyWeight ?? 1;
+    const share = w === 1 ? "" : `, applied at ${w === 0.5 ? "half" : `${Math.round(w * 100)}%`}`;
     effects.push(
-      { label: "= their front 7", unit: "front-7 grade pt", effect: step.effect / cc.lineRef.front7Sd },
-      { label: "= his OL (equal weight, your call)", unit: "OL grade pt", effect: -step.effect / cc.lineRef.olSd },
+      { label: `= their front 7${share}`, unit: "front-7 grade pt", effect: (w * step.effect) / cc.lineRef.front7Sd },
+      { label: `= his OL (equal weight${share}, your call)`, unit: "OL grade pt", effect: (-w * step.effect) / cc.lineRef.olSd },
     );
   }
   return {

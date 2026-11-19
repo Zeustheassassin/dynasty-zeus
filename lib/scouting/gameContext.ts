@@ -285,6 +285,15 @@ export const CAST_SPECS = {
 };
 
 /**
+ * The share of the line matchup's measured effect that counts (the user,
+ * 2026-11-19, after full weight lifted Fluff Bothwell +0.87: "the change should
+ * be about cut in half ... more like 0.43"). Both sides at half, so his line
+ * still weighs the same as the D-line. The held-out tests still measure the
+ * full effect (CovariateSpec.applyWeight).
+ */
+export const LINE_MATCHUP_WEIGHT = 0.5;
+
+/**
  * The season unit inputs (line season grades plan). Signs: a better line makes
  * his runs easier; a better front seven or coverage makes reps harder; a
  * defense that misses more tackles makes yards after contact / missed tackles
@@ -311,8 +320,13 @@ export const SEASON_UNIT_SPECS = {
    * itself was tried: the ~13 backs whose line changed between seasons
    * didn't move with it in SRAE / YCO, which dragged the D-line's effect down
    * too (SRAE 4.5% held out → 1.8%).
+   *
+   * Applied at LINE_MATCHUP_WEIGHT of the measured step, both sides alike.
    */
-  lineMatchup: { key: COV.lineFront7, applyKey: COV.lineMatchup, label: "Line matchup (their front 7 vs his OL)", sign: -1, ref: 0, unit: "step of matchup" } as CovariateSpec,
+  lineMatchup: {
+    key: COV.lineFront7, applyKey: COV.lineMatchup, applyWeight: LINE_MATCHUP_WEIGHT,
+    label: "Line matchup (their front 7 vs his OL)", sign: -1, ref: 0, unit: "step of matchup",
+  } as CovariateSpec,
 };
 
 /** The season unit tests. */

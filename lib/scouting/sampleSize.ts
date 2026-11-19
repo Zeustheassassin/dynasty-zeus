@@ -26,7 +26,7 @@ export { SAMPLE_TIERS, sampleTier, type SampleTier } from "./sampleTiers";
 export interface SampleFull {
   key: string;
   label: string;
-  input: Exclude<keyof CompositeInputs, "extra">;
+  input: Exclude<keyof CompositeInputs, "extra" | "spreadFrom">;
   full: number;
 }
 

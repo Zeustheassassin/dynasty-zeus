@@ -62,6 +62,12 @@ export interface CovariateSpec {
    * whole gap, his line included at equal weight (the user's call, untested).
    */
   applyKey?: string;
+  /**
+   * Apply this share of the fitted effect (default 1). The line matchup counts
+   * at half (the user, 2026-11-19: "the change should be about cut in half").
+   * Only the applied lift changes; the held-out tests measure the full effect.
+   */
+  applyWeight?: number;
 }
 
 /** game id → its covariate values; a missing key = unknown for that game. */
@@ -215,7 +221,7 @@ export function contextLift(byGame: ByGame | undefined, cov: GameCovariates, fit
     w += g.w;
     const vals = cov.get(gid);
     if (!vals || !fit.specs.every((s) => Number.isFinite(vals[appliedKey(s)]))) continue;
-    for (const s of fit.specs) lift += g.w * fit.beta[s.key] * (vals[appliedKey(s)] - fit.ref[s.key]);
+    for (const s of fit.specs) lift += g.w * fit.beta[s.key] * (s.applyWeight ?? 1) * (vals[appliedKey(s)] - fit.ref[s.key]);
   }
   return w > 0 ? lift / w : 0;
 }

@@ -38,7 +38,7 @@ function unitsCell(c: GameContext | undefined, position: string) {
     `front seven run D ${u.oppFront7?.toFixed(1) ?? "—"}, coverage outside ${u.oppCoverage.outside?.toFixed(1) ?? "—"} / slot ${u.oppCoverage.slot?.toFixed(1) ?? "—"} / box ${u.oppCoverage.box?.toFixed(1) ?? "—"}, missed-tackle rate ${mt}.`,
     pos === "RB" ? `His line's run blocking that season: ${u.olRunBlock?.toFixed(1) ?? "—"} (${u.teamGames ?? 0} games).` : "",
     thin ? `Fewer than ${MIN_SEASON_GAMES} games behind a report: too close to a same-game grade, not used.` : "",
-    "Tested in Analysis → Grading checks; not in any score.",
+    "The inputs that passed Analysis → Grading checks count in the AE Score; the rest are shown only.",
   ].filter(Boolean).join(" ");
   return <span className={thin ? "text-slate-600" : "text-slate-300"} title={title}>{parts.join(" · ")}</span>;
 }
@@ -150,7 +150,7 @@ export default function GameContextPanel({ position, games, log }: {
               <th className="pb-2 pr-3" title="Game-window weather (Open-Meteo archive)">Weather</th>
               <th className="pb-2 pr-3 text-right" title="His offensive line's PFF pass-block / run-block grade that game (snap-weighted). Shown only: not in any score.">OL PB / RB</th>
               {!isQB && <th className="pb-2 pr-3" title="His quarterback's PFF passing grade that game. Shown only: not in any score.">QB</th>}
-              {!isQB && <th className="pb-2 pr-3" title="PFF FULL-season grades for that game's season (never the same game's): his line (RB), the opponent's front seven (F7), coverage outside / slot / box (Cov) and missed-tackle rate (MT). Tested in Grading checks; not in any score.">Season (PFF)</th>}
+              {!isQB && <th className="pb-2 pr-3" title="PFF FULL-season grades for that game's season (never the same game's): his line (RB), the opponent's front seven (F7), coverage outside / slot / box (Cov) and missed-tackle rate (MT). The inputs that passed Grading checks count in the AE Score; the rest are shown only.">Season (PFF)</th>}
               <th className="pb-2 pr-3 text-right" title="His PFF snaps / the team's offensive snaps">Snaps</th>
               <th className="pb-2 pr-3" title="Suggested when his snap share is well under his usual; you confirm">Left early</th>
               <th className="pb-2 pr-3" title="Your call: he played this game hurt">Hurt</th>

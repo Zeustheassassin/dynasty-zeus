@@ -72,6 +72,11 @@ export interface CompositeMetric {
    *  pool doesn't yet spread beyond its noise; the floor keeps such a metric
    *  counting, trusted by τ² / (τ² + v) at the floored τ. */
   spreadFloor?: number;
+  /** Measure τ on these instead of `samples`: the same players' values before
+   *  the season units (contextGrading.ts contextAdjust), so that credit moves
+   *  each player's own number, never the yardstick. The pool mean is still
+   *  `samples`' own (at that τ). */
+  spreadSamples?: Map<string, AESample | null>;
   /** The smallest sampling variance a sample is taken to have (default
    *  MIN_VARIANCE, 1 pt², a guard for AE points). A component in other units
    *  (yards per route, say) sets its own. */
@@ -100,6 +105,8 @@ export interface MetricSpread {
   additive?: true;
   /** τ is the spread floor's, not Paule–Mandel's (CompositeMetric.spreadFloor). */
   floored?: true;
+  /** τ was measured before the season units (CompositeMetric.spreadSamples). */
+  heldSpread?: true;
 }
 
 /** A metric that counts through a rule with another skill instead of as a
@@ -247,9 +254,14 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
   const fitted = metrics.map((m) => {
     const xs = [...m.samples.values()].filter((s): s is AESample => s != null);
     const minVar = m.minVariance ?? MIN_VARIANCE;
-    const pm = xs.length >= MIN_POOL ? estimateSpread(xs, minVar) : null;
-    const floor2 = pm && m.spreadFloor ? (m.spreadFloor * observedSD(xs)) ** 2 : 0;
-    const est = pm && floor2 > pm.tau2 ? { ...pm, tau2: floor2 } : pm;
+    // The yardstick's pool: before the season units when given (spreadSamples).
+    const held = m.spreadSamples ? [...m.spreadSamples.values()].filter((s): s is AESample => s != null) : null;
+    const sx = held && held.length === xs.length ? held : xs;
+    const pm = xs.length >= MIN_POOL ? estimateSpread(sx, minVar) : null;
+    const floor2 = pm && m.spreadFloor ? (m.spreadFloor * observedSD(sx)) ** 2 : 0;
+    const spread0 = pm && floor2 > pm.tau2 ? { ...pm, tau2: floor2 } : pm;
+    // The mean is the scored values' own, weighted at that τ.
+    const est = spread0 && sx !== xs ? { ...spread0, mean: generalizedQ(xs, spread0.tau2, minVar).mean } : spread0;
     const ready = est != null && est.tau2 > 0;
     const spread: MetricSpread = {
       key: m.key, label: m.label, weight: m.weight,
@@ -259,7 +271,8 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
       tau: ready ? Math.sqrt(est.tau2) : null,
       ...(m.perPlayer ? { perPlayer: true as const } : {}),
       ...(m.additive ? { additive: true as const } : {}),
-      ...(ready && est !== pm ? { floored: true as const } : {}),
+      ...(ready && spread0 !== pm ? { floored: true as const } : {}),
+      ...(ready && sx !== xs ? { heldSpread: true as const } : {}),
     };
     if (ready && m.fullTrustAt != null) {
       spread.halfPoint = median(xs.map((s) => varianceOf(s, minVar) * s.n)) / est.tau2;
@@ -441,6 +454,9 @@ export interface AECompositeInputs {
   /** Per-player components by position (PFF results, tag-only stats), each a
    *  `perPlayer` metric after the user's own. */
   extra?: Partial<Record<CompositePos, CompositeMetric[]>>;
+  /** A headline metric's samples before its season units, to measure its
+   *  spread on (CompositeMetric.spreadSamples); keyed like the inputs above. */
+  spreadFrom?: Partial<Record<"qb" | "rb" | "wr" | "wrCore" | "teRoute" | "teBlock", Map<string, AESample | null>>>;
 }
 
 export interface AEComposite {
@@ -451,20 +467,24 @@ export interface AEComposite {
 
 export function buildAEComposite(inp: AECompositeInputs): AEComposite {
   const extra = (pos: CompositePos) => (inp.extra?.[pos] ?? []).map((m) => ({ ...m, perPlayer: true as const }));
+  const held = (k: keyof NonNullable<AECompositeInputs["spreadFrom"]>) => {
+    const s = inp.spreadFrom?.[k];
+    return s ? { spreadSamples: s } : {};
+  };
   const WR = buildPositionComposite("WR", [
-    { key: "csae", label: "cSAE", weight: WR_CORE_WEIGHT, samples: inp.wrCore, fullTrustAt: WR_CORE_FULL_TRUST },
-    { key: "sae", label: "SAE", weight: WR_ALL_WEIGHT, samples: inp.wr, fullTrustAt: WR_ALL_FULL_TRUST },
+    { key: "csae", label: "cSAE", weight: WR_CORE_WEIGHT, samples: inp.wrCore, fullTrustAt: WR_CORE_FULL_TRUST, ...held("wrCore") },
+    { key: "sae", label: "SAE", weight: WR_ALL_WEIGHT, samples: inp.wr, fullTrustAt: WR_ALL_FULL_TRUST, ...held("wr") },
     ...extra("WR"),
   ], POSITION_BASELINE.WR, WR_FIELD_TIME_PAIR);
   const matched = matchedCeiling(WR);
   const positions: Record<CompositePos, PositionComposite> = {
-    QB: buildPositionComposite("QB", [{ key: "aae", label: "AAE", weight: 1, samples: inp.qb, fullTrustAt: QB_FULL_TRUST }, ...extra("QB")], POSITION_BASELINE.QB),
+    QB: buildPositionComposite("QB", [{ key: "aae", label: "AAE", weight: 1, samples: inp.qb, fullTrustAt: QB_FULL_TRUST, ...held("qb") }, ...extra("QB")], POSITION_BASELINE.QB),
     // RB's samples come in at the NFL run mix (runMix.ts), so its label says so.
-    RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE (NFL run mix)", weight: 1, samples: inp.rb, fullTrustAt: RB_FULL_TRUST }, ...extra("RB")], POSITION_BASELINE.RB, RB_FIELD_TIME_PAIR),
+    RB: buildPositionComposite("RB", [{ key: "srae", label: "SRAE (NFL run mix)", weight: 1, samples: inp.rb, fullTrustAt: RB_FULL_TRUST, ...held("rb") }, ...extra("RB")], POSITION_BASELINE.RB, RB_FIELD_TIME_PAIR),
     WR,
     TE: buildPositionComposite("TE", [
-      { key: "te_saer", label: "TE-SAER", weight: TE_ROUTE_WEIGHT, samples: inp.teRoute, fullTrustAt: matched, spreadFloor: TE_SPREAD_FLOOR },
-      { key: "te_saeb", label: "TE-SAEB", weight: TE_BLOCK_WEIGHT, samples: inp.teBlock, fullTrustAt: matched, spreadFloor: TE_SPREAD_FLOOR },
+      { key: "te_saer", label: "TE-SAER", weight: TE_ROUTE_WEIGHT, samples: inp.teRoute, fullTrustAt: matched, spreadFloor: TE_SPREAD_FLOOR, ...held("teRoute") },
+      { key: "te_saeb", label: "TE-SAEB", weight: TE_BLOCK_WEIGHT, samples: inp.teBlock, fullTrustAt: matched, spreadFloor: TE_SPREAD_FLOOR, ...held("teBlock") },
       ...extra("TE"),
     ], POSITION_BASELINE.TE, TE_FIELD_TIME_PAIR),
   };

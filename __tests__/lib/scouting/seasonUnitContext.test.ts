@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { alignmentMixByGame, blendCoverage, teRoutesBySpot, wrRoutesBySpot } from "@/lib/scouting/alignmentMix";
-import { COV, gameCovariates, lineMatchup, lineRefOf, SEASON_UNIT_SPECS, resolveGameContexts, type GameContext, type GameContextData, type GameContextRow, type SeasonUnits } from "@/lib/scouting/gameContext";
+import { COV, gameCovariates, LINE_MATCHUP_WEIGHT, lineMatchup, lineRefOf, SEASON_UNIT_SPECS, resolveGameContexts, type GameContext, type GameContextData, type GameContextRow, type SeasonUnits } from "@/lib/scouting/gameContext";
 import { SEASON_UNIT_TESTS, seasonUnitCheck, type ContextMetric } from "@/lib/scouting/contextChecks";
 import { addGameResidual, contextLift, type ByGame } from "@/lib/scouting/contextEffects";
 import type { TEPlay } from "@/lib/types";
@@ -110,10 +110,14 @@ describe("the line matchup", () => {
     expect(cc.cov.get("a")![COV.lineFront7]).toBeCloseTo(1, 9); // a front one spread above average
     expect(cc.cov.get("a")![COV.lineMatchup]).toBeCloseTo(2, 9); // ...against a line one spread below: tough
     expect(cc.cov.get("b")![COV.lineMatchup]).toBeCloseTo(-2, 9);
-    // One effect of −0.02 per step, fit on the D-line: a game's lift reads the whole gap.
+    // One effect of −0.02 per step, fit on the D-line: a game's lift reads the whole gap, at LINE_MATCHUP_WEIGHT.
     const fit = { specs: [SEASON_UNIT_SPECS.lineMatchup], beta: { [COV.lineFront7]: -0.02 }, ref: { [COV.lineFront7]: 0 }, prospects: 10, games: 20, reps: 400 };
     const byGame = { a: { n: 10, resid: 0, w: 10 } };
-    expect(contextLift(byGame, cc.cov, fit)).toBeCloseTo(-0.02 * cc.cov.get("a")![COV.lineMatchup], 9);
+    expect(LINE_MATCHUP_WEIGHT).toBe(0.5); // the user's call, 2026-11-19: "cut in half"
+    expect(contextLift(byGame, cc.cov, fit)).toBeCloseTo(-0.02 * LINE_MATCHUP_WEIGHT * cc.cov.get("a")![COV.lineMatchup], 9);
+    // A spec without applyWeight counts in full.
+    const full = { ...fit, specs: [{ ...SEASON_UNIT_SPECS.lineMatchup, applyWeight: undefined }] };
+    expect(contextLift(byGame, cc.cov, full)).toBeCloseTo(-0.02 * cc.cov.get("a")![COV.lineMatchup], 9);
   });
 
   it("measures the yardsticks over RB games with full reports", () => {

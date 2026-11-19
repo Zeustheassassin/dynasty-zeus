@@ -112,6 +112,7 @@ export function buildComponents(inp: ComponentInputs): ComponentBuild {
       label: def.source === "pff" ? `PFF ${def.label}` : def.source === "tag" ? `Tag ${def.label}` : def.label,
       weight: componentWeight(def.key, inp.weights),
       samples: res.samples,
+      ...(res.spreadSamples ? { spreadSamples: res.spreadSamples } : {}),
       perPlayer: true,
       ...(def.additive ? { additive: true as const } : {}),
       describe: describe(def, res),

@@ -141,6 +141,32 @@ describe("buildPositionComposite", () => {
     expect(pc.ready).toBe(false);
     expect(pc.metrics[0].qualified).toBe(MIN_POOL);
   });
+
+  it("measures τ on spreadSamples (before the season units) and the mean on the scored values", () => {
+    // The season-unit credit pulled the pool together (×0.8 about the mean) and moved it up 1.
+    const before = pool(SPREAD);
+    const after = pool(SPREAD.map((x) => x * 0.8 + 1));
+    const plain = buildPositionComposite("QB", [metric(after)]);
+    const held = buildPositionComposite("QB", [{ ...metric(after), spreadSamples: before }]);
+    const tauBefore = Math.sqrt(estimateSpread([...before.values()] as AESample[]).tau2);
+    expect(plain.metrics[0].tau!).toBeLessThan(tauBefore); // the shrunken yardstick the user saw stretch the top backs
+    expect(held.metrics[0].tau).toBeCloseTo(tauBefore, 9);
+    expect(held.metrics[0].heldSpread).toBe(true);
+    expect(held.metrics[0].floored).toBeUndefined();
+    expect(plain.metrics[0].heldSpread).toBeUndefined();
+    expect(held.metrics[0].mean).toBeCloseTo(1, 9); // the scored values' own mean, not the old pool's 0
+    // So the top player sits less far out than on the shrunken yardstick.
+    expect(held.scores.get("p9")!.score).toBeLessThan(plain.scores.get("p9")!.score);
+    expect(held.scores.get("p9")!.score).toBeGreaterThan(0);
+  });
+
+  it("ignores spreadSamples that don't cover the same players", () => {
+    const after = pool(SPREAD);
+    const short = pool(SPREAD.slice(0, 5).map((x) => x * 3));
+    const pc = buildPositionComposite("QB", [{ ...metric(after), spreadSamples: short }]);
+    expect(pc.metrics[0].heldSpread).toBeUndefined();
+    expect(pc.metrics[0].tau).toBeCloseTo(buildPositionComposite("QB", [metric(after)]).metrics[0].tau!, 9);
+  });
 });
 
 describe("buildAEComposite", () => {

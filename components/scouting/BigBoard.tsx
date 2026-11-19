@@ -968,7 +968,7 @@ export default function BigBoard({
   const compositeStatus = COMPOSITE_POS.map((pos) => {
     const pc = composite.positions[pos];
     const m = pc.metrics[0];
-    if (pc.ready) return `${pos} ±${m.tau!.toFixed(1)} pts (${m.qualified}${m.floored ? ", at the spread floor" : ""})`;
+    if (pc.ready) return `${pos} ±${m.tau!.toFixed(1)} pts (${m.qualified}${m.floored ? ", at the spread floor" : ""}${m.heldSpread ? ", measured before the season units" : ""})`;
     return m.qualified >= MIN_POOL ? `${pos} out, no spread beyond noise (${m.qualified})` : `${pos} joins at ${MIN_POOL} (${m.qualified} now)`;
   }).join(" · ");
   // Opponent-strength status: how much easier a G5 / FCS rep counts, by
@@ -989,7 +989,7 @@ export default function BigBoard({
   const unitText = (Object.values(contextInfo) as MetricContext[])
     .filter((c) => c.fit && (c.units?.length ?? 0) > 0)
     .flatMap((c) => c.fit!.specs.filter((s) => s.key === COV.lineFront7 || s.key === COV.oppCoverage)
-      .map((s) => `${HEADLINE_LABEL[c.key as HeadlineKey] ?? c.key} by ${s.key === COV.lineFront7 ? "line matchup" : "opp. coverage"} (${(c.fit!.beta[s.key] * 100).toFixed(2)} pts per ${s.unit})`));
+      .map((s) => `${HEADLINE_LABEL[c.key as HeadlineKey] ?? c.key} by ${s.key === COV.lineFront7 ? "line matchup" : "opp. coverage"} (${(c.fit!.beta[s.key] * 100).toFixed(2)} pts per ${s.unit}${s.applyWeight != null && s.applyWeight !== 1 ? `, counted at ${s.applyWeight === 0.5 ? "half" : `${Math.round(s.applyWeight * 100)}%`}` : ""})`));
   const opponentStatus = !gameRouteCells
     ? "the per-game WR route data (migration 058) didn't load"
     : [...spText, ...unitText, effectText("WR"), effectText("TE"), effectText("RB"), "QB not adjusted"].filter(Boolean).join(" · ") || "not enough games vs G5/FCS yet";

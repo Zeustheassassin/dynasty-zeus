@@ -93,6 +93,8 @@ export interface CountStatResult {
   measured: boolean;
   /** The game-context model applied on top (contextGrading.ts), when this stat has one. */
   context?: MetricContext;
+  /** The samples before the season units, which the AE Score measures this stat's spread on (contextAdjust). */
+  spreadSamples?: Map<string, CountSample | null>;
 }
 
 const fmtNum = (v: number, dp: number) => (Number.isFinite(v) ? v.toFixed(dp) : "—");
@@ -179,6 +181,7 @@ export function countStat(
   return {
     def, samples: ctx?.samples ?? tierAdjusted, poolRate: poolRate != null ? poolRate * def.scale : null, dispersion,
     effects, tierProspects: m.G5.prospects, measured, ...(ctx ? { context: ctx.info } : {}),
+    ...(ctx?.spreadSamples ? { spreadSamples: ctx.spreadSamples } : {}),
   };
 }
 

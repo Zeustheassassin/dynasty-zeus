@@ -47,6 +47,14 @@
 //   the missed-tackle rate only: on top of it the matchup adds +0.4% (p .085,
 //   fails), while the rate adds +1.8% (p .030) on top of the matchup. Read-only
 //   run on 790 games; Grading checks reruns them on the stored data.
+// - Same evening, after the fill (the user, on the RB board): the matchup
+//   counts at half (gameContext.ts LINE_MATCHUP_WEIGHT), and a metric's
+//   spread is measured before its season units (contextAdjust's
+//   spreadSamples), so the credit moves each player's own number, never the
+//   yardstick every player is divided by. The held RB PFF MTF/A vs the
+//   opponent's missed-tackle rate passed on the stored data (+1.59% held out,
+//   p .025; moves RB AE by 0.03 at most) and is switched on (the user: "yes go
+//   on with MTF/A if thats recomended").
 import type { AESample } from "../types";
 import type { CompositePos } from "./aeComposite";
 import { adjustForContext, CONTEXT_TEST_MIN_PROSPECTS, fitContext, type ByGame, type ContextFit, type CovariateSpec } from "./contextEffects";
@@ -64,6 +72,7 @@ export const CAST_ON: ReadonlySet<string> = new Set();
 export const SEASON_UNITS_ON: ReadonlyMap<string, readonly SeasonUnitInput[]> = new Map<string, readonly SeasonUnitInput[]>([
   ["rb_srae", ["matchup"]],
   ["pff_rb_yco", ["mt"]],
+  ["pff_rb_mtf", ["mt"]],
   ["pff_rb_10p", ["matchup"]],
   ["pff_wr_cc", ["coverage"]],
   ["wr_sae", ["coverage"]],
@@ -147,6 +156,17 @@ export function contextSpecs(key: string, cc: ContextCovariates, pos: CompositeP
  * Tier metrics with weather or cast on: fit together with the tiers (as
  * tested), and only the extra inputs' effects applied on top of today's tier
  * adjustment. Anything else: `tierAdjusted`, untouched.
+ *
+ * `spreadSamples` (only when the fit kept a season unit input): the same
+ * samples adjusted by the same fit with the season units left out. The AE
+ * Score measures the metric's spread on these (CompositeMetric.spreadSamples):
+ * the season units move each player's own number, never the yardstick. On the
+ * real data (2026-11-19) the line matchup took RB SRAE's spread from 3.81 to
+ * 3.21 (lines and backs are both better at the strong programs, so the credit
+ * pulls backs together), which stretched every far-from-average back:
+ * Keyjuan Brown went 2.09 → 2.52 Dynasty with only ~+0.6 SRAE of his own
+ * credit. The user: Keyjuan "far too elite ... i need him to fall under that
+ * 2.25 line".
  */
 export function contextAdjust<S extends AESample>(
   key: string,
@@ -155,7 +175,7 @@ export function contextAdjust<S extends AESample>(
   tierAdjusted: ReadonlyMap<string, S | null>,
   cc: ContextCovariates,
   scale = 100,
-): { samples: Map<string, S | null>; info: MetricContext } {
+): { samples: Map<string, S | null>; spreadSamples?: Map<string, S | null>; info: MetricContext } {
   const m = metricContext(key);
   const specs = contextSpecs(key, cc, pos);
   if (specs.length === 0) return { samples: new Map(tierAdjusted), info: { key, ...m, fit: null } };
@@ -165,13 +185,20 @@ export function contextAdjust<S extends AESample>(
   // keep today's adjustment rather than fit on a handful.
   const fit = fitted && fitted.prospects >= CONTEXT_TEST_MIN_PROSPECTS ? fitted : null;
   if (!fit) return { samples: new Map(tierAdjusted), info: { key, ...m, fit: null } };
+  const unitKeys = new Set(seasonUnitSpecs(key).map((s) => s.key));
+  const hasUnits = fit.specs.some((s) => unitKeys.has(s.key));
+  const withoutUnits = (f: ContextFit): ContextFit => ({ ...f, specs: f.specs.filter((s) => !unitKeys.has(s.key)) });
   if (m.opponent === "sp") {
-    return { samples: new Map([...raw].map(([id, s]) => [id, adjustForContext(s, cc.cov, fit, scale)])), info: { key, ...m, fit } };
+    const apply = (f: ContextFit) => new Map([...raw].map(([id, s]) => [id, adjustForContext(s, cc.cov, f, scale)]));
+    return { samples: apply(fit), ...(hasUnits ? { spreadSamples: apply(withoutUnits(fit)) } : {}), info: { key, ...m, fit } };
   }
   const tierKeys = new Set(OPPONENT_TIER_SPECS.map((s) => s.key));
   const extraOnly = { ...fit, specs: fit.specs.filter((s) => !tierKeys.has(s.key)) };
+  const apply = (f: ContextFit) =>
+    new Map([...tierAdjusted].map(([id, s]) => [id, s && raw.get(id)?.byGame ? adjustForContext({ ...s, byGame: raw.get(id)!.byGame }, cc.cov, f, scale) : s]));
   return {
-    samples: new Map([...tierAdjusted].map(([id, s]) => [id, s && raw.get(id)?.byGame ? adjustForContext({ ...s, byGame: raw.get(id)!.byGame }, cc.cov, extraOnly, scale) : s])),
+    samples: apply(extraOnly),
+    ...(hasUnits ? { spreadSamples: apply(withoutUnits(extraOnly)) } : {}),
     info: { key, ...m, fit: extraOnly },
   };
 }

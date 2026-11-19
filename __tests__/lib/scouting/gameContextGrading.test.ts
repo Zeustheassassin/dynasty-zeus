@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { gameCovariates, resolveGameContexts, COV, type GameContext, type GameContextData } from "@/lib/scouting/gameContext";
+import { gameCovariates, resolveGameContexts, COV, LINE_MATCHUP_WEIGHT, type GameContext, type GameContextData } from "@/lib/scouting/gameContext";
 import { contextAdjust, contextWhat, metricContext, OPPONENT_SP, WEATHER_ON, CAST_ON, SEASON_UNITS_ON } from "@/lib/scouting/contextGrading";
 import { addGameResidual, type ByGame } from "@/lib/scouting/contextEffects";
 import { gameFlagWeight, leftEarlySuggestions, flaggedGameTest, LEFT_EARLY_WEIGHT, PLAYED_HURT_WEIGHT } from "@/lib/scouting/gameFlags";
@@ -64,11 +64,11 @@ describe("contextGrading policy", () => {
     expect([...WEATHER_ON].sort()).toEqual(["ch_wr_drop", "pff_btt", "pff_rb_yprr", "qb_aae"]);
     expect(CAST_ON.size).toBe(0);
     // Season units (2026-11-19, the user's OK): what passed held out with each game left out.
+    // PFF MTF/A vs the missed-tackle rate joined after the fill (p .025 on the stored data).
     expect(Object.fromEntries(SEASON_UNITS_ON)).toEqual({
-      rb_srae: ["matchup"], pff_rb_yco: ["mt"], pff_rb_10p: ["matchup"],
+      rb_srae: ["matchup"], pff_rb_yco: ["mt"], pff_rb_mtf: ["mt"], pff_rb_10p: ["matchup"],
       pff_wr_cc: ["coverage"], wr_sae: ["coverage"], pff_wr_yprr: ["coverage"],
     });
-    expect(SEASON_UNITS_ON.has("pff_rb_mtf")).toBe(false); // held: p .035
     expect(metricContext("rb_srae")).toEqual({ opponent: "tier", weather: false, cast: false, units: ["matchup"] });
     expect(metricContext("te_saer")).toEqual({ opponent: "tier", weather: false, cast: false, units: [] });
   });
@@ -140,10 +140,25 @@ describe("contextGrading policy", () => {
     expect(out.info.fit!.specs.map((s) => s.key)).toEqual([COV.lineFront7]); // only the extra is applied
     const beta = out.info.fit!.beta[COV.lineFront7];
     expect(beta).toBeLessThan(-0.005);
-    // Lift = β × (average gap, from 0) = β × (average front7 + 1), taken off the tier-adjusted AE.
+    // Lift = β × LINE_MATCHUP_WEIGHT × (average gap, from 0) = β × ½ × (average front7 + 1), taken off the tier-adjusted AE.
     const s0 = out.samples.get("p0")!;
     const meanGap = [0, 1, 2, 3].reduce((a, g) => a + ((0 * 4 + g) % 5) - 2 + 1, 0) / 4;
-    expect(s0.ae).toBeCloseTo(tier.get("p0")!.ae - 100 * beta * meanGap, 6);
+    expect(s0.ae).toBeCloseTo(tier.get("p0")!.ae - 100 * beta * LINE_MATCHUP_WEIGHT * meanGap, 6);
+    // The yardstick's samples: the same fit with the season units left out = today's tier adjustment alone.
+    expect(out.spreadSamples!.get("p0")!.ae).toBeCloseTo(tier.get("p0")!.ae, 9);
+    expect(out.spreadSamples!.size).toBe(out.samples.size);
+  });
+
+  it("no season units on the metric: no yardstick samples", () => {
+    const raw = new Map<string, AESample>(), cov = new Map<string, Record<string, number>>();
+    for (let p = 0; p < 12; p++) {
+      const bg: ByGame = {};
+      for (let g = 0; g < 4; g++) { const id = `p${p}g${g}`; addGameResidual(bg, id, 40, 40 * 0.01 * (g - 1.5)); cov.set(id, { [COV.oppDefSp]: 20 + g, [COV.oppFcs]: 0 }); }
+      raw.set(`p${p}`, { ae: p, n: 160, w: 160, variance: 4, byGame: bg });
+    }
+    const out = contextAdjust("wr_csae", "WR", raw, raw, { cov, spRef: 21, fcsSp: 30 });
+    expect(out.info.fit).not.toBeNull();
+    expect(out.spreadSamples).toBeUndefined();
   });
 
   it("weather on a tier metric goes on top of today's tier adjustment", () => {
