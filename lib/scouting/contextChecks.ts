@@ -32,9 +32,9 @@ import {
   type ByGame, type ContextFit, type CovariateSpec,
 } from "./contextEffects";
 import {
-  castSpecsFor, contextSpecs, HEADLINE_KEYS, HEADLINE_LABEL, HEADLINE_POS, metricContext, type OpponentMode,
+  castSpecsFor, contextSpecs, HEADLINE_KEYS, HEADLINE_LABEL, HEADLINE_POS, metricContext, seasonUnitSpecs, type OpponentMode,
 } from "./contextGrading";
-import { alignmentMixByGame, teRoutesBySpot, wrRoutesBySpot, type AlignmentMix } from "./alignmentMix";
+import { routeAlignmentMix } from "./alignmentMix";
 import {
   gameCovariates, OPPONENT_SP_SPECS, OPPONENT_TIER_SPECS, resolveGameContexts, SEASON_UNIT_INPUTS, SEASON_UNIT_SPECS, WEATHER_SPECS,
   type ContextCovariates, type SeasonUnitInput,
@@ -138,21 +138,14 @@ export interface ContextInputs {
 const WR_FLOOR = 15;
 const list = (m: Map<string, { byGame?: ByGame } | null>) => [...m].map(([id, s]) => [id, s?.byGame] as const);
 
-/** Where each WR / TE game's routes were run (for the opponent's coverage blend). */
-export function routeAlignmentMix(inp: Pick<ContextInputs, "games" | "gameRouteCells" | "gradingData" | "tePlays">): Map<string, AlignmentMix> {
-  const routes = new Map([
-    ...wrRoutesBySpot(inp.gameRouteCells ?? [], inp.gradingData.routeTagCells),
-    ...teRoutesBySpot(inp.tePlays),
-  ]);
-  return alignmentMixByGame(inp.games, routes);
-}
-
 /** Every metric's per-game residuals, and the games' covariates. */
 export function contextMetrics(inp: ContextInputs): { metrics: ContextMetric[]; cc: ContextCovariates } {
   const prospects = inp.prospects as Prospect[];
   const games = inp.games as ScoutingGame[];
   const tiers = tierGames(games, learnOpponents(games, inp.gradingData.context.rows)).byGame;
-  const cc = gameCovariates(games, resolveGameContexts(games, inp.gradingData.context), tiers, routeAlignmentMix(inp));
+  const cc = gameCovariates(games, resolveGameContexts(games, inp.gradingData.context), tiers, routeAlignmentMix({
+    games, gameRouteCells: inp.gameRouteCells, routeTagCells: inp.gradingData.routeTagCells, tePlays: inp.tePlays,
+  }));
   const metrics: ContextMetric[] = [];
   const head = (key: (typeof HEADLINE_KEYS)[number], samples: ContextMetric["samples"]) =>
     metrics.push({ key, label: HEADLINE_LABEL[key], pos: HEADLINE_POS[key], scale: 100, samples });
@@ -181,19 +174,20 @@ export function contextMetrics(inp: ContextInputs): { metrics: ContextMetric[]; 
 const opponentBase = (key: string, cc: ContextCovariates): CovariateSpec[] =>
   metricContext(key).opponent === "sp" ? OPPONENT_SP_SPECS(cc.spRef) : OPPONENT_TIER_SPECS;
 
-/** What a metric is judged against now: its opponent model, plus weather where it's on. */
-function inUseBase(key: string, cc: ContextCovariates): { specs: CovariateSpec[]; label: string } {
+/** What a metric is judged against now: its opponent model, weather where it's on, and its other season units on. */
+function inUseBase(key: string, cc: ContextCovariates, except?: SeasonUnitInput): { specs: CovariateSpec[]; label: string } {
   const mc = metricContext(key);
   const opp = opponentBase(key, cc);
+  const others = mc.units.filter((u) => u !== except);
   return {
-    specs: mc.weather ? [...opp, ...WEATHER_SPECS] : opp,
-    label: `${mc.opponent === "sp" ? "Opp. D SP+" : "Tiers"}${mc.weather ? " + weather" : ""}`,
+    specs: [...opp, ...(mc.weather ? WEATHER_SPECS : []), ...seasonUnitSpecs(key, except)],
+    label: [mc.opponent === "sp" ? "Opp. D SP+" : "Tiers", ...(mc.weather ? ["weather"] : []), ...others.map((u) => SEASON_UNIT_INPUTS[u].label.toLowerCase())].join(" + "),
   };
 }
 
 /** One season unit test (held out; the chance check is unitPValue). */
 export function seasonUnitCheck(m: ContextMetric, input: SeasonUnitInput, cc: ContextCovariates): UnitCheck {
-  const { specs: base, label } = inUseBase(m.key, cc);
+  const { specs: base, label } = inUseBase(m.key, cc, input);
   const added = SEASON_UNIT_INPUTS[input].specs;
   const t = heldOutContextTest(m.samples, cc.cov, [base, [...base, ...added]]);
   let replace: UnitCheck["replace"] = null;
@@ -227,7 +221,7 @@ export function seasonUnitCheck(m: ContextMetric, input: SeasonUnitInput, cc: Co
 
 /** The chance check for one season unit test: does the input beat shuffles of itself, on top of the base? */
 export function unitPValue(m: ContextMetric, input: SeasonUnitInput, cc: ContextCovariates): number | null {
-  return contextVerdict(m.samples, cc.cov, inUseBase(m.key, cc).specs, SEASON_UNIT_INPUTS[input].specs).p;
+  return contextVerdict(m.samples, cc.cov, inUseBase(m.key, cc, input).specs, SEASON_UNIT_INPUTS[input].specs).p;
 }
 
 function appliedEffects(m: ContextMetric, fit: ContextFit | null): ContextCheck["applied"] {

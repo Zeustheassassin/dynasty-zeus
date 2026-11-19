@@ -4,6 +4,7 @@ import type { ProspectAge } from "../../../../lib/scouting/prospectAge";
 import { prospectAgeAt } from "../../../../lib/scouting/prospectAge";
 import { learnOpponents, tierGames, type GameTiers, type OpponentTier } from "../../../../lib/scouting/opponentTier";
 import { gameCovariates, resolveGameContexts, type ContextCovariates, type GameContext } from "../../../../lib/scouting/gameContext";
+import { routeAlignmentMix } from "../../../../lib/scouting/alignmentMix";
 import { computeRoleFits } from "../../../../lib/scouting/roleFits";
 import type { RoleFit } from "../../../../lib/scouting/roleFit";
 import { pffValues, type PffTotals, type PffValues } from "../../../../lib/pff/totals";
@@ -82,7 +83,12 @@ export function useProspectScores(
   // context effects read: opponent defense SP+ and weather count where their
   // held-out tests passed (contextGrading.ts).
   const contexts = useMemo(() => resolveGameContexts(games, gradingData.context), [games, gradingData.context]);
-  const contextCov = useMemo(() => gameCovariates(games, contexts, gameTiers.byGame), [games, contexts, gameTiers]);
+  // The opponent's season coverage is read at the spots each WR / TE ran his routes that game (alignmentMix.ts).
+  const routeMix = useMemo(
+    () => routeAlignmentMix({ games, gameRouteCells, routeTagCells: gradingData.routeTagCells, tePlays }),
+    [games, gameRouteCells, gradingData.routeTagCells, tePlays],
+  );
+  const contextCov = useMemo(() => gameCovariates(games, contexts, gameTiers.byGame, routeMix), [games, contexts, gameTiers, routeMix]);
 
   // The AE columns and the AE Score; each league model is fit once.
   const ae = useMemo(

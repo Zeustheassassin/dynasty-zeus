@@ -96,6 +96,22 @@ export function alignmentMixByGame(
   return out;
 }
 
+/**
+ * Every WR / TE game's mix from what's loaded: the WR route cells (null until
+ * they load; the tagged cells cover the games they hold meanwhile) and the TE
+ * plays. The scoring (useProspectScores), the Grading checks and the context
+ * tests all read the same mix.
+ */
+export function routeAlignmentMix(inp: {
+  games: readonly Pick<ScoutingGame, "id" | "prospect_id">[];
+  gameRouteCells: readonly CellsRow[] | null;
+  routeTagCells: readonly CellsRow[];
+  tePlays: readonly Pick<TEPlay, "game_id" | "play_type" | "positioning">[];
+}): Map<string, AlignmentMix> {
+  const routes = new Map([...wrRoutesBySpot(inp.gameRouteCells ?? [], inp.routeTagCells), ...teRoutesBySpot(inp.tePlays)]);
+  return alignmentMixByGame(inp.games, routes);
+}
+
 /** The coverage grade that matches his mix: spots without a grade drop out and the rest re-weight. */
 export function blendCoverage(mix: AlignmentMix, grades: Record<CoverageSpot, number | null>): number | null {
   let w = 0, s = 0;

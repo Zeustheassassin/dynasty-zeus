@@ -18,6 +18,7 @@ import { TAG_COMPONENTS, TAG_COMPONENT_WEIGHTS, tagGameCounts, type tagStatReps 
 import type { OpponentTier } from "./opponentTier";
 import type { ProspectGameRouteTagCellsRow } from "./aggregateMerge";
 import { EMPTY_CONTEXT_DATA, type ContextCovariates, type GameContextData } from "./gameContext";
+import { contextWhat } from "./contextGrading";
 import type { PffSeasonDepthRow } from "./middleUsage";
 import { SEASON_PFF_KEYS, seasonTwpCounts } from "./seasonTwp";
 
@@ -93,7 +94,7 @@ function describe(def: CountStatDef, res: CountStatResult) {
     if (res.poolRate != null) parts.push(`(pool ${formatRate(def, res.poolRate)})`);
     if (s.rawAe != null) {
       const shift = def.dir * (s.ae - s.rawAe);
-      const what = res.context?.weather ? "opponents and weather" : res.context?.opponent === "sp" ? "opponent defenses" : "opponents";
+      const what = contextWhat(res.context);
       parts.push(`(${shift >= 0 ? "+" : "−"}${formatRate(def, Math.abs(shift))} for ${what})`);
     }
     return parts.join(" ");

@@ -38,6 +38,7 @@ import { buildComponents, type GradingData } from "./aeComponents";
 import { tagStatReps } from "./tagStats";
 import { learnOpponents, tierGames } from "./opponentTier";
 import { gameCovariates, resolveGameContexts } from "./gameContext";
+import { routeAlignmentMix } from "./alignmentMix";
 import { chartedSeasonRows } from "./middleUsage";
 import type { CountStatResult } from "./countComponents";
 
@@ -173,7 +174,9 @@ export function buildGradingReport(inp: GradingInputs): GradingReport {
   const tiers = tierGames(inp.games, learnOpponents(inp.games, inp.gradingData.context.rows)).byGame;
   const built = buildComponents({
     prospects: inp.prospects, games: inp.games, tierByGame: tiers,
-    context: gameCovariates(inp.games, resolveGameContexts(inp.games, inp.gradingData.context), tiers),
+    context: gameCovariates(inp.games, resolveGameContexts(inp.games, inp.gradingData.context), tiers, routeAlignmentMix({
+      games: inp.games, gameRouteCells: inp.gameRouteCells, routeTagCells: inp.gradingData.routeTagCells, tePlays: inp.tePlays,
+    })),
     qbPlays: inp.qbPlays, rbPlays: inp.rbPlays,
     pffGameRows: inp.gradingData.pffGameRows, wrRouteCounts: inp.gradingData.routeCounts,
     tagReps: tagStatReps({ games: inp.games, qbPlays: inp.qbPlays, rbPlays: inp.rbPlays, tePlays: inp.tePlays, wrTagRows: inp.gradingData.routeTagCells }),

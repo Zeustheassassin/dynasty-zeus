@@ -33,11 +33,25 @@
 //   the AE Score's CC% is now PFF's (pff_wr_cc), and the charted CC%'s
 //   weather switch went with it. PFF's CC% hasn't had its own weather test
 //   yet: it's off until Grading checks shows it passing (activation list).
+// - 2026-11-19, season units (line season grades plan; PFF FULL-season grades
+//   with the game itself left out, migration 103; the user: "OK to switch
+//   everything on you recomend"). Held out on top of what each metric used:
+//   RB line matchup on SRAE (+4.5%, p .020) and
+//   PFF 10+% (+5.9%, p .010): their front seven vs his line, the effect
+//   measured on the front seven and applied to the whole gap, so his line
+//   weighs the same as the D-line (the user's call, untested); PFF YCO/A vs the
+//   opponent's missed-tackle rate (+4.5%, p .005); WR PFF CC% vs the
+//   opponent's coverage at his spots (+3.2%, p .005); WR SAE (+0.6%, p .015)
+//   and PFF YPRR (+0.4%, p .035) vs coverage on top of SP+. Held: RB PFF
+//   MTF/A vs missed-tackle rate (+1.5%, p .035, borderline). PFF YCO/A takes
+//   the missed-tackle rate only: on top of it the matchup adds +0.4% (p .085,
+//   fails), while the rate adds +1.8% (p .030) on top of the matchup. Read-only
+//   run on 790 games; Grading checks reruns them on the stored data.
 import type { AESample } from "../types";
 import type { CompositePos } from "./aeComposite";
 import { adjustForContext, CONTEXT_TEST_MIN_PROSPECTS, fitContext, type ByGame, type ContextFit, type CovariateSpec } from "./contextEffects";
 import {
-  CAST_SPECS, OPPONENT_SP_SPECS, OPPONENT_TIER_SPECS, WEATHER_SPECS, type ContextCovariates,
+  CAST_SPECS, OPPONENT_SP_SPECS, OPPONENT_TIER_SPECS, SEASON_UNIT_INPUTS, WEATHER_SPECS, type ContextCovariates, type SeasonUnitInput,
 } from "./gameContext";
 
 /** Metrics (headline AE keys and component keys) judged against opponent defense SP+ instead of tiers. */
@@ -46,6 +60,15 @@ export const OPPONENT_SP: ReadonlySet<string> = new Set(["wr_csae", "ch_qb_p2s",
 export const WEATHER_ON: ReadonlySet<string> = new Set(["pff_rb_yprr", "qb_aae", "pff_btt", "ch_wr_drop"]);
 /** Supporting cast never counts in a score (the user's call); kept for the checks. */
 export const CAST_ON: ReadonlySet<string> = new Set();
+/** Season unit inputs that count, per metric (2026-11-19). */
+export const SEASON_UNITS_ON: ReadonlyMap<string, readonly SeasonUnitInput[]> = new Map<string, readonly SeasonUnitInput[]>([
+  ["rb_srae", ["matchup"]],
+  ["pff_rb_yco", ["mt"]],
+  ["pff_rb_10p", ["matchup"]],
+  ["pff_wr_cc", ["coverage"]],
+  ["wr_sae", ["coverage"]],
+  ["pff_wr_yprr", ["coverage"]],
+]);
 
 /** The headline AE metrics, keyed like the components. */
 export const HEADLINE_KEYS = ["qb_aae", "rb_srae", "wr_sae", "wr_csae", "te_saer", "te_saeb"] as const;
@@ -71,19 +94,47 @@ export interface MetricContext {
   key: string;
   opponent: OpponentMode;
   weather: boolean;
+  /** Season unit inputs switched on for it. */
+  units?: readonly SeasonUnitInput[];
   /** The fit applied (SP+ and/or weather); null when only today's tiers apply. */
   fit: ContextFit | null;
 }
 
 /** What `key` is judged against. */
-export function metricContext(key: string): { opponent: OpponentMode; weather: boolean; cast: boolean } {
-  return { opponent: OPPONENT_SP.has(key) ? "sp" : "tier", weather: WEATHER_ON.has(key), cast: CAST_ON.has(key) };
+export function metricContext(key: string): { opponent: OpponentMode; weather: boolean; cast: boolean; units: readonly SeasonUnitInput[] } {
+  return { opponent: OPPONENT_SP.has(key) ? "sp" : "tier", weather: WEATHER_ON.has(key), cast: CAST_ON.has(key), units: SEASON_UNITS_ON.get(key) ?? [] };
+}
+
+/** The season unit inputs on for `key`, as covariates (`except` one, for testing it on top of the rest). */
+export function seasonUnitSpecs(key: string, except?: SeasonUnitInput): CovariateSpec[] {
+  return metricContext(key).units.filter((u) => u !== except).flatMap((u) => SEASON_UNIT_INPUTS[u].specs);
+}
+
+const UNIT_WORDS: Record<SeasonUnitInput, string> = {
+  matchup: "the line matchup", front7: "front sevens", coverage: "opponent coverage", mt: "missed tackles",
+};
+
+/**
+ * What a metric's context adjustment was for, for the AE tooltips:
+ * "opponents", "opponent defenses", "opponents and weather" (QB AAE:
+ * "weather"), then any season units the fit kept ("opponents, the line
+ * matchup"). `headline` false = a composite piece without its own context.
+ */
+export function contextWhat(
+  info: { key: string; opponent: OpponentMode; weather: boolean; units?: readonly SeasonUnitInput[]; fit: ContextFit | null } | null | undefined,
+  headline = true,
+): string {
+  if (!info || !headline) return "opponents";
+  const base = info.weather ? (info.key === "qb_aae" ? "weather" : "opponents and weather") : info.opponent === "sp" && info.fit ? "opponent defenses" : "opponents";
+  const kept = new Set(info.fit?.specs.map((s) => s.key) ?? []);
+  const units = (info.units ?? []).filter((u) => SEASON_UNIT_INPUTS[u].specs.some((s) => kept.has(s.key))).map((u) => UNIT_WORDS[u]);
+  return units.length ? `${base}, ${units.join(", ")}` : base;
 }
 
 /** The covariates fit for `key` (empty when only today's tiers apply). */
 export function contextSpecs(key: string, cc: ContextCovariates, pos: CompositePos): CovariateSpec[] {
   const m = metricContext(key);
-  const extra = [...(m.weather ? WEATHER_SPECS : []), ...(m.cast ? castSpecsFor(pos, key) : [])];
+  const extra = [...(m.weather ? WEATHER_SPECS : []), ...(m.cast ? castSpecsFor(pos, key) : []), ...seasonUnitSpecs(key)];
   if (m.opponent === "sp") return [...OPPONENT_SP_SPECS(cc.spRef), ...extra];
   return extra.length ? [...OPPONENT_TIER_SPECS, ...extra] : [];
 }

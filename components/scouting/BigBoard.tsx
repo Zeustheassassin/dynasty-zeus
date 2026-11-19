@@ -20,7 +20,8 @@ import { PRO_DAY_ADJUST, RB_SPEED_FLOOR, fortyDisplay } from "../../lib/scouting
 import PostDraftTab from "./PostDraftTab";
 import { classDraftedBy, makeLock } from "../../lib/scouting/scoreLock";
 import type { ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
-import { HEADLINE_LABEL, type HeadlineKey, type MetricContext } from "../../lib/scouting/contextGrading";
+import { contextWhat, HEADLINE_LABEL, type HeadlineKey, type MetricContext } from "../../lib/scouting/contextGrading";
+import { COV } from "../../lib/scouting/gameContext";
 import { SEASON_DECAY } from "../../lib/scouting/seasonWeight";
 import { POS_COLOR } from "../../lib/uiTheme";
 import { levelRuleText, matchFor, noLevelReached, roleFitTooltip, roleLabel, roleTagRuleText, standAloneRuleText, versatileLeadText, versatileRuleText, type RoleFit } from "../../lib/scouting/roleFit";
@@ -775,7 +776,7 @@ export default function BigBoard({
           `weight ${c.weight} × ${Math.round(c.reliability * 100)}% = ${(c.effectiveWeight ?? 0).toFixed(2)} → ${signed(c.z, 2)}`;
       }
       const ctx = contextInfo[COMPOSITE_HEADLINE[c.key] ?? "qb_aae"];
-      const what = !COMPOSITE_HEADLINE[c.key] ? "opponents" : ctx.weather ? (ctx.key === "qb_aae" ? "weather" : "opponents and weather") : ctx.opponent === "sp" && ctx.fit ? "opponent defenses" : "opponents";
+      const what = contextWhat(ctx, !!COMPOSITE_HEADLINE[c.key]);
       const ae = c.rawAe != null
         ? `${signed(c.rawAe, 1)} (${signed(c.ae - c.rawAe, 1)} for ${what}) = ${signed(c.ae, 1)}`
         : signed(c.ae, 1);
@@ -984,9 +985,14 @@ export default function BigBoard({
   const spText = (Object.values(contextInfo) as MetricContext[])
     .filter((c) => c.opponent === "sp" && c.fit && c.fit.beta.opp_def_sp != null)
     .map((c) => `${HEADLINE_LABEL[c.key as HeadlineKey] ?? c.key} by opp. defense SP+ (${(c.fit!.beta.opp_def_sp * 100).toFixed(2)} pts per SP+ pt)`);
+  // Season units on top (contextGrading.ts SEASON_UNITS_ON): the line matchup per step of matchup, coverage per grade pt.
+  const unitText = (Object.values(contextInfo) as MetricContext[])
+    .filter((c) => c.fit && (c.units?.length ?? 0) > 0)
+    .flatMap((c) => c.fit!.specs.filter((s) => s.key === COV.lineFront7 || s.key === COV.oppCoverage)
+      .map((s) => `${HEADLINE_LABEL[c.key as HeadlineKey] ?? c.key} by ${s.key === COV.lineFront7 ? "line matchup" : "opp. coverage"} (${(c.fit!.beta[s.key] * 100).toFixed(2)} pts per ${s.unit})`));
   const opponentStatus = !gameRouteCells
     ? "the per-game WR route data (migration 058) didn't load"
-    : [...spText, effectText("WR"), effectText("TE"), effectText("RB"), "QB not adjusted"].filter(Boolean).join(" · ") || "not enough games vs G5/FCS yet";
+    : [...spText, ...unitText, effectText("WR"), effectText("TE"), effectText("RB"), "QB not adjusted"].filter(Boolean).join(" · ") || "not enough games vs G5/FCS yet";
   const unrecognized = [...gameTiers.unrecognized].map(([name, n]) => `${name}${n > 1 ? ` (${n})` : ""}`);
 
   const compositeTooltip =

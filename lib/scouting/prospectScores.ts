@@ -230,7 +230,7 @@ export function scorePieces(view: ScoreView, pc: PositionComposite): ScorePiece[
     const value = c.perPlayer
       ? c.text ?? sgn(c.ae, 2)
       : c.rawAe != null
-        ? `${sgn(c.ae, 1)} on ${c.n} ${unit ?? "plays"} (${sgn(c.ae - c.rawAe, 1)} for opponents)`
+        ? `${sgn(c.ae, 1)} on ${c.n} ${unit ?? "plays"} (${sgn(c.ae - c.rawAe, 1)} for opponents and game context)`
         : `${sgn(c.ae, 1)} on ${c.n} ${unit ?? "plays"}`;
     const weight = c.contribution != null
       ? `field time: ${c.via ?? "snaps"}${c.additive ? ", added on top" : ""}`

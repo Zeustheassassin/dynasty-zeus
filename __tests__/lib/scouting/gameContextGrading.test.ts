@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { gameCovariates, resolveGameContexts, COV, type GameContext, type GameContextData } from "@/lib/scouting/gameContext";
-import { contextAdjust, metricContext, OPPONENT_SP, WEATHER_ON, CAST_ON } from "@/lib/scouting/contextGrading";
+import { contextAdjust, contextWhat, metricContext, OPPONENT_SP, WEATHER_ON, CAST_ON, SEASON_UNITS_ON } from "@/lib/scouting/contextGrading";
 import { addGameResidual, type ByGame } from "@/lib/scouting/contextEffects";
 import { gameFlagWeight, leftEarlySuggestions, flaggedGameTest, LEFT_EARLY_WEIGHT, PLAYED_HURT_WEIGHT } from "@/lib/scouting/gameFlags";
 import { seasonWeights } from "@/lib/scouting/seasonWeight";
@@ -63,7 +63,23 @@ describe("contextGrading policy", () => {
     // ch_wr_cc's weather went with it (2026-11-10); PFF's CC% waits for its own test.
     expect([...WEATHER_ON].sort()).toEqual(["ch_wr_drop", "pff_btt", "pff_rb_yprr", "qb_aae"]);
     expect(CAST_ON.size).toBe(0);
-    expect(metricContext("rb_srae")).toEqual({ opponent: "tier", weather: false, cast: false });
+    // Season units (2026-11-19, the user's OK): what passed held out with each game left out.
+    expect(Object.fromEntries(SEASON_UNITS_ON)).toEqual({
+      rb_srae: ["matchup"], pff_rb_yco: ["mt"], pff_rb_10p: ["matchup"],
+      pff_wr_cc: ["coverage"], wr_sae: ["coverage"], pff_wr_yprr: ["coverage"],
+    });
+    expect(SEASON_UNITS_ON.has("pff_rb_mtf")).toBe(false); // held: p .035
+    expect(metricContext("rb_srae")).toEqual({ opponent: "tier", weather: false, cast: false, units: ["matchup"] });
+    expect(metricContext("te_saer")).toEqual({ opponent: "tier", weather: false, cast: false, units: [] });
+  });
+
+  it("names what an adjustment was for, season units the fit kept included", () => {
+    const fit = (keys: string[]) => ({ specs: keys.map((key) => ({ key, label: key, sign: -1 as const, ref: 0, unit: "" })), beta: {}, ref: {}, prospects: 10, games: 20, reps: 100 });
+    expect(contextWhat({ key: "rb_srae", opponent: "tier", weather: false, units: ["matchup"], fit: fit([COV.lineFront7]) })).toBe("opponents, the line matchup");
+    expect(contextWhat({ key: "wr_sae", opponent: "sp", weather: false, units: ["coverage"], fit: fit([COV.oppDefSp]) })).toBe("opponent defenses"); // coverage dropped by the fit
+    expect(contextWhat({ key: "qb_aae", opponent: "tier", weather: true, fit: fit([COV.wind]) })).toBe("weather");
+    expect(contextWhat({ key: "rb_srae", opponent: "tier", weather: false, units: ["matchup"], fit: fit([COV.lineFront7]) }, false)).toBe("opponents");
+    expect(contextWhat(null)).toBe("opponents");
   });
 
   // 12 prospects, 4 games each, residual rising with the opponent's defensive SP+.
@@ -104,6 +120,30 @@ describe("contextGrading policy", () => {
     const out = contextAdjust("wr_csae", "WR", few, few, { cov, spRef: 21, fcsSp: 30 });
     expect(out.info.fit).toBeNull();
     expect(out.samples.get("p1")).toBe(few.get("p1"));
+  });
+
+  it("the line matchup on RB SRAE: fit on the front seven, applied to the whole gap on top of the tiers", () => {
+    // 12 backs × 4 games: a game's residual falls one point of success rate per step of front seven;
+    // every back's line is 1 step below average (gap = front7 + 1), so the whole-gap lift exceeds the D-line's alone.
+    const raw = new Map<string, AESample>(), cov = new Map<string, Record<string, number>>();
+    for (let p = 0; p < 12; p++) {
+      const bg: ByGame = {};
+      for (let g = 0; g < 4; g++) {
+        const id = `p${p}g${g}`, f7 = ((p * 4 + g) % 5) - 2;
+        addGameResidual(bg, id, 40, 40 * (-0.01 * f7 + (p % 3) * 0.01));
+        cov.set(id, { [COV.g5]: 0, [COV.fcsTier]: 0, [COV.lineFront7]: f7, [COV.lineMatchup]: f7 + 1 });
+      }
+      raw.set(`p${p}`, { ae: p, n: 160, w: 160, variance: 4, byGame: bg });
+    }
+    const tier = new Map([...raw].map(([id, s]) => [id, { ...s, ae: s.ae - 1, rawAe: s.ae }]));
+    const out = contextAdjust("rb_srae", "RB", raw, tier, { cov, spRef: 21, fcsSp: 30 });
+    expect(out.info.fit!.specs.map((s) => s.key)).toEqual([COV.lineFront7]); // only the extra is applied
+    const beta = out.info.fit!.beta[COV.lineFront7];
+    expect(beta).toBeLessThan(-0.005);
+    // Lift = β × (average gap, from 0) = β × (average front7 + 1), taken off the tier-adjusted AE.
+    const s0 = out.samples.get("p0")!;
+    const meanGap = [0, 1, 2, 3].reduce((a, g) => a + ((0 * 4 + g) % 5) - 2 + 1, 0) / 4;
+    expect(s0.ae).toBeCloseTo(tier.get("p0")!.ae - 100 * beta * meanGap, 6);
   });
 
   it("weather on a tier metric goes on top of today's tier adjustment", () => {
