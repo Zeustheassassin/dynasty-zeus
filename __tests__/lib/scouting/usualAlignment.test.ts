@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { isRBCarry, usualRBPlay, usualTEAlignment, usualWRAlignment } from "@/lib/scouting/usualAlignment";
+import { isRBBlock, isRBCarry, usualRBPlay, usualTEAlignment, usualWRAlignment } from "@/lib/scouting/usualAlignment";
 import type { RBPlay, RBRunType } from "@/lib/types";
 
 // The user (2026-10-23): a WR / TE play starts where that player lines up most.
@@ -115,13 +115,20 @@ describe("usualRBPlay", () => {
     expect((["pass_block", "run_block", "decoy", "route"] as RBRunType[]).some(isRBCarry)).toBe(false);
   });
 
-  it("is what the RB board opens on and resets to, and a switch to a block clears the result", () => {
+  it("counts a block as Pass Block or Run Block only", () => {
+    expect((["pass_block", "run_block"] as RBRunType[]).every(isRBBlock)).toBe(true);
+    expect((["outside_man_gap", "inside_man_gap", "outside_zone", "inside_zone", "decoy", "route"] as RBRunType[]).some(isRBBlock)).toBe(false);
+  });
+
+  it("is what the RB board opens on and resets to, and a switch to a block starts on Success", () => {
     const board = readFileSync(join(process.cwd(), "components/scouting/rb/RBChartingBoard.tsx"), "utf8");
     expect(board).toMatch(/usual\.current = u;/);
     expect(board).toMatch(/setFormation\(usual\.current\?\.formation \?\? "gun"\)/);
     expect(board).toMatch(/setRunType\(usual\.current\?\.runType \?\? "outside_zone"\)/);
     expect(board).toMatch(/setAlignedAsWr\(usual\.current\?\.alignedAsWr \?\? false\)/);
-    expect(board).toMatch(/if \(isRBCarry\(rt\) !== isRBCarry\(runType\)\) setSuccess\(isRBCarry\(rt\) \? usual\.current\?\.success \?\? null : null\);/);
+    // A carry picks his usual result, a block Success (the user, 2026-11-19), a decoy none;
+    // within a kind (Pass Block ↔ Run Block) the picked result stays.
+    expect(board).toMatch(/if \(kind\(rt\) !== kind\(runType\)\) setSuccess\(isRBCarry\(rt\) \? usual\.current\?\.success \?\? null : isRBBlock\(rt\) \? true : null\);/);
     // Every play-type button goes through it.
     expect(board).not.toMatch(/onClick=\{\(\) => setRunType\(/);
   });

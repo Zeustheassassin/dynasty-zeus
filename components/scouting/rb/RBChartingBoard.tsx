@@ -23,7 +23,7 @@ import RouteVariantPicker, { RouteVariantMark } from "../shared/RouteVariantPick
 import { useRouteVariant } from "../shared/hooks/useRouteVariant";
 import { routeVariantSpec } from "../../../lib/scouting/routeVariants";
 import { RB_BACKFIELD_ROUTES, RB_ROUTE_RUN_DEFAULT, rbBucketFor, rbRouteOffered } from "../../../lib/scouting/rbRouteTree";
-import { isRBCarry, usualRBPlay, type UsualRBPlay } from "../../../lib/scouting/usualAlignment";
+import { isRBBlock, isRBCarry, usualRBPlay, type UsualRBPlay } from "../../../lib/scouting/usualAlignment";
 import RBPlayerCharts from "./RBPlayerCharts";
 import { buildRBBaselines, computeRBAboveExpectedForPlays } from "../../../lib/scouting/aboveExpected";
 import type {
@@ -408,11 +408,13 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
     }
   }
 
-  // Switching between a carry and anything else (block, decoy) clears the result,
-  // so a pre-picked carry Success never rides onto a block; coming back to a
-  // carry picks his usual carry result again. Carry to carry keeps it.
+  // Switching kind of play (carry, block, anything else) picks that kind's
+  // starting result: a carry his usual carry result, a block Success (the user,
+  // 2026-11-19), a decoy none. Within a kind (carry to carry, Pass Block to Run
+  // Block) the result already picked stays.
   function pickRunType(rt: RBRunType) {
-    if (isRBCarry(rt) !== isRBCarry(runType)) setSuccess(isRBCarry(rt) ? usual.current?.success ?? null : null);
+    const kind = (t: RBRunType) => (isRBCarry(t) ? "carry" : isRBBlock(t) ? "block" : "other");
+    if (kind(rt) !== kind(runType)) setSuccess(isRBCarry(rt) ? usual.current?.success ?? null : isRBBlock(rt) ? true : null);
     setRunType(rt);
   }
 

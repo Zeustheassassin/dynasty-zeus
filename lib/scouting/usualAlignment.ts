@@ -55,6 +55,8 @@ export function usualTEAlignment(
 /** An RB's designed carries (not a route, a block or a decoy). */
 export const RB_CARRY_TYPES: readonly RBRunType[] = ["outside_man_gap", "inside_man_gap", "outside_zone", "inside_zone"];
 export const isRBCarry = (t: RBRunType): boolean => RB_CARRY_TYPES.includes(t);
+/** An RB's block plays (Pass Block, Run Block): they start on Success (the user, 2026-11-19). */
+export const isRBBlock = (t: RBRunType): boolean => t === "pass_block" || t === "run_block";
 
 export interface UsualRBPlay {
   formation: RBFormation;
