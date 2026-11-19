@@ -17,16 +17,9 @@ import type { RoleFit, RolePos } from "../../lib/scouting/roleFit";
 import type { OverviewData } from "./overview/useProspectReport";
 import { usePositionRoleFits } from "./shared/hooks/usePositionRoleFits";
 import { ShouldPlayText } from "./shared/RoleFields";
+import { CHARTING_DECISIONS, FULLY_CHARTED_HINT } from "./shared/chartingConstants";
 
 const log = logger("ProspectRosterSheet");
-
-const CHARTING_DECISIONS: { value: ChartingDecision; label: string }[] = [
-  { value: "fully_charted", label: "Fully Charted" },
-  { value: "partial_chart", label: "Partial Chart" },
-  { value: "charting",      label: "Charting" },
-  { value: "pending",       label: "Undecided" },
-  { value: "not_charting",  label: "Not Charting" },
-];
 
 interface RowState {
   school: string;
@@ -211,13 +204,13 @@ function RosterRow({ p, fit, fitsReady, sizes, rank, onRankCommit }: RosterRowPr
       </td>
 
       <td className={tdShrink}>
-        <select className={sel} value={local.charting_decision}
+        <select className={sel} value={local.charting_decision} title={FULLY_CHARTED_HINT}
           onChange={(e) => {
             const v = e.target.value as ChartingDecision;
             setLocal((l) => ({ ...l, charting_decision: v }));
             saveFields({ charting_decision: v });
           }}>
-          {CHARTING_DECISIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+          {CHARTING_DECISIONS.map((d) => <option key={d.value} value={d.value} disabled={d.value === "fully_charted"}>{d.label}</option>)}
         </select>
       </td>
 

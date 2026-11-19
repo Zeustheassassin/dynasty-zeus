@@ -23,18 +23,19 @@ describe("sampleTier", () => {
     expect(sampleTier(0, 180)).toBe("low");
   });
 
-  it("takes an odd full sample's half and quarter as they fall, 62.5 and 31.25 runs of 125", () => {
-    expect(sampleTier(63, 125)).toBe("half");
-    expect(sampleTier(62, 125)).toBe("quarter");
-    expect(sampleTier(32, 125)).toBe("quarter");
-    expect(sampleTier(31, 125)).toBe("low");
+  it("takes an odd full sample's half and quarter as they fall, 70 and 35 routes of 140", () => {
+    expect(sampleTier(70, 140)).toBe("half");
+    expect(sampleTier(69, 140)).toBe("quarter");
+    expect(sampleTier(35, 140)).toBe("quarter");
+    expect(sampleTier(34, 140)).toBe("low");
   });
 });
 
 describe("sampleSizes", () => {
-  it("uses the user's full samples: QB 180 throws, RB 125 runs, WR 160 routes, TE 140 routes", () => {
+  // RB 125 → 100 runs (the user, 2026-11-19: college backfields are split).
+  it("uses the user's full samples: QB 180 throws, RB 100 runs, WR 160 routes, TE 140 routes", () => {
     expect(Object.fromEntries(Object.entries(SAMPLE_FULL).map(([pos, f]) => [pos, f.full])))
-      .toEqual({ QB: 180, RB: 125, WR: 160, TE: 140 });
+      .toEqual({ QB: 180, RB: 100, WR: 160, TE: 140 });
   });
 
   it("reads each position's headline plays against its full sample", () => {
@@ -47,7 +48,7 @@ describe("sampleSizes", () => {
       }),
     );
     expect(m.get("q")).toMatchObject({ key: "aae", n: 180, share: 1, tier: "full" });
-    expect(m.get("r")).toMatchObject({ key: "srae", n: 70, share: 0.56, tier: "half" });
+    expect(m.get("r")).toMatchObject({ key: "srae", n: 70, share: 0.7, tier: "half" });
     expect(m.get("w")).toMatchObject({ key: "sae", n: 40, share: 0.25, tier: "quarter" });
     expect(m.get("t")).toMatchObject({ key: "te_saer", n: 20, tier: "low" });
   });
@@ -69,6 +70,6 @@ describe("sampleText", () => {
     expect(sampleText({ ...qb, n: 150 })).toBe("150 of 180 throws");
     expect(sampleText({ ...qb, n: 240 })).toBe("240 throws (full at 180)");
     expect(sampleText({ ...qb, n: null })).toBe("under the AAE sample floor (full at 180 throws)");
-    expect(sampleText({ ...SAMPLE_FULL.RB, n: 60 })).toBe("60 of 125 runs");
+    expect(sampleText({ ...SAMPLE_FULL.RB, n: 60 })).toBe("60 of 100 runs");
   });
 });

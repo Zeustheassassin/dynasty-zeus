@@ -812,11 +812,14 @@ function avgExternalRank(p: Prospect): number | null {
   return parseFloat((ranks.reduce((s, r) => s + r, 0) / ranks.length).toFixed(1));
 }
 
+/** A prospect's plays in each position's headline AE metric: QB graded throws,
+ *  RB known runs, TE rated routes (prospect_sample_counts, migration 102). */
+export type SamplePlays = Partial<Record<"QB" | "RB" | "TE", number>>;
+
 export interface ProspectThresholdCounts {
-  /** Per-prospect QB throw count (from prospect_qb_stats.total_throws) */
-  qbThrowsByProspect?: Map<string, number>;
-  /** Per-prospect TE route count (from prospect_te_stats.total_routes) */
-  teRoutesByProspect?: Map<string, number>;
+  /** Per-prospect QB / RB / TE sample plays, the Big Board sample dot's count,
+   *  for Fully Charted; read at his position. WR reads his SAE sample. */
+  samplePlaysByProspect?: ReadonlyMap<string, SamplePlays>;
 }
 
 // `gameCellRows` is prospect_game_route_cells (migration 058) and `games` the
@@ -842,7 +845,7 @@ export function buildProspectsWithStats(
   const eras = coverageEras(games);
   const cellsByProspect = weightedCellsByProspect(gameCellRows, seasonWeights(games), eras, splitTagged(wrModel) ? tagRows : undefined);
   const linedUp = linedUpByProspect(alignmentRows, eras);
-  const { qbThrowsByProspect, teRoutesByProspect } = thresholdCounts;
+  const { samplePlaysByProspect } = thresholdCounts;
   const release = releaseByProspect(tagRows);
   const taggedDouble = taggedDoubleByProspect(tagRows);
   const wrPff = wrPffRates(prospects, pff);
@@ -855,22 +858,18 @@ export function buildProspectsWithStats(
     const total_games = v?.total_games ?? 0;
     const has_charted_open_data = v?.has_charted_open_data ?? false;
 
-    // Per-position threshold count for the "fully charted" auto-promote:
-    //   WR → routes from prospect_route_stats, TE → routes from te_plays,
-    //   QB → throws from qb_plays. RB falls through to the games-based path.
-    const wrRoutes = v?.total_routes ?? 0;
-    const teRoutes = teRoutesByProspect?.get(p.id) ?? 0;
-    const qbThrows = qbThrowsByProspect?.get(p.id) ?? 0;
+    // Fully Charted = the Big Board's full sample (deriveChartingDecision), on
+    // the same count its sample dot reads: a WR's SAE sample, a QB / RB / TE's
+    // headline plays from prospect_sample_counts.
+    const sae_sample = v ? computeSAESample(v, cells, wrModel) : null;
+    const pos = p.position;
+    const samplePlays = pos === "WR" ? sae_sample?.n ?? 0
+      : pos === "QB" || pos === "RB" || pos === "TE" ? samplePlaysByProspect?.get(p.id)?.[pos] ?? 0
+      : 0;
 
     return {
       ...p,
-      charting_decision: deriveChartingDecision(
-        p.charting_decision,
-        total_games,
-        p.position,
-        p.position === "TE" ? teRoutes : wrRoutes,
-        qbThrows,
-      ),
+      charting_decision: deriveChartingDecision(p.charting_decision, total_games, p.position, samplePlays),
       total_snaps: v?.total_snaps ?? 0,
       total_routes: v?.total_routes ?? 0,
       total_games,
@@ -906,7 +905,7 @@ export function buildProspectsWithStats(
         : null,
       adj_success_above_exp: v ? computeSAE(v, cells, wrModel) : null,
       core_sae: v ? computeCoreSAE(v, cells, wrModel) : null,
-      sae_sample: v ? computeSAESample(v, cells, wrModel) : null,
+      sae_sample,
       core_sae_sample: v ? computeCoreSAESample(v, cells, wrModel) : null,
       avg_external_rank: avgExternalRank(p),
       depth_behind_los: v?.depth_behind_los ?? 0,

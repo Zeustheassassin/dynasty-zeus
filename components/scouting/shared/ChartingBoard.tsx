@@ -2,7 +2,7 @@
 import { useState } from "react";
 import type { Prospect, ScoutingGame, ChartingDecision, FortySource } from "../../../lib/types";
 import { FORTY_MAX, FORTY_MIN, FORTY_SOURCE_LABEL, FORTY_WEIGHT_MAX, FORTY_WEIGHT_MIN, PRO_DAY_ADJUST, parseFortyTime } from "../../../lib/scouting/speedFloor";
-import { GAME_TYPES, CHARTING_DECISIONS } from "./chartingConstants";
+import { GAME_TYPES, CHARTING_DECISIONS, FULLY_CHARTED_HINT } from "./chartingConstants";
 import { BASE_YEAR, FILM_YEARS, classYearOptionsWith } from "../../../lib/helpers/season";
 import { parseGrade, formatGrade, gradeColor, dynastyGradeCurveText, GRADE_MIN, GRADE_MAX } from "../../../lib/scouting/prospectGrade";
 import { preGradeIsMirrored } from "../../../lib/scouting/preGradeMirror";
@@ -309,8 +309,8 @@ export default function ChartingBoard({
             <div>
               <label className="block text-xs text-slate-500 mb-1">Charting Status</label>
               <select className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none ${a.focusBorder}`}
-                value={bio.charting_decision ?? "pending"} onChange={(e) => onBioChange({ charting_decision: e.target.value as ChartingDecision })}>
-                {CHARTING_DECISIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+                value={bio.charting_decision ?? "pending"} title={FULLY_CHARTED_HINT} onChange={(e) => onBioChange({ charting_decision: e.target.value as ChartingDecision })}>
+                {CHARTING_DECISIONS.map((d) => <option key={d.value} value={d.value} disabled={d.value === "fully_charted"}>{d.label}</option>)}
               </select>
             </div>
           </div>

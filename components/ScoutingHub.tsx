@@ -21,6 +21,7 @@ import type {
 import type { GradeField } from "../lib/scouting/prospectGrade";
 import {
   buildProspectsWithStats,
+  type SamplePlays,
   buildWRModel,
   type ProspectRouteStatsRow,
   type ProspectGameRouteCellsRow,
@@ -80,6 +81,33 @@ interface TeThresholdRow {
 interface RbRunTypeRow {
   prospect_id: string;
   run_type_stats_raw: Partial<Record<RBRunTypeKey, RBRunTypeStat>> | null;
+}
+
+// prospect_sample_counts (migration 102).
+interface SampleCountsRow {
+  prospect_id: string;
+  qb_graded_throws: number;
+  rb_known_runs: number;
+  te_rated_routes: number;
+}
+
+// Each QB / RB / TE prospect's sample plays for Fully Charted (the Big Board
+// sample dot's count, aggregateMerge SamplePlays). Before migration 102 is
+// applied (`rows` null): the closest counts the older views have, QB balls
+// thrown, RB runs and TE routes.
+function samplePlaysFrom(
+  rows: readonly SampleCountsRow[] | null,
+  qb: readonly QbThresholdRow[], rb: readonly RbRunTypeRow[], te: readonly TeThresholdRow[],
+): Map<string, SamplePlays> {
+  if (rows) {
+    return new Map(rows.map((r) => [r.prospect_id, { QB: r.qb_graded_throws, RB: r.rb_known_runs, TE: r.te_rated_routes }]));
+  }
+  const m = new Map<string, SamplePlays>();
+  const add = (id: string, s: SamplePlays) => m.set(id, { ...m.get(id), ...s });
+  for (const r of qb) add(r.prospect_id, { QB: r.total_throws ?? 0 });
+  for (const r of rb) add(r.prospect_id, { RB: Object.values(r.run_type_stats_raw ?? {}).reduce((s, x) => s + (x?.count ?? 0), 0) });
+  for (const r of te) add(r.prospect_id, { TE: r.total_routes ?? 0 });
+  return m;
 }
 
 const fillZoneStats = (raw: Partial<Record<QBZoneKey, QBDepthZoneStat>> | null | undefined): Record<QBZoneKey, QBDepthZoneStat> => ({
@@ -260,11 +288,11 @@ export default function ScoutingHub() {
   // everything built from the games; a newer save is always the latest value.
   const [tapeEdits, setTapeEdits] = useState<ReadonlyMap<string, string | null>>(new Map());
   const [posSnapsRows, setPosSnapsRows] = useState<PosSnapsRow[]>([]);
-  const [qbThrowsByProspect, setQbThrowsByProspect] = useState<Map<string, number>>(new Map());
-  const [teRoutesByProspect, setTeRoutesByProspect] = useState<Map<string, number>>(new Map());
+  // Each QB / RB / TE prospect's sample plays, for Fully Charted (samplePlaysFrom).
+  const [samplePlaysByProspect, setSamplePlaysByProspect] = useState<Map<string, SamplePlays>>(new Map());
   // Full-career success-rate breakdowns for the Prospects-list badges (Phase 3) —
-  // side-channel Maps mirroring qbThrowsByProspect/teRoutesByProspect above, kept
-  // out of ProspectWithStats/buildProspectsWithStats (that pipeline is WR-specific).
+  // side-channel Maps like samplePlaysByProspect above, kept out of
+  // ProspectWithStats/buildProspectsWithStats (that pipeline is WR-specific).
   const [qbDepthZoneStatsByProspect, setQbDepthZoneStatsByProspect] =
     useState<Map<string, Record<QBZoneKey, QBDepthZoneStat>>>(new Map());
   const [rbRunTypeStatsByProspect, setRbRunTypeStatsByProspect] =
@@ -335,6 +363,7 @@ export default function ScoutingHub() {
         { rows: countData, error: countErr },
         { rows: tagCellData, error: tagCellErr },
         { rows: contextRows, error: contextErr },
+        { data: sampleData, error: sampleErr },
       ] = await Promise.all([
         supabase.from("prospects").select("*").order("personal_rank", { ascending: true, nullsFirst: false }),
         fetchAllGames().then(
@@ -382,6 +411,9 @@ export default function ScoutingHub() {
           (rows) => ({ rows, error: null }),
           (error: unknown) => ({ rows: EMPTY_CONTEXT_DATA, error }),
         ),
+        // Sample plays for Fully Charted (migration 102). Its own query: before
+        // 102, Fully Charted reads the older views' counts instead.
+        supabase.from("prospect_sample_counts").select("prospect_id,qb_graded_throws,rb_known_runs,te_rated_routes"),
       ]);
       if (!isLoadCurrent(seq)) return; // superseded by a newer reload
       if (pErr) log.error("prospects load", { msg: pErr.message, code: pErr.code, details: pErr.details, hint: pErr.hint });
@@ -402,6 +434,11 @@ export default function ScoutingHub() {
       if (contextErr) {
         if (isMissingContextTables(contextErr)) log.warn("game context tables missing (apply migration 065); context blank");
         else log.error("game context load (context blank)", { msg: String(contextErr) });
+      }
+      if (sampleErr) {
+        const missing = sampleErr.code === "42P01" || sampleErr.code === "PGRST205" || /does not exist|could not find/i.test(sampleErr.message ?? "");
+        if (missing) log.warn("prospect_sample_counts missing (apply migration 102); Fully Charted reads the older view counts");
+        else log.error("prospect_sample_counts load (Fully Charted reads the older view counts)", { msg: sampleErr.message, code: sampleErr.code });
       }
 
       // Reset lazy-fetch cache so a parent reload re-fetches plays the
@@ -433,8 +470,7 @@ export default function ScoutingHub() {
         ...qbRows.map(({ prospect_id, total_snaps }) => ({ prospect_id, total_snaps })),
         ...teRows.map(({ prospect_id, total_snaps }) => ({ prospect_id, total_snaps })),
       ]);
-      setQbThrowsByProspect(new Map(qbRows.map((r) => [r.prospect_id, r.total_throws ?? 0])));
-      setTeRoutesByProspect(new Map(teRows.map((r) => [r.prospect_id, r.total_routes ?? 0])));
+      setSamplePlaysByProspect(samplePlaysFrom(sampleErr ? null : (sampleData ?? []) as SampleCountsRow[], qbRows, rbRows, teRows));
       setQbDepthZoneStatsByProspect(new Map(qbRows.map((r) => [r.prospect_id, fillZoneStats(r.depth_zone_stats_raw)])));
       setRbRunTypeStatsByProspect(new Map(rbRows.map((r) => [r.prospect_id, fillRunTypeStats(r.run_type_stats_raw)])));
       setTeCoverageStatsByProspect(new Map(teRows.map((r) => [r.prospect_id, fillTeCoverageStats(r.coverage_stats_raw)])));
@@ -514,10 +550,9 @@ export default function ScoutingHub() {
   const prospectsWithStats = useMemo(
     (): ProspectWithStats[] =>
       buildProspectsWithStats(prospects, routeStatsRows, gameRouteCells ?? [], games, {
-        qbThrowsByProspect,
-        teRoutesByProspect,
+        samplePlaysByProspect,
       }, wrModel, gameAlignment, routeTagCells, pffTotals),
-    [prospects, routeStatsRows, gameRouteCells, games, qbThrowsByProspect, teRoutesByProspect, wrModel, gameAlignment, routeTagCells, pffTotals],
+    [prospects, routeStatsRows, gameRouteCells, games, samplePlaysByProspect, wrModel, gameAlignment, routeTagCells, pffTotals],
   );
 
   async function handleAddProspect(data: Omit<Prospect, "id" | "user_id" | "created_at" | "updated_at">) {

@@ -347,7 +347,7 @@ describe("BigBoard AE Score", () => {
 
 describe("BigBoard sample dot", () => {
   // The stubs chart 50 plays on every QB / RB / TE sample: 50 of 180 throws
-  // (27%), 50 of 125 runs (40%), 50 of 140 TE routes (35%). WRs carry their
+  // (27%), 50 of 100 runs (50%), 50 of 140 TE routes (35%). WRs carry their
   // own route counts, against 160.
   const smp = (ae: number, n: number) => ({ ae, n, variance: 4 });
   const WRS = [
@@ -380,14 +380,14 @@ describe("BigBoard sample dot", () => {
     expect(dot("Wide Two").getAttribute("title")).toBe("Sample 0% of full: under the SAE sample floor (full at 160 routes)");
     expect(tier("Quarter One")).toBe("Sample: 25–49.9%");
     expect(dot("Quarter One").getAttribute("title")).toBe("Sample 27% of full: 50 of 180 throws");
-    expect(dot("Running One").getAttribute("title")).toBe("Sample 40% of full: 50 of 125 runs");
+    expect(dot("Running One").getAttribute("title")).toBe("Sample 50% of full: 50 of 100 runs");
     expect(dot("Tight One").getAttribute("title")).toBe("Sample 35% of full: 50 of 140 routes");
   });
 
   it("explains the full samples in the header and the legend", () => {
     renderBoard();
     expect(screen.getByRole("columnheader", { name: "Smp" }).getAttribute("title"))
-      .toContain("Full: QB 180 throws · RB 125 runs · WR 160 routes · TE 140 routes.");
+      .toContain("Full: QB 180 throws · RB 100 runs · WR 160 routes · TE 140 routes.");
     const legend = screen.getByRole("list", { name: "Sample size" });
     expect(within(legend).getAllByRole("listitem").map((li) => li.textContent))
       .toEqual(["Smp (sample charted):", "Full", "50–99.9%", "25–49.9%", "Under 25%"]);
@@ -396,7 +396,11 @@ describe("BigBoard sample dot", () => {
   it("sorts fullest-first on the first click", () => {
     renderBoard([...PROSPECTS, ...WRS]);
     fireEvent.click(screen.getByRole("columnheader", { name: "Smp" }));
-    expect(names().slice(0, 4)).toEqual(["Wide Full", "Wide Half", "Running One", "Tight One"]);
+    // Wide Half (80 of 160) and Running One (50 of 100) tie at 50%.
+    const top = names().slice(0, 4);
+    expect(top[0]).toBe("Wide Full");
+    expect([...top.slice(1, 3)].sort()).toEqual(["Running One", "Wide Half"]);
+    expect(top[3]).toBe("Tight One");
   });
 });
 
@@ -641,7 +645,7 @@ describe("BigBoard saves the draft board's scores", () => {
     expect(qb.weights).toEqual({ age: 1, size: 1, draft: 2 });
     expect(qb.saved_at).toBe("2026-10-09T12:00:01.000Z");
     // No AE Score (the RB pool is too small): saved with blank Dynasty, for the dot.
-    expect(scores.rb1).toMatchObject({ dynasty: null, plus: null, sample: { n: 50, tier: "quarter" } }); // 50 of 125 runs
+    expect(scores.rb1).toMatchObject({ dynasty: null, plus: null, sample: { n: 50, tier: "half" } }); // 50 of 100 runs
   });
 
   it("waits for the plays, every hub load and the whole 247 index", async () => {
