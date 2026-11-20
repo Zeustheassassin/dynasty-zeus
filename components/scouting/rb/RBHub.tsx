@@ -26,6 +26,8 @@ export interface RBHubProps {
   games: ScoutingGame[];
   rbPlays: RBPlay[];
   rbRunTypeStatsByProspect: Map<string, Record<RBRunTypeKey, RBRunTypeStat>>;
+  /** Charted games per prospect (the list's "6/8G"); null = unknown, logged only. */
+  chartedGames: ReadonlyMap<string, number> | null;
 }
 
 type HubView = "list" | "roster";
@@ -44,6 +46,7 @@ export default function RBHub({
   games,
   rbPlays,
   rbRunTypeStatsByProspect,
+  chartedGames,
 }: RBHubProps) {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   // The game his board opens on (Unwatched tab); null = the board's usual start.
@@ -103,6 +106,7 @@ export default function RBHub({
         <RBProspectList
           prospects={rbProspects}
           gameCountByProspect={gameCountByProspect}
+          chartedGames={chartedGames}
           runTypeStatsByProspect={rbRunTypeStatsByProspect}
           loading={loading}
           onSelectProspect={setSelectedProspect}

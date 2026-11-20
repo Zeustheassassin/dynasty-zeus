@@ -39,7 +39,7 @@ import { useDraftPicks } from "./scouting/shared/hooks/useDraftPicks";
 import type { DraftResultUpdate } from "../lib/nflDraft";
 import type { LandingSaved } from "../lib/scouting/teamLanding";
 import type { RankUpdate } from "../lib/scouting/realignRanks";
-import { countUnwatched, tapeSourceSuggestions, unwatchedByProspect } from "../lib/scouting/unwatchedGames";
+import { chartedGamesByProspect, countUnwatched, tapeSourceSuggestions, unwatchedByProspect } from "../lib/scouting/unwatchedGames";
 
 const log = logger("ScoutingHub");
 
@@ -810,6 +810,13 @@ export default function ScoutingHub() {
     [games, gameSnapStatsRows, prospects],
   );
   const unwatchedCount = unwatchedLoadFailed ? 0 : countUnwatched(unwatchedGroups);
+  // Each prospect's charted games, for the Prospects lists' "6/8G" (charted /
+  // logged). Null when the games or their play counts didn't load: the lists
+  // then show the logged count alone, rather than calling every game uncharted.
+  const chartedGames = useMemo(
+    () => (unwatchedLoadFailed ? null : chartedGamesByProspect(games, gameSnapStatsRows)),
+    [unwatchedLoadFailed, games, gameSnapStatsRows],
+  );
   const classYears = useMemo(
     () => [...new Set(prospects.map((p) => p.draft_class_year))].sort((a, b) => a - b),
     [prospects],
@@ -911,6 +918,8 @@ export default function ScoutingHub() {
     rbRunTypeStatsByProspect,
     teCoverageStatsByProspect,
     teBlockStatsByProspect,
+    // Charted games per prospect, for the Prospects lists' "6/8G".
+    chartedGames,
   };
 
   return (

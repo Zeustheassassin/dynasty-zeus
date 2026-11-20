@@ -74,6 +74,23 @@ export function unwatchedByProspect<P extends GroupProspect>(
   });
 }
 
+/**
+ * Each prospect's charted games (at least one play), keyed by prospect id, for
+ * the Prospects lists' "6/8G" (charted / logged). Charted exactly as above, so
+ * logged minus charted is his Unwatched count. Prospects with none are absent.
+ */
+export function chartedGamesByProspect(
+  games: readonly Pick<ScoutingGame, "id" | "prospect_id">[],
+  snapCounts: readonly GameSnapCount[],
+): Map<string, number> {
+  const snaps = new Map(snapCounts.map((r) => [r.game_id, r.snaps_charted]));
+  const out = new Map<string, number>();
+  for (const g of games) {
+    if ((snaps.get(g.id) ?? 0) > 0) out.set(g.prospect_id, (out.get(g.prospect_id) ?? 0) + 1);
+  }
+  return out;
+}
+
 /** Unwatched games across the groups. */
 export function countUnwatched(groups: readonly { games: readonly unknown[] }[]): number {
   return groups.reduce((n, g) => n + g.games.length, 0);

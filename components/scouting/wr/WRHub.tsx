@@ -24,6 +24,8 @@ export interface WRHubProps {
   overviewData: OverviewData;
   /** The league WR model, for the charting board's per-game SAE badges. */
   wrModel: WRDifficultyModel;
+  /** Charted games per prospect (the list's "6/8G"); null = unknown, logged only. */
+  chartedGames: ReadonlyMap<string, number> | null;
 }
 
 type HubView = "list" | "roster";
@@ -40,6 +42,7 @@ export default function WRHub({
   onNavigated,
   overviewData,
   wrModel,
+  chartedGames,
 }: WRHubProps) {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   // The game his board opens on (Unwatched tab); null = the board's usual start.
@@ -94,6 +97,7 @@ export default function WRHub({
       {hubView === "list" && (
         <ProspectList
           prospects={wrProspects}
+          chartedGames={chartedGames}
           loading={loading}
           onSelectProspect={setSelectedProspect}
           onAddProspect={onAddProspect}

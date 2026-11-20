@@ -28,6 +28,8 @@ export interface TEHubProps {
   tePlays: TEPlay[];
   teCoverageStatsByProspect: Map<string, Record<TECoverageKey, CoverageStat>>;
   teBlockStatsByProspect: Map<string, Record<TEBlockKey, TEBlockStat>>;
+  /** Charted games per prospect (the list's "6/8G"); null = unknown, logged only. */
+  chartedGames: ReadonlyMap<string, number> | null;
 }
 
 type HubView = "list" | "roster";
@@ -47,6 +49,7 @@ export default function TEHub({
   tePlays,
   teCoverageStatsByProspect,
   teBlockStatsByProspect,
+  chartedGames,
 }: TEHubProps) {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   // The game his board opens on (Unwatched tab); null = the board's usual start.
@@ -108,6 +111,7 @@ export default function TEHub({
         <TEProspectList
           prospects={teProspects}
           gameCountByProspect={gameCountByProspect}
+          chartedGames={chartedGames}
           coverageStatsByProspect={teCoverageStatsByProspect}
           blockStatsByProspect={teBlockStatsByProspect}
           loading={loading}

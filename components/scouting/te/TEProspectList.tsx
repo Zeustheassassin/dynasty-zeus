@@ -14,6 +14,7 @@ import { lookupConference } from "../../../lib/scouting/schoolConferences";
 import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
 import RecruitStarBadge from "../RecruitStarBadge";
 import FocusTagChip from "../FocusTagChip";
+import { ChartedGamesCount, ProspectConference } from "../ProspectRowMeta";
 import { focusSortValue } from "../../../lib/scouting/focusTag";
 import { watchSortValue } from "../../../lib/scouting/watchRank";
 
@@ -39,6 +40,8 @@ function SortBtn({ label, k, sortKey, sortDir, onToggle }: {
 interface Props {
   prospects: ProspectWithStats[];
   gameCountByProspect: Record<string, number>;
+  /** Charted games per prospect ("6/8G"); null = unknown, logged only. */
+  chartedGames: ReadonlyMap<string, number> | null;
   coverageStatsByProspect: Map<string, Record<TECoverageKey, CoverageStat>>;
   blockStatsByProspect: Map<string, Record<TEBlockKey, TEBlockStat>>;
   loading: boolean;
@@ -68,6 +71,7 @@ const DECISION_LABEL: Record<ChartingDecision, string> = {
 export default function TEProspectList({
   prospects,
   gameCountByProspect,
+  chartedGames,
   coverageStatsByProspect,
   blockStatsByProspect,
   loading,
@@ -234,6 +238,7 @@ export default function TEProspectList({
                 {/* Focus Tag: beside the name from sm up; on phones it leads the stats line. */}
                 <FocusTagChip tag={p.focus_tag} className="hidden sm:inline-flex" />
                 <span className="text-xs text-slate-400 truncate hidden sm:block">{p.school}</span>
+                <ProspectConference conference={p.conference} school={p.school} />
                 <div className="ml-[1.375rem] sm:ml-auto flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 min-w-0 sm:flex-shrink-0">
                   <FocusTagChip tag={p.focus_tag} className="inline-flex sm:hidden" />
                   <span className="sm:w-20 flex justify-center empty:hidden sm:empty:flex">
@@ -269,7 +274,11 @@ export default function TEProspectList({
                       })}
                     </div>
                   )}
-                  {games > 0 && <span className="text-xs text-green-400">{games}G</span>}
+                  <ChartedGamesCount
+                    logged={games}
+                    charted={chartedGames ? (chartedGames.get(p.id) ?? 0) : null}
+                    className="text-green-400"
+                  />
                   {p.personal_rank && <span className="text-xs text-slate-500">#{p.personal_rank}</span>}
                   <span className="text-xs text-slate-700">{p.draft_class_year}</span>
                   <span className="text-slate-600 group-hover:text-slate-300 text-xs">›</span>

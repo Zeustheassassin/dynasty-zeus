@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  chartedGamesByProspect,
   countUnwatched,
   normalizeTapeSource,
   tapeLink,
@@ -20,6 +21,29 @@ const scored = (dynasty: number | null) =>
   ({ board_scores: { dynasty, plus: null, sample: { n: null, share: 0, tier: "low" }, weights: { age: 1, size: 1, draft: 1 }, saved_at: "2026-11-18T00:00:00Z" } }) as Partial<P>;
 const game = (id: string, prospect_id: string, season_year = 2026, game_slot = 1) =>
   ({ id, prospect_id, season_year, game_slot, opponent: `Opp ${id}`, game_type: "regular" }) as ScoutingGame;
+
+// 2026-11-19, the user: on the Prospects lists, "mark how many games i have
+// logged vs how many i have charted" ("6/8G").
+describe("chartedGamesByProspect", () => {
+  it("counts each prospect's games with at least one play; logged minus charted is his Unwatched count", () => {
+    const games = [game("g1", "a"), game("g2", "a"), game("g3", "a"), game("g4", "b")];
+    const snaps = [
+      { game_id: "g1", snaps_charted: 41 },
+      { game_id: "g2", snaps_charted: 0 },
+      { game_id: "g4", snaps_charted: 12 },
+    ];
+    const charted = chartedGamesByProspect(games, snaps);
+    expect(charted.get("a")).toBe(1); // g3 has no snap row: unwatched, as on the Unwatched tab
+    expect(charted.get("b")).toBe(1);
+    const [group] = unwatchedByProspect(games, snaps, [prospect("a")]);
+    expect(group.logged - group.games.length).toBe(charted.get("a"));
+  });
+
+  it("leaves out prospects with nothing charted, and snap rows for games not loaded", () => {
+    const charted = chartedGamesByProspect([game("g1", "a")], [{ game_id: "g1", snaps_charted: 0 }, { game_id: "gone", snaps_charted: 9 }]);
+    expect(charted.size).toBe(0);
+  });
+});
 
 describe("unwatchedByProspect", () => {
   it("lists only games with no charted plays, and counts every logged game", () => {

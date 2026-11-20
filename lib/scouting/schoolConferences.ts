@@ -225,3 +225,32 @@ export function lookupConference(school: string): string | null {
   if (!school) return null;
   return SCHOOL_TO_CONFERENCE[normalize(school)] ?? null;
 }
+
+/** The conference a Prospects list shows: his saved one, else his school's; null if neither. */
+export function displayConference(p: { conference?: string | null; school?: string | null }): string | null {
+  const saved = (p.conference ?? "").trim();
+  return saved || lookupConference(p.school ?? "");
+}
+
+// The conferences the Prospects lists show in red (the user's call, 2026-11-19):
+// Big Ten, Big 12, Independents (Notre Dame, UConn) and FCS, matched with case,
+// spaces and punctuation stripped. Prospects saves FCS players as plain "FCS";
+// the named FCS conferences are here in case one is typed in instead.
+const RED_CONFERENCES = new Set([
+  "big10", "bigten", "b1g",
+  "big12", "bigtwelve", "bigxii",
+  "independent", "independents", "ind", "fbsindependent", "fbsindependents",
+  "fcs", "fcsindependent", "fcsindependents",
+  "bigsky", "caa", "coastalathleticassociation", "colonialathleticassociation",
+  "mvfc", "missourivalley", "missourivalleyfootball", "missourivalleyfootballconference",
+  "southland", "southlandconference", "swac", "meac", "ivy", "ivyleague",
+  "patriot", "patriotleague", "pioneer", "pioneerfootballleague", "pfl",
+  "ovc", "ohiovalley", "ohiovalleyconference", "bigsouth", "bigsouthovc",
+  "nec", "northeastconference", "socon", "southernconference",
+  "uac", "unitedathleticconference", "asun",
+]);
+
+/** Big Ten, Big 12, Independents or FCS, however it's typed ("BIG 10", "Big XII", "FCS", "Big Sky"). */
+export function isRedConference(conference: string | null | undefined): boolean {
+  return RED_CONFERENCES.has((conference ?? "").toLowerCase().replace(/[^a-z0-9]/g, ""));
+}
