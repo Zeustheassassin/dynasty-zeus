@@ -18,6 +18,7 @@ import {
   qbPredraftDiscount,
   QB_SLOT_RATES,
   qbSlotValue,
+  RB_DRAFT_CAPITAL,
   ROUND_PICKS,
   type DynastyInputs,
 } from "@/lib/scouting/dynastyScore";
@@ -109,7 +110,7 @@ describe("scoreDynasty", () => {
     expect(d.dynasty).toBe(0.8);
     expect(d.plus).toBe(0.8);
     const half = scoreDynasty({ ...base, draftRound: 3 }, { age: 1, size: 1, speed: 1, lightInside: 1, draft: 0.5, landing: 1, role: 1, offense: 1, rushing: 1 });
-    expect(half.plus! - half.dynasty).toBeCloseTo(0.5 * DRAFT_CAPITAL[3], 9);
+    expect(half.plus! - half.dynasty).toBeCloseTo(0.5 * RB_DRAFT_CAPITAL[3], 9); // base is an RB
   });
 
   it("takes an RB's speed floor at the Speed slider's weight, into Dynasty and so Dynasty+; none for a WR (2026-11-15)", () => {
@@ -221,8 +222,8 @@ describe("scoreDynasty", () => {
   it("reads draft capital from the overall pick once one is set", () => {
     const early = scoreDynasty({ ...base, draftRound: 2, draftPick: 33 }, DEFAULT_DYNASTY_WEIGHTS);
     const late = scoreDynasty({ ...base, draftRound: 2, draftPick: 64 }, DEFAULT_DYNASTY_WEIGHTS);
-    expect(early.draftCapital).toBeCloseTo(draftCapitalForPick(33), 12);
-    expect(early.plus! - late.plus!).toBeCloseTo(2 * (draftCapitalForPick(33) - draftCapitalForPick(64)), 9);
+    expect(early.draftCapital).toBeCloseTo(draftCapitalForPick(33, "RB"), 12);
+    expect(early.plus! - late.plus!).toBeCloseTo(2 * (draftCapitalForPick(33, "RB") - draftCapitalForPick(64, "RB")), 9);
     expect(early.plus!).toBeGreaterThan(late.plus!);
   });
 });
@@ -276,6 +277,56 @@ describe("draft capital by pick", () => {
     expect(draftCapitalLabel(1, 20)).toBe("1st round, pick 20");
     expect(draftCapitalLabel(5, null)).toBe("5th round (no pick set, the round's average)");
     expect(draftCapitalLabel(8, 300)).toBe("Undrafted");
+  });
+});
+
+describe("an RB's draft capital (the user, 2026-11-20)", () => {
+  it("is the user's table: round 1 and undrafted as everyone's, rounds 2–7 above the WR/TE table", () => {
+    expect([1, 2, 3, 4, 5, 6, 7, 8].map((r) => RB_DRAFT_CAPITAL[r])).toEqual([1, 0.66, 0.33, 0, -0.2, -0.3, -0.4, -1]);
+    expect(RB_DRAFT_CAPITAL[1]).toBe(DRAFT_CAPITAL[1]);
+    expect(RB_DRAFT_CAPITAL[UNDRAFTED_ROUND]).toBe(DRAFT_CAPITAL[UNDRAFTED_ROUND]);
+    for (const r of [2, 3, 4, 5, 6, 7]) expect(RB_DRAFT_CAPITAL[r]).toBeGreaterThan(DRAFT_CAPITAL[r]);
+  });
+
+  it("puts each round's value at its middle pick and falls with every later pick", () => {
+    for (const r of [1, 2, 3, 4, 5, 6, 7]) {
+      expect(draftCapitalForPick(ROUND_MIDDLE_PICK[r], "RB")).toBeCloseTo(RB_DRAFT_CAPITAL[r], 12);
+    }
+    for (let pick = 2; pick <= 262; pick++) {
+      expect(draftCapitalForPick(pick, "RB")).toBeLessThan(draftCapitalForPick(pick - 1, "RB"));
+    }
+    expect(draftCapitalForPick(1, "RB")).toBeCloseTo(1 + 15.5 * 0.34 / 32, 9); // ≈ +1.16
+    expect(draftCapitalForPick(257, "RB")).toBeCloseTo(-0.45, 9);
+    expect(draftCapitalForPick(2000, "RB")).toBe(-1);
+  });
+
+  it("keeps each round's average at about its table value, round 1 exactly", () => {
+    const avg = (from: number, to: number) => {
+      let s = 0;
+      for (let p = from; p <= to; p++) s += draftCapitalForPick(p, "RB");
+      return s / (to - from + 1);
+    };
+    expect(avg(1, 32)).toBeCloseTo(1, 9);
+    for (const r of [2, 3, 4, 5, 6, 7]) {
+      expect(Math.abs(avg(ROUND_PICKS[r][0], ROUND_PICKS[r][1]) - RB_DRAFT_CAPITAL[r])).toBeLessThan(0.015);
+    }
+  });
+
+  it("uses the RB table for a round with no pick, and leaves WRs and TEs on everyone's", () => {
+    expect(draftCapitalAt(5, null, "RB")).toBe(-0.2);
+    expect(draftCapitalAt(5, null, "WR")).toBe(DRAFT_CAPITAL[5]);
+    expect(draftCapitalAt(5, null, "TE")).toBe(DRAFT_CAPITAL[5]);
+    expect(draftCapitalAt(8, 300, "RB")).toBe(-1);
+    expect(draftCapitalForPick(160, "TE")).toBeCloseTo(draftCapitalForPick(160), 12);
+    expect(scoreDynasty({ pos: "RB", aeScore: 0, rookieAge: null, heightIn: null, weightLb: null, draftRound: 6, draftPick: null },
+      DEFAULT_DYNASTY_WEIGHTS).plus).toBeCloseTo(2 * -0.3, 12);
+  });
+
+  it("prices an RB teammate ahead on the RB curve", () => {
+    const ahead = { name: "Ahead", position: "RB" as const, overall: 50, round: 2, moveTe: false };
+    const mine = draftCapitalForPick(190, "RB");
+    expect(rookieCompetition(mine, [ahead]).competitors[0].cost)
+      .toBeCloseTo(0.2 * (draftCapitalForPick(50, "RB") - mine), 12); // gap under 1.0 on the flatter curve
   });
 });
 
@@ -350,6 +401,14 @@ describe("a QB's draft capital", () => {
     expect(rookieCompetition(draftCapitalForPick(109, "QB"), [ahead]).competitors[0].cost).toBeCloseTo(0.2 * qbGap, 12);
     expect(rookieCompetition(draftCapitalForPick(109), [{ ...ahead, position: "WR" as const }]).competitors[0].cost)
       .toBeCloseTo(0.2 * (draftCapitalForPick(20) - draftCapitalForPick(109)), 12);
+  });
+
+  it("says an RB past round 1 is on the RB scale", () => {
+    const tail = ", on the RB scale (RBs fall off less after round 1)";
+    expect(draftCapitalLabel(5, 160, "RB")).toBe(`5th round, pick 160${tail}`);
+    expect(draftCapitalLabel(2, null, "RB")).toBe(`2nd round (no pick set, the round's average)${tail}`);
+    expect(draftCapitalLabel(1, 20, "RB")).toBe("1st round, pick 20");
+    expect(draftCapitalLabel(8, 300, "RB")).toBe("Undrafted");
   });
 
   it("says a QB past pick 5 is on the QB scale", () => {

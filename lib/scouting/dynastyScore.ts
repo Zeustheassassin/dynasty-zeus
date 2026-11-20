@@ -118,7 +118,8 @@ export function sizeFlags(pos: CompositePos, heightIn: number | null, weightLb: 
 // Football Factory WRs 2011-24; Dynasty Nerds all positions 2015-25). A smooth
 // RB+WR curve (65 / 42 / 25 / 12 / 8 / 5 / 4%, undrafted ~2%) taken to
 // log-odds and mapped onto +1 (round 1) … −1 (undrafted). QB and TE first
-// rounders hit even more often than this curve credits.
+// rounders hit even more often than this curve credits. WRs and TEs use it;
+// RBs and QBs have their own (RB_DRAFT_CAPITAL, QB_DRAFT_CAPITAL below).
 export const DRAFT_CAPITAL: Record<number, number> = {
   1: 1.0, 2: 0.6, 3: 0.25, 4: -0.15, 5: -0.35, 6: -0.6, 7: -0.7, [UNDRAFTED_ROUND]: -1.0,
 };
@@ -137,6 +138,22 @@ export const ROUND_MIDDLE_PICK: Record<number, number> = {
 };
 
 const CAPITAL_ANCHORS: readonly [number, number][] = [1, 2, 3, 4, 5, 6, 7].map((r) => [ROUND_MIDDLE_PICK[r], DRAFT_CAPITAL[r]]);
+
+// RBs fall off less after round 1 (the user, 2026-11-20: "While Round 1 running
+// backs are just as strong as a Round 1 WR or TE they fall off less. Round
+// 5-6-7 Running backs find starting roles all the time"). The user's numbers,
+// not a fit: round 1 stays everyone's +1.0 and undrafted stays −1.0, while rounds
+// 2–7 sit higher than the WR/TE table, most of all late (a 5th-round RB −0.2 vs
+// −0.35, a 7th −0.4 vs −0.7). Published RB hit rates do run above WR's in every
+// round, so the direction matches the research. WRs and TEs keep DRAFT_CAPITAL.
+// The same straight lines between round middles apply, so pick 1 ≈ +1.16, pick
+// 32 ≈ +0.84 (round 1 still averages +1.0) and pick 257 ≈ −0.45; going undrafted
+// is a bigger drop from round 7 for an RB (−0.4 → −1.0) than for a WR (−0.7 → −1.0).
+export const RB_DRAFT_CAPITAL: Record<number, number> = {
+  1: 1.0, 2: 0.66, 3: 0.33, 4: 0, 5: -0.2, 6: -0.3, 7: -0.4, [UNDRAFTED_ROUND]: -1.0,
+};
+
+const RB_CAPITAL_ANCHORS: readonly [number, number][] = [1, 2, 3, 4, 5, 6, 7].map((r) => [ROUND_MIDDLE_PICK[r], RB_DRAFT_CAPITAL[r]]);
 
 // QBs fall off faster after round 1 (the user, 2026-11-10: "QB's drafted after
 // round 1 rarely" hit). The user's QB hit rates (multi-year starter, a second
@@ -208,9 +225,14 @@ const QB_CAPITAL_ANCHORS: readonly [number, number][] = [
   ...[2, 3, 4, 5, 6, 7].map((r): [number, number] => [ROUND_MIDDLE_PICK[r], QB_DRAFT_CAPITAL[r]]),
 ];
 
-/** Draft capital at an overall pick (1 = first pick), on the round table's scale; a QB's falls faster from pick 6 (QB_SLOT_RATES). */
+/**
+ * Draft capital at an overall pick (1 = first pick), on the round table's scale;
+ * a QB's falls faster from pick 6 (QB_SLOT_RATES), an RB's slower after round 1
+ * (RB_DRAFT_CAPITAL).
+ */
 export function draftCapitalForPick(pick: number, pos?: string | null): number {
-  const v = anchorValue(pos === "QB" ? QB_CAPITAL_ANCHORS : CAPITAL_ANCHORS, pick);
+  const anchors = pos === "QB" ? QB_CAPITAL_ANCHORS : pos === "RB" ? RB_CAPITAL_ANCHORS : CAPITAL_ANCHORS;
+  const v = anchorValue(anchors, pick);
   // Never below going undrafted.
   return Math.max(DRAFT_CAPITAL[UNDRAFTED_ROUND], v);
 }
@@ -238,13 +260,15 @@ export function qbRoundAverage(round: number): number | null {
  * Draft capital for Dynasty+: by overall pick when one is set, else the round's
  * average. Undrafted is −1 whatever the pick (the Rookie Draft Hub writes an
  * undrafted rookie as pick 300). Null before a round is set. A QB's falls
- * faster from pick 6 (QB_SLOT_RATES, QB_DRAFT_CAPITAL).
+ * faster from pick 6 (QB_SLOT_RATES, QB_DRAFT_CAPITAL), an RB's slower after
+ * round 1 (RB_DRAFT_CAPITAL; its values are its rounds' averages, within 0.015).
  */
 export function draftCapitalAt(round: number | null, pick: number | null, pos?: string | null): number | null {
   if (round == null) return null;
   if (round === UNDRAFTED_ROUND) return DRAFT_CAPITAL[UNDRAFTED_ROUND];
   if (pick != null && pick >= 1) return draftCapitalForPick(pick, pos);
   if (pos === "QB") return qbRoundAverage(round);
+  if (pos === "RB") return RB_DRAFT_CAPITAL[round] ?? null;
   return DRAFT_CAPITAL[round] ?? null;
 }
 
