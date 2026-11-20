@@ -30,6 +30,7 @@ import { activeLock, classDraftedBy } from "./scoreLock";
 import { alignmentPenalty } from "./alignmentPenalty";
 import { chartedSeasonRows, middleAdjustment, type MiddleUsage } from "./middleUsage";
 import type { RushingBonus } from "./qbRushing";
+import type { RoleFit } from "./roleFit";
 import { buildWRGameSplits, buildWRTierSplits, type ProspectGameRouteCellsRow } from "./aggregateMerge";
 import type { ContextCovariates, GameContext } from "./gameContext";
 import { contextAdjust, type HeadlineKey, type MetricContext } from "./contextGrading";
@@ -317,20 +318,25 @@ export function scoreViewsFrom(
   return m;
 }
 
-/**
- * Dynasty Score (+ Plus) for every prospect with an AE Score (dynastyScore.ts).
- * `landing` holds the landing-spot inputs (landingSpot.ts) for drafted
- * prospects from LANDING_FIRST_CLASS on. `now` decides which classes are
- * drafted, where the RB speed floor is off (speedFloor.ts).
- */
+/** The optional inputs to dynastyScores. */
+export interface DynastyExtras {
+  /** Landing-spot inputs (landingSpot.ts) for drafted prospects from LANDING_FIRST_CLASS on. */
+  landing?: ReadonlyMap<string, LandingInputs>;
+  /** QBs' rushing bonuses (qbRushing.ts). */
+  rushing?: ReadonlyMap<string, RushingBonus>;
+  /** Role fits (roleFits.ts): an RB's Inside tag feeds the light-inside flag (lightInsideFlag.ts). */
+  roleFits?: ReadonlyMap<string, RoleFit | null>;
+  /** Decides which classes are drafted: the RB speed floor is off from then, the light-inside flag halved. Default now. */
+  now?: Date;
+}
+
+/** Dynasty Score (+ Plus) for every prospect with an AE Score (dynastyScore.ts). */
 export function dynastyScores(
   prospects: readonly ProspectWithStats[],
   scoreViews: ReadonlyMap<string, ScoreView>,
   hsClass: ReadonlyMap<string, number | null>,
   weights: DynastyWeights,
-  landing?: ReadonlyMap<string, LandingInputs>,
-  rushing?: ReadonlyMap<string, RushingBonus>,
-  now: Date = new Date(),
+  { landing, rushing, roleFits, now = new Date() }: DynastyExtras = {},
 ): Map<string, DynastyBreakdown> {
   const m = new Map<string, DynastyBreakdown>();
   for (const p of prospects) {
@@ -347,6 +353,8 @@ export function dynastyScores(
         ? { time: Number(p.forty_time), source: p.forty_source ?? "combine", weightLb: p.forty_weight ?? null }
         : null,
       classDrafted: classDraftedBy(p.draft_class_year, now),
+      runSideTag: roleFits?.get(p.id)?.tags?.[0] ?? null,
+      weighInLb: p.forty_weight ?? null,
       draftRound: p.draft_round,
       draftPick: p.draft_pick,
       landing: landing?.get(p.id) ?? null,

@@ -3,6 +3,7 @@
 //
 //   Dynasty Score      = AE Score + age weight × career window + size weight × size flags
 //                        + speed weight × an RB's speed floor (speedFloor.ts; off once his class is drafted)
+//                        + light inside weight × an RB's light-inside-runner flag (lightInsideFlag.ts; halved once drafted)
 //                        + rushing weight × a QB's rushing bonus (qbRushing.ts)
 //                        + a QB's pre-draft discount (QB_PREDRAFT_SCALE; off once his class is drafted)
 //   Dynasty Score Plus = Dynasty Score, less the QB pre-draft discount (his pick prices that in)
@@ -12,7 +13,7 @@
 //                        + offense weight × (QB + pass/run offense)
 //                          (the landing spot, 2027 classes on)
 //
-// The weights are the Big Board sliders (age 1, size 1, speed 1, rushing 1, draft 2, landing 1, role 1, offense 1 by default). The pieces below are
+// The weights are the Big Board sliders (age 1, size 1, speed 1, light inside 1, rushing 1, draft 2, landing 1, role 1, offense 1 by default). The pieces below are
 // from published research (the speed floor from past combine classes' NFL
 // results), not fit on the user's charting: there are no NFL outcomes for
 // these prospects to fit against. Each is scaled to sit alongside an AE Score
@@ -28,6 +29,8 @@ import { UNDRAFTED_ROUND } from "../draftRound";
 import type { CompositePos } from "./aeComposite";
 import type { RoleStanding } from "./roleStanding";
 import { speedFlag, type FortyRun, type SpeedFlag } from "./speedFloor";
+import { lightInsideFlag, type LightInsideFlag } from "./lightInsideFlag";
+import type { RoleTag } from "./roleFit";
 import type { TeamLanding } from "./teamLanding";
 
 // ── Career window ──────────────────────────────────────────────────────────
@@ -325,7 +328,7 @@ export interface LandingBreakdown {
 }
 
 // ── Weights (the Big Board sliders) ────────────────────────────────────────
-export interface DynastyWeights { age: number; size: number; speed: number; draft: number; landing: number; role: number; offense: number; rushing: number }
+export interface DynastyWeights { age: number; size: number; speed: number; lightInside: number; draft: number; landing: number; role: number; offense: number; rushing: number }
 // Draft defaults to 2 (the user's call, 2026-10-01): at 2× a 1st-rounder gets
 // +2.0 and an undrafted rookie −2.0, so draft capital, the strongest single
 // predictor of a fantasy hit, carries more than the AE Score's ±1.5 spread.
@@ -338,7 +341,9 @@ export interface DynastyWeights { age: number; size: number; speed: number; draf
 // Speed defaults to 1: an RB under the Speed Score floor loses up to 0.7, about
 // a round of draft capital at the Draft slider's 2× (speedFloor.ts), until his
 // class is drafted.
-export const DEFAULT_DYNASTY_WEIGHTS: DynastyWeights = { age: 1, size: 1, speed: 1, draft: 2, landing: 1, role: 1, offense: 1, rushing: 1 };
+// Light Inside defaults to 1: an RB with the Inside tag on a light frame loses
+// up to 0.5, 0.25 once his class is drafted (lightInsideFlag.ts).
+export const DEFAULT_DYNASTY_WEIGHTS: DynastyWeights = { age: 1, size: 1, speed: 1, lightInside: 1, draft: 2, landing: 1, role: 1, offense: 1, rushing: 1 };
 
 // ── QB pre-draft discount ──────────────────────────────────────────────────
 // Before the draft a QB's Dynasty Score counts 80% of his AE Score (the user,
@@ -378,8 +383,12 @@ export interface DynastyInputs {
   weightLb: number | null;
   /** His 40, where he ran it and his weigh-in there; null or absent without one. Only an RB's counts (speedFloor.ts). */
   forty?: FortyRun | null;
-  /** His class has been drafted (scoreLock.ts classDraftedBy): the speed floor is off from then. */
+  /** His class has been drafted (scoreLock.ts classDraftedBy): the speed floor is off from then, the light-inside flag halved. */
   classDrafted?: boolean;
+  /** An RB's Inside / Outside tag (roleFitRB.ts runSideTag), for the light-inside flag; absent without one. */
+  runSideTag?: RoleTag | null;
+  /** His weigh-in (prospects.forty_weight), over `weightLb` for the light-inside flag; absent without one. */
+  weighInLb?: number | null;
   /** 1–7, UNDRAFTED_ROUND, or null before the draft. */
   draftRound: number | null;
   /** Overall pick (1 = first), or null when only the round is known. */
@@ -398,6 +407,8 @@ export interface DynastyBreakdown {
   flags: SizeFlag[];
   /** An RB's speed floor before the Speed slider; null off RB or without a 40. */
   speed: SpeedFlag | null;
+  /** An RB's light-inside-runner red flag before the Light Inside slider; null when it doesn't apply. */
+  lightInside: LightInsideFlag | null;
   /** A QB's rushing bonus before the Rushing slider; null without one. */
   rushing: { value: number; label: string } | null;
   /** A QB's pre-draft discount, already in `dynasty` and backed out of `plus` (no slider); null when it doesn't apply. */
@@ -416,9 +427,14 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
   const flags = sizeFlags(inp.pos, inp.heightIn, inp.weightLb);
   const size = flags.reduce((s, f) => s + f.value, 0);
   const speed = speedFlag(inp.pos, inp.forty, inp.weightLb, inp.classDrafted ?? false);
+  const lightInside = lightInsideFlag({
+    pos: inp.pos, runSideTag: inp.runSideTag, heightIn: inp.heightIn, bioWeightLb: inp.weightLb,
+    weighInLb: inp.weighInLb, classDrafted: inp.classDrafted ?? false,
+  });
   const rushing = inp.pos === "QB" ? inp.rushing ?? null : null;
   const qbDiscount = qbPredraftDiscount(inp.pos, inp.aeScore, inp.classDrafted ?? false);
   const dynasty = inp.aeScore + w.age * (window ?? 0) + w.size * size + (w.speed ?? 0) * (speed?.value ?? 0)
+    + (w.lightInside ?? 0) * (lightInside?.value ?? 0)
     + (w.rushing ?? 0) * (rushing?.value ?? 0) + (qbDiscount?.value ?? 0);
   const draftCapital = draftCapitalAt(inp.draftRound, inp.draftPick, inp.pos);
   let landing: LandingBreakdown | null = null;
@@ -435,6 +451,7 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
     window,
     flags,
     speed,
+    lightInside,
     rushing,
     qbDiscount,
     dynasty,

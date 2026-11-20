@@ -132,13 +132,14 @@ function ScoreStrip({ p, pos, report }: { p: ProspectWithStats; pos: CompositePo
     tiles.push(<ScoreTile key="ae" primary label="AE SCORE" value="—" tone="dim" lines={["Not scored yet", aeScoreMissingReason(scores.composite, pos)]} />);
   }
 
-  const d = sc ? dynastyScores([p], new Map([[p.id, sc]]), scores.hsClass, weights, scores.landing, scores.rushing).get(p.id) : undefined;
+  const d = sc ? dynastyScores([p], new Map([[p.id, sc]]), scores.hsClass, weights, { landing: scores.landing, rushing: scores.rushing, roleFits: scores.roleFits }).get(p.id) : undefined;
   if (d) {
     const size = d.flags.reduce((s, f) => s + f.value, 0);
     const parts = [
       d.window != null ? `age ${signed(weights.age * d.window, 2)}` : "age unknown",
       ...(d.flags.length ? [`size ${signed(weights.size * size, 2)}`] : []),
       ...(d.speed?.value ? [`speed ${signed(weights.speed * d.speed.value, 2)}`] : []),
+      ...(d.lightInside ? [`light inside ${signed(weights.lightInside * d.lightInside.value, 2)}`] : []),
       ...(d.rushing ? [`rushing ${signed(weights.rushing * d.rushing.value, 2)}`] : []),
       ...(d.qbDiscount ? [`QB pre-draft ${signed(d.qbDiscount.value, 2)}`] : []),
     ];
@@ -146,7 +147,7 @@ function ScoreStrip({ p, pos, report }: { p: ProspectWithStats; pos: CompositePo
       ? `Age ${d.rookieAge.years.toFixed(1)} as a rookie${d.rookieAge.estimated ? " (est. from HS class)" : ""}; ${pos} primes end at ${PRIME_END_AGE[pos]}`
       : "Age unknown";
     tiles.push(<ScoreTile key="dyn" label="DYNASTY" value={signed(d.dynasty, 2)} tone={toneOf(d.dynasty)} lines={[parts.join(" · ")]}
-      title={[`AE Score ${signed(d.aeScore, 2)}`, ageTitle, ...d.flags.map((f) => `Size: ${f.label}`), ...(d.speed ? [`Speed: ${d.speed.label}`] : []), ...(d.rushing ? [`Rushing: ${d.rushing.label}`] : []), ...(d.qbDiscount ? [`QB pre-draft: ${d.qbDiscount.label}`] : []), "Weighted by the Big Board's Dynasty sliders."].join("\n")} />);
+      title={[`AE Score ${signed(d.aeScore, 2)}`, ageTitle, ...d.flags.map((f) => `Size: ${f.label}`), ...(d.speed ? [`Speed: ${d.speed.label}`] : []), ...(d.lightInside ? [`Red flag: ${d.lightInside.label}`] : []), ...(d.rushing ? [`Rushing: ${d.rushing.label}`] : []), ...(d.qbDiscount ? [`QB pre-draft: ${d.qbDiscount.label}`] : []), "Weighted by the Big Board's Dynasty sliders."].join("\n")} />);
     tiles.push(d.plus != null && d.draftCapital != null && p.draft_round != null
       ? <ScoreTile key="plus" label="DYNASTY+" value={signed(d.plus, 2)} tone={toneOf(d.plus)} lines={[`${p.draft_round === UNDRAFTED_ROUND ? "Undrafted" : p.draft_pick ? `pick ${p.draft_pick}` : `${draftRoundLabel(p.draft_round)} rd avg`} capital ${signed(weights.draft * d.draftCapital, 2)}`, ...(d.landing?.competition?.value ? [`competition ${signed(weights.landing * d.landing.competition.value, 2)}`] : []), ...(d.landing?.standing?.value ? [`role standing ${signed(weights.role * d.landing.standing.value, 2)}`] : []), ...(teamLandingTotal(d.landing?.team, weights) ? [`team ${signed(teamLandingTotal(d.landing?.team, weights), 2)}`] : [])]}
           title={[`Draft capital from the ${draftCapitalLabel(p.draft_round, p.draft_pick, p.position)}, × the Big Board's Draft slider (${weights.draft}).`, ...landingLines(d.landing, p.draft_class_year, weights)].join("\n")} />

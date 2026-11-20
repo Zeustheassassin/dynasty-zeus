@@ -12,6 +12,7 @@ import { buildPositionComposite, TE_FIELD_TIME_PAIR, WR_FIELD_TIME_PAIR } from "
 import { DEFAULT_DYNASTY_WEIGHTS } from "../../../lib/scouting/dynastyScore";
 import type { GameContext } from "../../../lib/scouting/gameContext";
 import type { OpponentTier } from "../../../lib/scouting/opponentTier";
+import type { RoleFit } from "../../../lib/scouting/roleFit";
 
 const prospect = (id: string, position: string, extra: Partial<ProspectWithStats> = {}) =>
   ({
@@ -94,7 +95,7 @@ describe("dynastyScores", () => {
       prospect("none", "RB", { weight: 214 }),
     ];
     const views = new Map(ps.map((p) => [p.id, live(1)]));
-    const m = dynastyScores(ps, views, new Map(), DEFAULT_DYNASTY_WEIGHTS, undefined, undefined, BEFORE_2027_DRAFT);
+    const m = dynastyScores(ps, views, new Map(), DEFAULT_DYNASTY_WEIGHTS, { now: BEFORE_2027_DRAFT });
     // Same AE Score and frame; only the 40 differs.
     const none = m.get("none")!.dynasty;
     expect(m.get("none")!.speed).toBeNull();
@@ -113,7 +114,7 @@ describe("dynastyScores", () => {
       prospect("none27", "RB", { weight: 214, draft_class_year: 2027 }),
     ];
     const views = new Map(ps.map((p) => [p.id, live(1)]));
-    const at = (now: Date) => dynastyScores(ps, views, new Map(), DEFAULT_DYNASTY_WEIGHTS, undefined, undefined, now);
+    const at = (now: Date) => dynastyScores(ps, views, new Map(), DEFAULT_DYNASTY_WEIGHTS, { now });
     const gap = (m: ReturnType<typeof at>, cls: number) => m.get(`slow${cls - 2000}`)!.dynasty - m.get(`none${cls - 2000}`)!.dynasty;
     // November 2026: the 2026 class is drafted (off), 2027 isn't (on).
     const nov = at(BEFORE_2027_DRAFT);
@@ -123,6 +124,35 @@ describe("dynastyScores", () => {
     // April 30, 2027 still counts it; May 1 turns 2027's off too.
     expect(gap(at(new Date(Date.UTC(2027, 3, 30, 12))), 2027)).toBeCloseTo(-0.7, 9);
     expect(gap(at(new Date(Date.UTC(2027, 4, 1))), 2027)).toBeCloseTo(0, 12);
+  });
+
+  // 2026-11-19, the user on Dwight Phillips Jr. (5'10" 185, Inside tag): "I would
+  // personally RED FLAG this prospect"; −0.5, "after the draft reduce it to −0.25".
+  it("reads an RB's Inside tag off his role fit and his weigh-in off his row for the light-inside flag", () => {
+    const inside = { key: "inside" as const, label: "Inside", why: "inside +20.1 pts on 22 runs vs outside −3.6 pts on 47 runs (SRAE)" };
+    const fitWith = (tag: typeof inside | null) => ({ tags: tag ? [tag] : undefined }) as unknown as RoleFit;
+    const ps = [
+      prospect("light", "RB", { height: `5'10"`, weight: 185 }),
+      prospect("weighed", "RB", { height: `5'10"`, weight: 185, forty_weight: 198 }),
+      prospect("untagged", "RB", { height: `5'10"`, weight: 185 }),
+      prospect("light26", "RB", { height: `5'10"`, weight: 185, draft_class_year: 2026 }),
+    ];
+    const views = new Map(ps.map((p) => [p.id, live(1)]));
+    const roleFits = new Map<string, RoleFit | null>([
+      ["light", fitWith(inside)], ["weighed", fitWith(inside)], ["untagged", fitWith(null)], ["light26", fitWith(inside)],
+    ]);
+    const m = dynastyScores(ps, views, new Map(), DEFAULT_DYNASTY_WEIGHTS, { roleFits, now: BEFORE_2027_DRAFT });
+    const base = m.get("untagged")!.dynasty;
+    expect(m.get("untagged")!.lightInside).toBeNull();
+    expect(m.get("light")!.dynasty - base).toBeCloseTo(-0.5, 12);
+    expect(m.get("light")!.lightInside!.label).toContain("2.64 lb per inch");
+    // A 198 weigh-in clears it (2.83 lb per inch).
+    expect(m.get("weighed")!.lightInside).toBeNull();
+    expect(m.get("weighed")!.dynasty).toBeCloseTo(base, 12);
+    // The 2026 class is drafted: halved, not off.
+    expect(m.get("light26")!.lightInside!.value).toBeCloseTo(-0.25, 12);
+    // Without role fits there's no tag, so no flag.
+    expect(dynastyScores(ps, views, new Map(), DEFAULT_DYNASTY_WEIGHTS, { now: BEFORE_2027_DRAFT }).get("light")!.lightInside).toBeNull();
   });
 });
 

@@ -8,7 +8,7 @@ const prospect = (id: string, position: string, board_scores: BoardScores | null
   ({ id, name: id, position, board_scores }) as ProspectWithStats;
 
 const dyn = (dynasty: number, plus: number | null): DynastyBreakdown =>
-  ({ aeScore: dynasty, rookieAge: null, window: null, flags: [], speed: null, rushing: null, qbDiscount: null, dynasty, draftCapital: null, plus });
+  ({ aeScore: dynasty, rookieAge: null, window: null, flags: [], speed: null, lightInside: null, rushing: null, qbDiscount: null, dynasty, draftCapital: null, plus });
 
 const sample = (pos: "QB" | "WR", n: number | null, share: number, tier: SampleSize["tier"]): SampleSize =>
   ({ ...SAMPLE_FULL[pos], n, share, tier });

@@ -101,10 +101,14 @@ describe("scoreDynasty", () => {
 
   it("scales each piece by its weight; zero weights leave the AE Score", () => {
     const slow = { time: 4.8, source: "combine" as const };
-    const d = scoreDynasty({ ...base, weightLb: 190, forty: slow, draftRound: 3 }, { age: 0, size: 0, speed: 0, draft: 0, landing: 0, role: 0, offense: 0, rushing: 0 });
+    const insideTag = { key: "inside" as const, label: "Inside", why: "inside +20 vs outside −4" };
+    const d = scoreDynasty(
+      { ...base, weightLb: 190, forty: slow, draftRound: 3, heightIn: 70, runSideTag: insideTag },
+      { age: 0, size: 0, speed: 0, lightInside: 0, draft: 0, landing: 0, role: 0, offense: 0, rushing: 0 },
+    );
     expect(d.dynasty).toBe(0.8);
     expect(d.plus).toBe(0.8);
-    const half = scoreDynasty({ ...base, draftRound: 3 }, { age: 1, size: 1, speed: 1, draft: 0.5, landing: 1, role: 1, offense: 1, rushing: 1 });
+    const half = scoreDynasty({ ...base, draftRound: 3 }, { age: 1, size: 1, speed: 1, lightInside: 1, draft: 0.5, landing: 1, role: 1, offense: 1, rushing: 1 });
     expect(half.plus! - half.dynasty).toBeCloseTo(0.5 * DRAFT_CAPITAL[3], 9);
   });
 
@@ -137,6 +141,29 @@ describe("scoreDynasty", () => {
     expect(drafted.plus!).toBeCloseTo(without.plus!, 12);
     // Before the draft it counts.
     expect(scoreDynasty({ ...base, draftRound: 4, forty, classDrafted: false }, DEFAULT_DYNASTY_WEIGHTS).dynasty - without.dynasty).toBeCloseTo(-0.7, 12);
+  });
+
+  // 2026-11-19, the user: "I would do the -0.5 and maybe after the draft reduce it to -0.25 I still want it to be penalised".
+  it("takes an RB's light-inside red flag at its slider's weight, into Dynasty and Dynasty+; halved once drafted, never off", () => {
+    const insideTag = { key: "inside" as const, label: "Inside", why: "inside +20.1 pts on 22 runs vs outside −3.6 pts on 47 runs (SRAE)" };
+    const light = { ...base, heightIn: 70, weightLb: 185, draftRound: 3 };
+    const without = scoreDynasty(light, DEFAULT_DYNASTY_WEIGHTS);
+    const flagged = scoreDynasty({ ...light, runSideTag: insideTag }, DEFAULT_DYNASTY_WEIGHTS);
+    expect(DEFAULT_DYNASTY_WEIGHTS.lightInside).toBe(1);
+    expect(without.lightInside).toBeNull();
+    expect(flagged.lightInside!.value).toBeCloseTo(-0.5, 12);
+    expect(flagged.dynasty - without.dynasty).toBeCloseTo(-0.5, 12);
+    expect(flagged.plus! - without.plus!).toBeCloseTo(-0.5, 12);
+    // The slider scales it; 0 turns it off.
+    expect(scoreDynasty({ ...light, runSideTag: insideTag }, { ...DEFAULT_DYNASTY_WEIGHTS, lightInside: 2 }).dynasty - without.dynasty).toBeCloseTo(-1, 12);
+    expect(scoreDynasty({ ...light, runSideTag: insideTag }, { ...DEFAULT_DYNASTY_WEIGHTS, lightInside: 0 }).dynasty).toBeCloseTo(without.dynasty, 12);
+    // Drafted: −0.25, still on.
+    const drafted = scoreDynasty({ ...light, runSideTag: insideTag, classDrafted: true }, DEFAULT_DYNASTY_WEIGHTS);
+    expect(drafted.dynasty - scoreDynasty({ ...light, classDrafted: true }, DEFAULT_DYNASTY_WEIGHTS).dynasty).toBeCloseTo(-0.25, 12);
+    // A 198 weigh-in clears it; an Outside tag or a WR never gets it.
+    expect(scoreDynasty({ ...light, runSideTag: insideTag, weighInLb: 198 }, DEFAULT_DYNASTY_WEIGHTS).lightInside).toBeNull();
+    expect(scoreDynasty({ ...light, runSideTag: { ...insideTag, key: "outside", label: "Outside" } }, DEFAULT_DYNASTY_WEIGHTS).lightInside).toBeNull();
+    expect(scoreDynasty({ ...light, pos: "WR", runSideTag: insideTag }, DEFAULT_DYNASTY_WEIGHTS).lightInside).toBeNull();
   });
 
   it("counts 80% of a QB's AE Score before the draft, and never in Dynasty+ (the user, 2026-11-18)", () => {

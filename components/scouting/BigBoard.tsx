@@ -17,6 +17,7 @@ import type { DraftPickRow, DraftResultUpdate } from "../../lib/nflDraft";
 import type { LandingSaved } from "../../lib/scouting/teamLanding";
 import { landingLines } from "../../lib/scouting/landingSpot";
 import { PRO_DAY_ADJUST, RB_SPEED_FLOOR, fortyDisplay } from "../../lib/scouting/speedFloor";
+import { LIGHT_INSIDE } from "../../lib/scouting/lightInsideFlag";
 import PostDraftTab from "./PostDraftTab";
 import { classDraftedBy, makeLock } from "../../lib/scouting/scoreLock";
 import type { ProspectGameRouteCellsRow } from "../../lib/scouting/aggregateMerge";
@@ -103,6 +104,7 @@ const WEIGHT_SLIDERS: { key: keyof DynastyWeights; label: string; hint: string }
   { key: "age",   label: "Age",   hint: "How much the career window (prime seasons left) counts" },
   { key: "size",  label: "Size",  hint: "How much size counts: RBs and WRs carrying more weight for their height gain, lean and very light ones lose" },
   { key: "speed", label: "Speed", hint: `How much an RB's speed floor counts: an RB whose Speed Score (weight × 200 ÷ 40⁴, a pro-day 40 +${PRO_DAY_ADJUST.toFixed(2)}) is under ${RB_SPEED_FLOOR.none} loses up to ${Math.abs(RB_SPEED_FLOOR.value).toFixed(1)} at 1×, all of it at ${RB_SPEED_FLOOR.full} and under. Never a bonus, and off once his class is drafted (May 1 of the draft year), when draft capital prices his speed in. No WR floor: from past combines, slow WRs hit as often as their draft pick says, while slow RBs fall short of theirs` },
+  { key: "lightInside", label: "Light Inside", hint: `How much an RB's light-inside-runner red flag counts: an RB with the Inside tag (above average on inside runs, below on outside ones) on a light frame (pounds per inch of height, on his weigh-in when there is one) loses up to ${Math.abs(LIGHT_INSIDE.value).toFixed(1)} at 1×, all of it at ${LIGHT_INSIDE.full.toFixed(2)} lb per inch and under, none from ${LIGHT_INSIDE.none.toFixed(2)} (at 5'10": 189 lb and under / 196 and up). Halved to ${Math.abs(LIGHT_INSIDE.draftedValue).toFixed(2)} once his class is drafted. Never a bonus` },
   { key: "rushing", label: "QB Rushing", hint: "How much a QB's rushing counts: rushing yards per game over his PFF full seasons (carries × yards per carry, no TDs), 0 at the college median (26) up to +0.3 at 62+ at 1×, only as much as his passing allows (none in the bottom third of charted QBs, all of it in the top third)" },
   { key: "draft", label: "Draft", hint: "How much draft capital counts in Dynasty Score Plus: by overall pick, or the round's average when no pick is set" },
   { key: "landing", label: "Landing", hint: "How much his team's room counts in Dynasty Score Plus (2027 classes on): rookie competition (the players at his position his team drafted ahead of him; WRs and Move TEs count against each other), the established veterans ahead of him, and his path by year 2 (Post-Draft tab)" },
@@ -427,8 +429,8 @@ export default function BigBoard({
 
   // Dynasty Score (+ Plus) for every prospect with an AE Score.
   const dynasty = useMemo(
-    () => dynastyScores(prospects, scoreViews, hsClass, weights, landing, rushing),
-    [prospects, scoreViews, hsClass, weights, landing, rushing],
+    () => dynastyScores(prospects, scoreViews, hsClass, weights, { landing, rushing, roleFits }),
+    [prospects, scoreViews, hsClass, weights, landing, rushing, roleFits],
   );
 
   // Each prospect's charted sample against his position's full sample
@@ -451,8 +453,8 @@ export default function BigBoard({
   // still pending, and saves run one after another so an older one can't land
   // last.
   const savedDynasty = useMemo(
-    () => dynastyScores(prospects, scoreViewsFrom(prospects, liveScores, "live", new Date()), hsClass, weights, landing, rushing),
-    [prospects, liveScores, hsClass, weights, landing, rushing],
+    () => dynastyScores(prospects, scoreViewsFrom(prospects, liveScores, "live", new Date()), hsClass, weights, { landing, rushing, roleFits }),
+    [prospects, liveScores, hsClass, weights, landing, rushing, roleFits],
   );
   const boardScores = useMemo(
     () => buildBoardScores(prospects, savedDynasty, samples, weights),
@@ -849,6 +851,7 @@ export default function BigBoard({
         ? ` (${p.forty_projected_from ?? "projected"} projects ${Number(p.forty_projected).toFixed(2)}; projections don't count)` : "";
       lines.push(`Speed: no 40 time yet${proj} → +0.00`);
     }
+    if (d.lightInside) lines.push(`Red flag: ${d.lightInside.label} → ${signed(weights.lightInside * d.lightInside.value, 2)}`);
     if (d.rushing) lines.push(`Rushing: ${d.rushing.label} → ${signed(weights.rushing * d.rushing.value, 2)}`);
     if (d.qbDiscount) lines.push(`QB pre-draft: ${d.qbDiscount.label} → ${signed(d.qbDiscount.value, 2)}`);
     lines.push(`= Dynasty ${signed(d.dynasty, 2)}`);
@@ -860,7 +863,15 @@ export default function BigBoard({
     }
     const v = plus ? d.plus! : d.dynasty;
     const color = v >= 0 ? "text-emerald-400" : "text-red-400";
-    return <td className={`${cls} ${color} font-semibold`} title={lines.join("\n")}>{signed(v, 2)}</td>;
+    // The light-inside red flag (lightInsideFlag.ts) shows as a flag beside the score while its slider is on.
+    const flagged = d.lightInside != null && weights.lightInside > 0;
+    return (
+      <td className={`${cls} ${color} font-semibold`} title={lines.join("\n")}>
+        {flagged && <span className="text-red-500 mr-1" aria-hidden="true">⚑</span>}
+        {flagged && <span className="sr-only">Red flag: light inside runner. </span>}
+        {signed(v, 2)}
+      </td>
+    );
   }
   // ── Role cell ─────────────────────────────────────────────────
   // The best-case role ("X", or "X / Z" on a near tie) with a V for
@@ -946,7 +957,8 @@ export default function BigBoard({
     "Dynasty Score: the AE Score plus a career-window adjustment for age (prime seasons left at rookie " +
     `age vs a typical ${REFERENCE_ROOKIE_AGE}-year-old rookie; primes end RB ${PRIME_END_AGE.RB}, WR ${PRIME_END_AGE.WR}, ` +
     `TE ${PRIME_END_AGE.TE}, QB ${PRIME_END_AGE.QB}), size (RB and WR pounds per inch of height vs the position's typical, plus WRs under 175 lb), ` +
-    `an RB's speed floor (Speed Score under ${RB_SPEED_FLOOR.none}, never a bonus, off once his class is drafted) and a QB's rushing. Weighted by the sliders. ` +
+    `an RB's speed floor (Speed Score under ${RB_SPEED_FLOOR.none}, never a bonus, off once his class is drafted), ` +
+    `an RB's light-inside red flag ⚑ (the Inside tag on a frame under ${LIGHT_INSIDE.none.toFixed(2)} lb per inch, up to ${LIGHT_INSIDE.value}, ${LIGHT_INSIDE.draftedValue} once drafted) and a QB's rushing. Weighted by the sliders. ` +
     `Before the draft a QB counts ${Math.round(QB_PREDRAFT_SCALE * 100)}% of his AE Score (no slider; off once his class is drafted and never in Dynasty+, where his pick takes over).`;
   const preGradeTooltip =
     `Pre-draft grade: mirrors the Dynasty Score on a curve (${dynastyGradeCurveText()}, straight lines between) ` +
