@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import { lookupConference } from "../../lib/scouting/schoolConferences";
 import { classYearOptionsWith } from "../../lib/helpers/season";
-import { reorderRanksWithinClass } from "../../lib/scouting/rankReorder";
+import { isUnrankInput, reorderRanksWithinClass } from "../../lib/scouting/rankReorder";
 import { logger } from "../../lib/logger";
 import type { ProspectWithStats, ChartingDecision, FocusTag } from "../../lib/types";
 import { FOCUS_TAGS, focusSortValue, parseFocusTag } from "../../lib/scouting/focusTag";
@@ -307,7 +307,8 @@ export default function ProspectRosterSheet({ prospects, rolePos, overviewData, 
     const mover = prospects.find((p) => p.id === prospectId);
     if (!mover) return;
     const trimmed = raw.trim();
-    const target = trimmed === "" ? null : Number(trimmed);
+    // Blank or 0 = take him off the ranks (the rest of his class moves up).
+    const target = trimmed === "" || isUnrankInput(trimmed) ? null : Number(trimmed);
     // personal_rank is a ladder per (position, draft class). The hub already
     // filtered to one position; scope to the mover's draft class so the reorder
     // matches the Big Board editor and never disturbs another class's ranks.

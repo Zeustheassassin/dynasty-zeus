@@ -32,6 +32,7 @@ import {
 } from "../../lib/scouting/prospectGrade";
 import { changedPreGrades, mirroredPreGrade } from "../../lib/scouting/preGradeMirror";
 import { realignRanks, type RankUpdate } from "../../lib/scouting/realignRanks";
+import { isUnrankInput, unrankUpdates } from "../../lib/scouting/rankReorder";
 import { fmtVal, type ColDef } from "./stats/StatsTableShell";
 import { pffCols, PFF_ALL_TAB_KEY, PFF_BOARD_KEYS, QB_STYLE_BOARD_COLS } from "./stats/pffCols";
 import type { PffTotals, PffValues } from "../../lib/pff/totals";
@@ -1049,6 +1050,19 @@ export default function BigBoard({
   const rankField = (p: ProspectWithStats) => boardTab === "all" ? p.overall_rank : p.personal_rank;
 
   async function commitRank(id: string) {
+    // 0 takes him off this tab's rank (POS, or OVR on All); the ladder below
+    // him moves up one, in one all-or-nothing call.
+    if (isUnrankInput(rankInput)) {
+      const updates = unrankUpdates(prospects, id, boardTab === "all" ? "overall_rank" : "personal_rank");
+      if (updates.size > 0 && onSetRanks) {
+        setRealignNote(null);
+        setSavingRankId(id);
+        await onSetRanks(updates);
+        setSavingRankId(null);
+      }
+      setEditingRankId(null);
+      return;
+    }
     const nr = parseInt(rankInput, 10);
     if (!rankInput || isNaN(nr) || nr < 1) { setEditingRankId(null); return; }
     setRealignNote(null); // an Undo now would undo this edit too
@@ -1204,7 +1218,7 @@ export default function BigBoard({
           className="sticky z-10 bg-slate-950 border-r border-slate-800 text-center"
           onClick={(e) => { e.stopPropagation(); setEditingRankId(p.id); setRankInput(rank ? `${rank}` : ""); }}>
           {editingRankId === p.id ? (
-            <input autoFocus type="number" min={1}
+            <input autoFocus type="number" min={0} title="0 removes his rank"
               className="w-10 px-0.5 py-0.5 bg-slate-800 border border-blue-500 rounded text-yellow-400 font-bold text-xs focus:outline-none text-center"
               value={rankInput}
               onChange={(e) => setRankInput(e.target.value)}

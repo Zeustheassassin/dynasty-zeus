@@ -1209,3 +1209,52 @@ describe("BigBoard Realign ranks", () => {
     expect(screen.queryByRole("group", { name: "Realign ranks" })).toBeNull();
   });
 });
+
+// 2026-11-21, the user: "if i change a rank to 0 it just removes him from the
+// rank". The rest of that ladder moves up one, in one onSetRanks call.
+describe("BigBoard rank 0 removes the rank", () => {
+  type SetFn = (updates: ReadonlyMap<string, Record<string, number | null>>) => Promise<boolean>;
+  const typeRank = (current: string, value: string) => {
+    fireEvent.click(screen.getAllByText(current)[0]);
+    const input = screen.getByTitle("0 removes his rank");
+    fireEvent.change(input, { target: { value } });
+    fireEvent.keyDown(input, { key: "Enter" });
+  };
+
+  it("takes him off OVR on the All tab and moves the class up", async () => {
+    const set = vi.fn<SetFn>(async () => true);
+    const update = vi.fn(async () => {});
+    renderBoard(PROSPECTS, undefined, { onSetRanks: set, onUpdateOverallRank: update });
+    typeRank("#1", "0");
+    await vi.waitFor(() => expect(set).toHaveBeenCalledTimes(1));
+    expect(Object.fromEntries(set.mock.calls[0][0])).toEqual({
+      wr1: { overall_rank: null },
+      wr2: { overall_rank: 1 }, qb1: { overall_rank: 2 }, rb1: { overall_rank: 3 },
+      te1: { overall_rank: 4 }, te2: { overall_rank: 5 },
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("takes him off the position rank on a position tab, only that position moving up", async () => {
+    const set = vi.fn<SetFn>(async () => true);
+    const update = vi.fn(async () => {});
+    renderBoard(PROSPECTS, undefined, { onSetRanks: set, onUpdateRank: update });
+    fireEvent.click(screen.getByRole("button", { name: /^WR/ }));
+    typeRank("#1", "0");
+    await vi.waitFor(() => expect(set).toHaveBeenCalledTimes(1));
+    expect(Object.fromEntries(set.mock.calls[0][0])).toEqual({
+      wr1: { personal_rank: null },
+      wr2: { personal_rank: 1 },
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("still moves him for any other number", async () => {
+    const set = vi.fn<SetFn>(async () => true);
+    const update = vi.fn(async () => {});
+    renderBoard(PROSPECTS, undefined, { onSetRanks: set, onUpdateOverallRank: update });
+    typeRank("#1", "3");
+    await vi.waitFor(() => expect(update).toHaveBeenCalledWith("wr1", 3));
+    expect(set).not.toHaveBeenCalled();
+  });
+});

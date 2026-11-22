@@ -19,6 +19,7 @@ import FocusTagChip from "../FocusTagChip";
 import { ChartedGamesCount, ProspectConference, ReadyPffGrade } from "../ProspectRowMeta";
 import { focusSortValue } from "../../../lib/scouting/focusTag";
 import { rankSortValue } from "../../../lib/scouting/readyToChart";
+import { isUnrankInput } from "../../../lib/scouting/rankReorder";
 import { watchSortValue } from "../../../lib/scouting/watchRank";
 
 const QBChartingBoard  = dynamic(() => import("./QBChartingBoard"),   { ssr: false });
@@ -151,7 +152,7 @@ export default function QBHub({
       conference: newProspect.conference.trim(),
       draft_class_year: newProspect.draft_class_year,
       position: "QB",
-      personal_rank: newProspect.personal_rank !== "" ? Number(newProspect.personal_rank) : null,
+      personal_rank: newProspect.personal_rank !== "" && !isUnrankInput(String(newProspect.personal_rank)) ? Number(newProspect.personal_rank) : null,
       height: "", weight: null, birthday: null,
       should_play: "", will_play_pre: "", will_play_post: "",
       charting_decision: "pending",

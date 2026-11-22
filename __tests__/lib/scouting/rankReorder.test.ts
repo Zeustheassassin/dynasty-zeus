@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+  isUnrankInput,
   reorderRanks,
   reorderRanksWithinClass,
+  unrankUpdates,
   type RankItem,
   type ClassRankItem,
 } from "@/lib/scouting/rankReorder";
@@ -205,5 +207,58 @@ describe("reorderRanksWithinClass", () => {
   it("returns an empty diff for an unknown id", () => {
     const changes = reorderRanksWithinClass(twoClasses(), "nope", 1);
     expect(changes.size).toBe(0);
+  });
+});
+
+// 2026-11-21, the user: "if i change a rank to 0 it just removes him from the
+// rank. Got some guys who i havent watched yet with ranks on them".
+describe("isUnrankInput", () => {
+  it("is true for 0 only", () => {
+    expect(isUnrankInput("0")).toBe(true);
+    expect(isUnrankInput(" 0 ")).toBe(true);
+    expect(isUnrankInput("00")).toBe(true);
+    expect(isUnrankInput("")).toBe(false);
+    expect(isUnrankInput("  ")).toBe(false);
+    expect(isUnrankInput("1")).toBe(false);
+    expect(isUnrankInput("10")).toBe(false);
+    expect(isUnrankInput("abc")).toBe(false);
+  });
+});
+
+describe("unrankUpdates", () => {
+  const p = (id: string, position: string, draft_class_year: number, personal_rank: number | null, overall_rank: number | null = null) =>
+    ({ id, position, draft_class_year, personal_rank, overall_rank });
+  const BOARD = [
+    p("wr1", "WR", 2027, 1, 1),
+    p("rb1", "RB", 2027, 1, 2),
+    p("wr2", "WR", 2027, 2, 3),
+    p("wr3", "WR", 2027, 3, 4),
+    p("wr-28", "WR", 2028, 1, 1),
+    p("wr-none", "WR", 2027, null, null),
+  ];
+
+  it("position rank: he goes to null and only his position + class move up", () => {
+    expect(Object.fromEntries(unrankUpdates(BOARD, "wr2", "personal_rank"))).toEqual({
+      wr2: { personal_rank: null },
+      wr3: { personal_rank: 2 },
+    });
+  });
+
+  it("OVR: every position in his class moves up, other classes untouched", () => {
+    expect(Object.fromEntries(unrankUpdates(BOARD, "wr1", "overall_rank"))).toEqual({
+      wr1: { overall_rank: null },
+      rb1: { overall_rank: 1 },
+      wr2: { overall_rank: 2 },
+      wr3: { overall_rank: 3 },
+    });
+  });
+
+  it("the last one ranked: only his own rank goes", () => {
+    expect(Object.fromEntries(unrankUpdates(BOARD, "wr3", "personal_rank"))).toEqual({ wr3: { personal_rank: null } });
+  });
+
+  it("nothing when he isn't ranked there, or isn't on the list", () => {
+    expect(unrankUpdates(BOARD, "wr-none", "personal_rank").size).toBe(0);
+    expect(unrankUpdates(BOARD, "nobody", "overall_rank").size).toBe(0);
   });
 });

@@ -21,6 +21,9 @@
  * and compacts the rest.
  */
 
+import type { Prospect } from "../types";
+import type { RankField, RankUpdate } from "./realignRanks";
+
 export interface RankItem {
   id: string;
   /** Current personal rank, or null when unranked. */
@@ -113,4 +116,34 @@ export function reorderRanksWithinClass(
   if (!mover) return new Map();
   const sameClass = items.filter((it) => it.draftClass === mover.draftClass);
   return reorderRanks(sameClass, movedId, target);
+}
+
+// ── Typing 0 takes him off the ranks ──────────────────────────
+// The user (2026-11-21): "if i change a rank to 0 it just removes him from the
+// rank" (prospects ranked before he'd watched them). Every rank box reads 0
+// this way: the Big Board's POS / OVR cell, the Prospect Data sheet and the
+// charting board's Bio. A blank box keeps its own meaning there.
+
+/** A typed rank of 0: remove him from that rank. */
+export function isUnrankInput(raw: string): boolean {
+  const t = raw.trim();
+  return t !== "" && Number(t) === 0;
+}
+
+type LadderProspect = Pick<Prospect, "id" | "position" | "draft_class_year"> & Partial<Pick<Prospect, RankField>>;
+
+/**
+ * The writes that take `id` off a rank: his rank → null, and everyone below
+ * him on the same ladder moves up one (no gap). The ladder is his position and
+ * draft class for the position rank (personal_rank), his draft class for OVR.
+ * Only changed prospects; empty when he isn't ranked there.
+ */
+export function unrankUpdates(prospects: readonly LadderProspect[], id: string, field: RankField): Map<string, RankUpdate> {
+  const mover = prospects.find((p) => p.id === id);
+  if (!mover || mover[field] == null) return new Map();
+  const ladder = prospects
+    .filter((p) => field === "overall_rank" || p.position === mover.position)
+    .map((p) => ({ id: p.id, rank: p[field] ?? null, draftClass: p.draft_class_year }));
+  const changes = reorderRanksWithinClass(ladder, id, null);
+  return new Map([...changes].map(([pid, r]) => [pid, { [field]: r }]));
 }

@@ -5,6 +5,7 @@ import { logger } from "../../../../lib/logger";
 import { BASE_YEAR } from "../../../../lib/helpers/season";
 import type { Prospect, ScoutingGame } from "../../../../lib/types";
 import { preGradeIsMirrored } from "../../../../lib/scouting/preGradeMirror";
+import { unrankUpdates } from "../../../../lib/scouting/rankReorder";
 import { FORTY_WEIGHT_MAX, FORTY_WEIGHT_MIN } from "../../../../lib/scouting/speedFloor";
 import { useDeferredDataChanged } from "./useDeferredDataChanged";
 
@@ -155,6 +156,31 @@ export function useChartingState(prospect: Prospect, options: Options) {
     }
   }
 
+  // Blank or 0 in Personal Rank: off the position rank, and the rest of his
+  // position + class ladder moves up one (unrankUpdates), in one
+  // set_prospect_ranks call (migration 098). Null on success.
+  async function unrankOnServer(): Promise<string | null> {
+    const { data, error } = await supabase
+      .from("prospects")
+      .select("id, position, draft_class_year, personal_rank")
+      .eq("position", prospect.position)
+      .eq("draft_class_year", prospect.draft_class_year)
+      .not("personal_rank", "is", null);
+    if (error) {
+      log.error("rank ladder load failed", { err: error.message });
+      return "Couldn't remove his rank — please try again.";
+    }
+    const ladder = (data ?? []) as Pick<Prospect, "id" | "position" | "draft_class_year" | "personal_rank">[];
+    const updates = unrankUpdates(ladder, prospect.id, "personal_rank");
+    if (updates.size === 0) return null;
+    const { error: rpcErr } = await supabase.rpc("set_prospect_ranks", { p_ranks: Object.fromEntries(updates) });
+    if (rpcErr) {
+      log.error("unrank failed (needs migration 098)", { err: rpcErr.message, code: rpcErr.code });
+      return "Couldn't remove his rank — please try again.";
+    }
+    return null;
+  }
+
   async function saveBio() {
     setSavingBio(true);
     setGameError(null);
@@ -172,6 +198,22 @@ export function useChartingState(prospect: Prospect, options: Options) {
       return;
     }
     if (preGradeIsMirrored(prospect, new Date())) delete fields.pre_draft_grade;
+    // Blank or 0 = no rank. Taking a ranked prospect off goes first, on the
+    // class ladder he's ranked in now (before a class change below lands).
+    if ("personal_rank" in fields && !fields.personal_rank) {
+      if (prospect.personal_rank != null) {
+        const err = await unrankOnServer();
+        if (err) {
+          setSavingBio(false);
+          setGameError(err);
+          return;
+        }
+        delete fields.personal_rank; // written just above
+        markDataDirty();
+      } else {
+        fields.personal_rank = null;
+      }
+    }
     const { error } = await supabase
       .from("prospects")
       .update({ ...fields, updated_at: new Date().toISOString() })
