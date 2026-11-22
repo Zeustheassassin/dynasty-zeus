@@ -30,6 +30,8 @@ export interface TEHubProps {
   teBlockStatsByProspect: Map<string, Record<TEBlockKey, TEBlockStat>>;
   /** Charted games per prospect (the list's "6/8G"); null = unknown, logged only. */
   chartedGames: ReadonlyMap<string, number> | null;
+  /** Ready-to-chart prospects' PFF grades (lib/scouting/readyToChart.ts), for the Rank sort. */
+  readyGrades: ReadonlyMap<string, number | null> | null;
 }
 
 type HubView = "list" | "roster";
@@ -50,6 +52,7 @@ export default function TEHub({
   teCoverageStatsByProspect,
   teBlockStatsByProspect,
   chartedGames,
+  readyGrades,
 }: TEHubProps) {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   // The game his board opens on (Unwatched tab); null = the board's usual start.
@@ -112,6 +115,7 @@ export default function TEHub({
           prospects={teProspects}
           gameCountByProspect={gameCountByProspect}
           chartedGames={chartedGames}
+          readyGrades={readyGrades}
           coverageStatsByProspect={teCoverageStatsByProspect}
           blockStatsByProspect={teBlockStatsByProspect}
           loading={loading}

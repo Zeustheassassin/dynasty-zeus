@@ -16,8 +16,9 @@ import { lookupConference } from "../../../lib/scouting/schoolConferences";
 import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
 import RecruitStarBadge from "../RecruitStarBadge";
 import FocusTagChip from "../FocusTagChip";
-import { ChartedGamesCount, ProspectConference } from "../ProspectRowMeta";
+import { ChartedGamesCount, ProspectConference, ReadyPffGrade } from "../ProspectRowMeta";
 import { focusSortValue } from "../../../lib/scouting/focusTag";
+import { rankSortValue } from "../../../lib/scouting/readyToChart";
 import { watchSortValue } from "../../../lib/scouting/watchRank";
 
 const QBChartingBoard  = dynamic(() => import("./QBChartingBoard"),   { ssr: false });
@@ -48,6 +49,8 @@ export interface QBHubProps {
   qbDepthZoneStatsByProspect: Map<string, Record<QBZoneKey, QBDepthZoneStat>>;
   /** Charted games per prospect (the list's "6/8G"); null = unknown, logged only. */
   chartedGames: ReadonlyMap<string, number> | null;
+  /** Ready-to-chart prospects' PFF grades (lib/scouting/readyToChart.ts): the Rank sort puts them after the ranked ones. */
+  readyGrades: ReadonlyMap<string, number | null> | null;
 }
 
 type HubView = "list" | "roster";
@@ -67,6 +70,7 @@ export default function QBHub({
   games,
   qbDepthZoneStatsByProspect,
   chartedGames,
+  readyGrades,
 }: QBHubProps) {
   const { matchProspect } = useRecruitIndex();
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
@@ -102,7 +106,7 @@ export default function QBHub({
     const base = draftYearFilter ? qbProspects.filter((p) => p.draft_class_year === draftYearFilter) : qbProspects;
     return [...base].sort((a, b) => {
       let av: string | number = 0, bv: string | number = 0;
-      if (sortKey === "personal_rank") { av = a.personal_rank ?? 9999; bv = b.personal_rank ?? 9999; }
+      if (sortKey === "personal_rank") { av = rankSortValue(a, readyGrades); bv = rankSortValue(b, readyGrades); }
       else if (sortKey === "focus")    { av = focusSortValue(a); bv = focusSortValue(b); }
       else if (sortKey === "watch")    { av = watchSortValue(a); bv = watchSortValue(b); }
       else if (sortKey === "name")     { av = a.name ?? ""; bv = b.name ?? ""; }
@@ -111,7 +115,7 @@ export default function QBHub({
       const cmp = typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number);
       return sortDir === "asc" ? cmp : -cmp;
     });
-  }, [qbProspects, draftYearFilter, sortKey, sortDir]);
+  }, [qbProspects, draftYearFilter, sortKey, sortDir, readyGrades]);
 
   const draftYears = useMemo(
     () => [...new Set(qbProspects.map((p) => p.draft_class_year).filter(Boolean))].sort() as number[],
@@ -332,6 +336,7 @@ export default function QBHub({
                       className="text-blue-400"
                     />
                     {p.personal_rank && <span className="text-xs text-slate-500">#{p.personal_rank}</span>}
+                    <ReadyPffGrade id={p.id} position={p.position} ready={readyGrades} />
                     <span className="text-xs text-slate-700">{p.draft_class_year}</span>
                     <span className="text-slate-600 group-hover:text-slate-300 text-xs">›</span>
                     {confirmDeleteId === p.id ? (

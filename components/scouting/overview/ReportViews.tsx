@@ -9,6 +9,7 @@ import { teamLandingTotal } from "../../../lib/scouting/teamLanding";
 import { formatGrade } from "../../../lib/scouting/prospectGrade";
 import { roleFitTooltip, roleInfo, roleLabel } from "../../../lib/scouting/roleFit";
 import { poolRankText } from "../../../lib/scouting/roleStanding";
+import { PFF_GRADE } from "../../../lib/scouting/readyToChart";
 import { aeScoreMissingReason, dynastyScores, scorePieces, type AEKey } from "../../../lib/scouting/prospectScores";
 import type { OverviewPage } from "../../../lib/scouting/overviewStats";
 import { COLLEGE_ZONE_ACCURACY, COLLEGE_ZONE_SHARE, type QBFullSeasons } from "../../../lib/scouting/qbStyle";
@@ -34,12 +35,6 @@ const AE_TILES: Record<CompositePos, { key: AEKey; label: string; what: string }
     { key: "te_saer", label: "TE-SAER", what: "open % vs expected, routes" },
     { key: "te_saeb", label: "TE-SAEB", what: "block wins vs expected" },
   ],
-};
-const PFF_GRADE: Record<CompositePos, { key: string; label: string }> = {
-  WR: { key: "pff_gr_route", label: "PFF route grade" },
-  QB: { key: "pff_gr_pass", label: "PFF pass grade" },
-  RB: { key: "pff_gr_run", label: "PFF run grade" },
-  TE: { key: "pff_gr_off", label: "PFF offense grade" },
 };
 
 function anyChip(page: OverviewPage, ranks: Ranks, id: string): boolean {

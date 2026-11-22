@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import { ChartedGamesCount, ProspectConference } from "@/components/scouting/ProspectRowMeta";
+import { ChartedGamesCount, ProspectConference, ReadyPffGrade } from "@/components/scouting/ProspectRowMeta";
 
 // 2026-11-19: the Prospects lists show the conference after the school (Big Ten,
 // Big 12, Independents and FCS in red) and "6/8G" = charted / logged games. Both
@@ -65,5 +65,24 @@ describe("ProspectConference", () => {
   it("renders nothing when neither the prospect nor his school gives a conference", () => {
     const { container } = render(<ProspectConference conference="" school="Manual Check University" />);
     expect(container.firstChild).toBeNull();
+  });
+});
+
+// 2026-11-21: unranked prospects with logged games and none charted show their
+// PFF grade where the rank goes; the Rank sort orders them by it.
+describe("ReadyPffGrade", () => {
+  it("shows a ready prospect's PFF grade, named for his position", () => {
+    const { container } = render(<ReadyPffGrade id="a" position="RB" ready={new Map([["a", 74.06]])} />);
+    const el = container.firstElementChild as HTMLElement;
+    expect(el.textContent).toBe("PFF 74.1");
+    expect(el.title).toContain("PFF run grade over his logged games");
+  });
+
+  it("renders nothing for a prospect who isn't ready, has no grade yet, or when readiness is unknown", () => {
+    for (const ready of [new Map<string, number | null>([["b", 80]]), new Map<string, number | null>([["a", null]]), null]) {
+      const { container } = render(<ReadyPffGrade id="a" position="WR" ready={ready} />);
+      expect(container.firstChild).toBeNull();
+      cleanup();
+    }
   });
 });

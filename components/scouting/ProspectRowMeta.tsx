@@ -1,4 +1,6 @@
 import { displayConference, isRedConference } from "../../lib/scouting/schoolConferences";
+import { PFF_GRADE } from "../../lib/scouting/readyToChart";
+import type { CompositePos } from "../../lib/scouting/aeComposite";
 
 /**
  * A Prospects-list row's conference, after the school. Big Ten, Big 12,
@@ -33,6 +35,28 @@ export function ChartedGamesCount({ logged, charted, className = "" }: { logged:
     <span className={`text-xs whitespace-nowrap ${className}`} title={title}>
       {c != null && <span className={`hidden sm:inline ${c < logged ? "text-amber-400" : ""}`}>{c}/</span>}
       {logged}G
+    </span>
+  );
+}
+
+/**
+ * A ready prospect's PFF grade (lib/scouting/readyToChart.ts: unranked, games
+ * logged, none charted), where a ranked prospect's "#12" goes. The Rank sort
+ * orders the ready prospects by it. `ready` null / absent = not ready: renders
+ * nothing, as it does before a grade is imported.
+ */
+export function ReadyPffGrade({ id, position, ready }: {
+  id: string; position: string; ready: ReadonlyMap<string, number | null> | null;
+}) {
+  const grade = ready?.get(id);
+  const g = PFF_GRADE[position as CompositePos];
+  if (grade == null || !g) return null;
+  return (
+    <span
+      className="text-xs text-sky-400 whitespace-nowrap"
+      title={`${g.label} over his logged games (none charted yet). Unranked prospects with no charted games sort by it, after the ranked ones.`}
+    >
+      PFF {grade.toFixed(1)}
     </span>
   );
 }

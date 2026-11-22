@@ -7,8 +7,9 @@ import { lookupConference } from "../../../lib/scouting/schoolConferences";
 import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
 import RecruitStarBadge from "../RecruitStarBadge";
 import FocusTagChip from "../FocusTagChip";
-import { ChartedGamesCount, ProspectConference } from "../ProspectRowMeta";
+import { ChartedGamesCount, ProspectConference, ReadyPffGrade } from "../ProspectRowMeta";
 import { focusSortValue } from "../../../lib/scouting/focusTag";
+import { rankSortValue } from "../../../lib/scouting/readyToChart";
 import { watchSortValue } from "../../../lib/scouting/watchRank";
 
 type SortKey = "personal_rank" | "focus" | "watch" | "name" | "school" | "total_routes" | "draft_class_year";
@@ -34,6 +35,8 @@ interface Props {
   prospects: ProspectWithStats[];
   /** Charted games per prospect ("6/8G"); null = unknown, logged only. */
   chartedGames: ReadonlyMap<string, number> | null;
+  /** Ready-to-chart prospects' PFF grades: the Rank sort puts them after the ranked ones. */
+  readyGrades: ReadonlyMap<string, number | null> | null;
   loading: boolean;
   onSelectProspect: (p: Prospect) => void;
   onAddProspect: (data: Omit<Prospect, "id" | "user_id" | "created_at" | "updated_at">) => Promise<void>;
@@ -61,6 +64,7 @@ const DECISION_LABEL: Record<ChartingDecision, string> = {
 export default function ProspectList({
   prospects,
   chartedGames,
+  readyGrades,
   loading,
   onSelectProspect,
   onAddProspect,
@@ -96,7 +100,7 @@ export default function ProspectList({
       let vb: string | number = 0;
       if (sortKey === "name") { va = a.name; vb = b.name; }
       else if (sortKey === "school") { va = a.school; vb = b.school; }
-      else if (sortKey === "personal_rank") { va = a.personal_rank ?? 9999; vb = b.personal_rank ?? 9999; }
+      else if (sortKey === "personal_rank") { va = rankSortValue(a, readyGrades); vb = rankSortValue(b, readyGrades); }
       else if (sortKey === "focus") { va = focusSortValue(a); vb = focusSortValue(b); }
       else if (sortKey === "watch") { va = watchSortValue(a); vb = watchSortValue(b); }
       else if (sortKey === "total_routes") { va = a.total_routes; vb = b.total_routes; }
@@ -106,7 +110,7 @@ export default function ProspectList({
       return sortDir === "asc" ? va - (vb as number) : (vb as number) - va;
     });
     return list;
-  }, [prospects, draftYearFilter, sortKey, sortDir]);
+  }, [prospects, draftYearFilter, sortKey, sortDir, readyGrades]);
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -326,6 +330,7 @@ export default function ProspectList({
                 {p.personal_rank && (
                   <span className="text-xs text-slate-500">#{p.personal_rank}</span>
                 )}
+                <ReadyPffGrade id={p.id} position={p.position} ready={readyGrades} />
                 <span className="text-xs text-slate-700">{p.draft_class_year}</span>
                 <span className="text-slate-600 group-hover:text-slate-300 text-xs">›</span>
                 {confirmDeleteId === p.id ? (

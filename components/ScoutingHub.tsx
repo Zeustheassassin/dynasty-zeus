@@ -40,6 +40,7 @@ import type { DraftResultUpdate } from "../lib/nflDraft";
 import type { LandingSaved } from "../lib/scouting/teamLanding";
 import type { RankUpdate } from "../lib/scouting/realignRanks";
 import { chartedGamesByProspect, countUnwatched, tapeSourceSuggestions, unwatchedByProspect } from "../lib/scouting/unwatchedGames";
+import { readyToChart } from "../lib/scouting/readyToChart";
 
 const log = logger("ScoutingHub");
 
@@ -817,6 +818,12 @@ export default function ScoutingHub() {
     () => (unwatchedLoadFailed ? null : chartedGamesByProspect(games, gameSnapStatsRows)),
     [unwatchedLoadFailed, games, gameSnapStatsRows],
   );
+  // Unranked prospects with logged games and none charted → their PFF grade:
+  // the Prospects lists' Rank sort puts them after the ranked ones, best first.
+  const readyGrades = useMemo(
+    () => readyToChart(prospects, games, chartedGames, pffTotals),
+    [prospects, games, chartedGames, pffTotals],
+  );
   const classYears = useMemo(
     () => [...new Set(prospects.map((p) => p.draft_class_year))].sort((a, b) => a - b),
     [prospects],
@@ -920,6 +927,8 @@ export default function ScoutingHub() {
     teBlockStatsByProspect,
     // Charted games per prospect, for the Prospects lists' "6/8G".
     chartedGames,
+    // Ready-to-chart prospects' PFF grades, for the lists' Rank sort.
+    readyGrades,
   };
 
   return (
