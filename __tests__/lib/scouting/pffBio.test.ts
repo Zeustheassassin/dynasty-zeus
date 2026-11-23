@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { bioChanges, bioPatches, heightText, pffHeightInches, readPffBio, type BioRow } from "@/lib/scouting/pffBio";
+import { bioChanges, bioPatches, heightText, jerseyNumber, pffHeightInches, readPffBio, type BioRow } from "@/lib/scouting/pffBio";
 
 const row = (current: Partial<BioRow["current"]>, pff: Partial<BioRow["pff"]>, id = "p1"): BioRow => ({
   prospectId: id,
   name: `Name ${id}`,
-  current: { height: "", weight: null, birthday: null, eligibleThru: null, ...current },
-  pff: { heightIn: null, weight: null, dob: null, eligibleThru: null, ...pff },
+  current: { height: "", weight: null, birthday: null, eligibleThru: null, jersey: null, ...current },
+  pff: { heightIn: null, weight: null, dob: null, eligibleThru: null, jersey: null, ...pff },
 });
 
 describe("pffHeightInches", () => {
@@ -29,15 +29,34 @@ describe("pffHeightInches", () => {
   });
 });
 
+describe("jerseyNumber", () => {
+  it("keeps one or two digits, as text", () => {
+    expect(jerseyNumber("26")).toBe("26");
+    expect(jerseyNumber(" 7 ")).toBe("7");
+    expect(jerseyNumber(26)).toBe("26");
+    expect(jerseyNumber("0")).toBe("0");
+    expect(jerseyNumber("00")).toBe("00");
+  });
+  it("drops blanks and anything that isn't a jersey number", () => {
+    expect(jerseyNumber(null)).toBeNull();
+    expect(jerseyNumber(undefined)).toBeNull();
+    expect(jerseyNumber("")).toBeNull();
+    expect(jerseyNumber("100")).toBeNull();
+    expect(jerseyNumber("#26")).toBeNull();
+    expect(jerseyNumber(-1)).toBeNull();
+  });
+});
+
 describe("readPffBio", () => {
   it("keeps plausible values", () => {
-    expect(readPffBio({ height: 603, weight: 215, dob: "2005-04-26", current_eligible_year: 2028 })).toEqual({ heightIn: 75, weight: 215, dob: "2005-04-26", eligibleThru: 2028 });
+    expect(readPffBio({ height: 603, weight: 215, dob: "2005-04-26", current_eligible_year: 2028, jersey_number: "26" }))
+      .toEqual({ heightIn: 75, weight: 215, dob: "2005-04-26", eligibleThru: 2028, jersey: "26" });
   });
   it("trims a timestamp birthday to the date", () => {
     expect(readPffBio({ height: null, weight: null, dob: "2005-04-26T00:00:00Z" }).dob).toBe("2005-04-26");
   });
   it("drops implausible weights and unreadable birthdays", () => {
-    expect(readPffBio({ height: null, weight: 0, dob: "unknown" })).toEqual({ heightIn: null, weight: null, dob: null, eligibleThru: null });
+    expect(readPffBio({ height: null, weight: 0, dob: "unknown" })).toEqual({ heightIn: null, weight: null, dob: null, eligibleThru: null, jersey: null });
     expect(readPffBio({ height: null, weight: null, dob: null, current_eligible_year: 0 }).eligibleThru).toBeNull();
     expect(readPffBio({ height: null, weight: null, dob: null, current_eligible_year: null }).eligibleThru).toBeNull();
     expect(readPffBio({ height: null, weight: 900, dob: "2005-13-45" }).weight).toBeNull();
@@ -95,6 +114,17 @@ describe("bioChanges", () => {
     expect(bioChanges([row({ eligibleThru: 2028 }, { eligibleThru: null })])).toEqual([]);
   });
 
+  it("fills the jersey from PFF and PFF's number wins, ticked", () => {
+    expect(bioChanges([row({}, { jersey: "26" })])).toEqual([
+      expect.objectContaining({ key: "p1:jersey_number", field: "jersey_number", from: null, to: "26", kind: "fill", on: true }),
+    ]);
+    expect(bioChanges([row({ jersey: "6" }, { jersey: "26" })])).toEqual([
+      expect.objectContaining({ field: "jersey_number", from: "6", to: "26", kind: "update", on: true }),
+    ]);
+    expect(bioChanges([row({ jersey: "26" }, { jersey: "26" })])).toEqual([]);
+    expect(bioChanges([row({ jersey: "26" }, { jersey: null })])).toEqual([]);
+  });
+
   it("skips fields that already match", () => {
     expect(bioChanges([row({ height: `6'0"`, weight: 200, birthday: "2005-01-02" }, { heightIn: 72, weight: 200, dob: "2005-01-02" })])).toEqual([]);
   });
@@ -104,11 +134,11 @@ describe("bioPatches", () => {
   it("groups the chosen fields into one update per prospect", () => {
     const changes = bioChanges([
       row({ height: `6'3"`, weight: 215 }, { heightIn: 76, weight: 220 }, "a"),
-      row({}, { dob: "2005-01-02", eligibleThru: 2029 }, "b"),
+      row({}, { dob: "2005-01-02", eligibleThru: 2029, jersey: "4" }, "b"),
     ]);
     expect([...bioPatches(changes)]).toEqual([
       ["a", { height: `6'4"`, weight: 220 }],
-      ["b", { birthday: "2005-01-02", eligible_thru_year: 2029 }],
+      ["b", { birthday: "2005-01-02", eligible_thru_year: 2029, jersey_number: "4" }],
     ]);
   });
 });

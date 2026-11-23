@@ -31,6 +31,8 @@ export interface PffPlayer {
   weight: number | null;
   current_class: string | null;
   current_eligible_year: number | null;
+  /** His number now, as a string ("26"; checked 2026-11-23). Per-game rows carry their own. */
+  jersey_number?: string | null;
   /** His CURRENT team. */
   team: PffTeamRef | null;
 }

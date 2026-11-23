@@ -1,10 +1,11 @@
 // POST /api/pff/bio  { prospectIds: string[] }  (Authorization: Bearer <access token>)
 //
-// PFF's height, weight, birthday and eligible-thru year (the last draft he
-// can enter) for a few of the caller's prospects, next to what they have on
-// file, for the Roster sheet's "Fill from PFF" review (lib/scouting/pffBio.ts
-// decides the changes; the sheet saves the ones the user keeps, under their
-// own RLS). Read-only: nothing is written here. Needs migration 071.
+// PFF's height, weight, birthday, eligible-thru year (the last draft he can
+// enter) and jersey number for a few of the caller's prospects, next to what
+// they have on file, for the Roster sheet's "Fill from PFF" review
+// (lib/scouting/pffBio.ts decides the changes; the sheet saves the ones the
+// user keeps, under their own RLS). Read-only: nothing is written here.
+// Needs migrations 071 and 104.
 // One PFF read per prospect with a sure link (auto or confirmed); the rest
 // cost nothing and come back with why. PFF's per-minute budget is paced in
 // the client; when it runs out, the rest of the batch comes back "Not
@@ -31,7 +32,8 @@ const TIME_BUDGET_MS = 230_000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NOT_REACHED = "Not reached this batch; run again";
 
-const MIGRATION_HINT = "Apply migration 071 (supabase/migrations/071_prospect_eligible_thru.sql) first.";
+const MIGRATION_HINT =
+  "Apply migrations 071 (supabase/migrations/071_prospect_eligible_thru.sql) and 104 (supabase/migrations/104_prospect_jersey_number.sql) first.";
 
 const UNLINKED_NOTE: Record<string, string> = {
   review: "His PFF match is waiting on you in PFF Links",
@@ -46,6 +48,7 @@ interface ProspectRow {
   weight: number | null;
   birthday: string | null;
   eligible_thru_year: number | null;
+  jersey_number: string | null;
   pff_player_id: number | null;
   pff_match_status: PffPlayerMatchStatus | null;
 }
@@ -69,7 +72,7 @@ export async function POST(req: NextRequest) {
 
   // The caller's own rows only (RLS); ids that aren't theirs just don't come back.
   const { data, error } = await supabase.from("prospects")
-    .select("id,name,height,weight,birthday,eligible_thru_year,pff_player_id,pff_match_status")
+    .select("id,name,height,weight,birthday,eligible_thru_year,jersey_number,pff_player_id,pff_match_status")
     .in("id", ids);
   if (error) {
     log.error("load failed", { err: error.message, code: error.code });
@@ -84,7 +87,10 @@ export async function POST(req: NextRequest) {
     const base = {
       prospectId: p.id,
       name: p.name,
-      current: { height: p.height ?? "", weight: p.weight, birthday: p.birthday, eligibleThru: p.eligible_thru_year },
+      current: {
+        height: p.height ?? "", weight: p.weight, birthday: p.birthday,
+        eligibleThru: p.eligible_thru_year, jersey: p.jersey_number ?? null,
+      },
       pff: null,
     };
     const status = p.pff_match_status ?? "";

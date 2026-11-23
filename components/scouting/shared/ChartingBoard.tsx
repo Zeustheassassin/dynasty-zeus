@@ -73,6 +73,18 @@ export interface ChartingBoardProps {
   renderGamesTable: () => React.ReactNode;
 }
 
+/**
+ * An Edit Bio box's text → what saves: numbers as numbers, a jersey as its
+ * first two digits (migration 104's CHECK), name and school as typed, any
+ * other blank as null.
+ */
+function bioInputValue(key: string, type: string, raw: string): string | number | null {
+  if (type === "number") return raw ? Number(raw) : null;
+  if (key === "name" || key === "school") return raw;
+  if (key === "jersey_number") return raw.replace(/\D/g, "").slice(0, 2) || null;
+  return raw || null;
+}
+
 /** Remembers whether the Chart Game tab's games list is collapsed (for split-screen charting). */
 const GAMES_COLLAPSED_KEY = "chartingGamesCollapsed";
 
@@ -207,7 +219,11 @@ export default function ChartingBoard({
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-xl font-bold text-white truncate">{prospect.name}</h2>
+            <h2 className="text-xl font-bold text-white truncate">
+              {prospect.name}
+              {/* His number now (migration 104; Fill from PFF or Edit Bio). */}
+              {prospect.jersey_number && <span className="text-slate-400"> #{prospect.jersey_number}</span>}
+            </h2>
             {(prospect.pre_draft_grade != null || prospect.post_draft_grade != null) && (
               <span className="px-2 py-0.5 bg-slate-800 border border-slate-700 rounded text-xs font-semibold">
                 <span className="text-slate-500 font-normal">Pre </span>
@@ -248,6 +264,7 @@ export default function ChartingBoard({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
             {([
               { label: "Name",          key: "name" as const,          type: "text",   placeholder: "First Last" },
+              { label: "Jersey #",      key: "jersey_number" as const, type: "text",   placeholder: "26" },
               { label: "School",        key: "school" as const,        type: "text",   placeholder: "Alabama" },
               { label: "Height",        key: "height" as const,        type: "text",   placeholder: '6\'4"' },
               { label: "Weight (lbs)",  key: "weight" as const,        type: "number", placeholder: "220" },
@@ -257,9 +274,10 @@ export default function ChartingBoard({
               <div key={f.key}>
                 <label className="block text-xs text-slate-500 mb-1">{f.label}</label>
                 <input type={f.type} placeholder={f.placeholder}
+                  inputMode={f.key === "jersey_number" ? "numeric" : undefined}
                   className={`w-full px-2 py-1.5 bg-slate-800 border border-slate-700 rounded text-white text-sm focus:outline-none ${a.focusBorder}`}
                   value={(bio[f.key] as string | number | null | undefined) ?? ""}
-                  onChange={(e) => onBioChange({ [f.key]: f.type === "number" ? (e.target.value ? Number(e.target.value) : null) : (f.key === "school" || f.key === "name" ? e.target.value : (e.target.value || null)) })}
+                  onChange={(e) => onBioChange({ [f.key]: bioInputValue(f.key, f.type, e.target.value) })}
                 />
               </div>
             ))}

@@ -1143,6 +1143,10 @@ export interface Prospect {
    *  071; Fill from PFF). Optional: absent before the migration, and never sent
    *  on insert. Null = unknown. */
   eligible_thru_year?: number | null;
+  /** The number he wears now, one or two digits as text (migration 104; Fill
+   *  from PFF or Edit Bio), shown after his name on the charting boards.
+   *  Optional: absent before the migration, and never sent on insert. */
+  jersey_number?: string | null;
   height: string;
   weight: number | null;
   /** 40-yard dash in seconds, where he ran it, and what he weighed in at

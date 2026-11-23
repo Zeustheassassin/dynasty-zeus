@@ -58,7 +58,7 @@ export interface QbPocketResponse {
 /** Prospects per POST /api/pff/bio; one PFF read per linked prospect. */
 export const PFF_BIO_BATCH = 20;
 
-/** Height, weight, birthday and eligible-thru year as the prospect has them now. */
+/** Height, weight, birthday, eligible-thru year and jersey number as the prospect has them now. */
 export interface BioOnFile {
   /** As typed ("6'2\""); "" when blank. */
   height: string;
@@ -67,6 +67,8 @@ export interface BioOnFile {
   birthday: string | null;
   /** Last draft he can enter (migration 071); null when blank. */
   eligibleThru: number | null;
+  /** His number now (migration 104), e.g. "26"; null when blank. */
+  jersey: string | null;
 }
 
 /** PFF's directory numbers for him, each null when PFF leaves it blank. */
@@ -77,6 +79,8 @@ export interface PffBio {
   dob: string | null;
   /** PFF's current_eligible_year: the year his college eligibility runs out. */
   eligibleThru: number | null;
+  /** PFF's jersey_number: the number he wears now. */
+  jersey: string | null;
 }
 
 export interface PffBioResult {

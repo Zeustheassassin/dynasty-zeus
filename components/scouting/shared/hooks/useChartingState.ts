@@ -67,6 +67,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
     loadGames();
     setBio({
       name: prospect.name,
+      jersey_number: prospect.jersey_number ?? null,
       school: prospect.school,
       height: prospect.height, weight: prospect.weight, birthday: prospect.birthday,
       forty_time: prospect.forty_time ?? null, forty_source: prospect.forty_source ?? null, forty_weight: prospect.forty_weight ?? null,
@@ -77,7 +78,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
       draft_round: prospect.draft_round, draft_pick: prospect.draft_pick, draft_team: prospect.draft_team,
       pre_draft_grade: prospect.pre_draft_grade, post_draft_grade: prospect.post_draft_grade,
     });
-  }, [loadGames, prospect.id, prospect.name, prospect.school, prospect.height, prospect.weight, prospect.birthday,
+  }, [loadGames, prospect.id, prospect.name, prospect.jersey_number, prospect.school, prospect.height, prospect.weight, prospect.birthday,
     prospect.forty_time, prospect.forty_source, prospect.forty_weight,
     prospect.draft_class_year, prospect.personal_rank,
     prospect.should_play, prospect.will_play_pre, prospect.will_play_post,
@@ -198,6 +199,9 @@ export function useChartingState(prospect: Prospect, options: Options) {
       return;
     }
     if (preGradeIsMirrored(prospect)) delete fields.pre_draft_grade;
+    // The jersey (migration 104) goes only when it changed, so a database
+    // without 104 can't fail an unrelated bio save.
+    if ((fields.jersey_number ?? null) === (prospect.jersey_number ?? null)) delete fields.jersey_number;
     // Blank or 0 = no rank. Taking a ranked prospect off goes first, on the
     // class ladder he's ranked in now (before a class change below lands).
     if ("personal_rank" in fields && !fields.personal_rank) {

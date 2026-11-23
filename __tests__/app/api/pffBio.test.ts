@@ -23,7 +23,7 @@ const ID = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
 
 const prospect = (n: number, extra: Record<string, unknown>) => ({
   id: ID(n), name: `Player ${n}`, height: `6'1"`, weight: 200, birthday: null, eligible_thru_year: 2027,
-  pff_player_id: null, pff_match_status: null, ...extra,
+  jersey_number: null, pff_player_id: null, pff_match_status: null, ...extra,
 });
 
 let rows: Record<string, unknown>[] = [];
@@ -68,7 +68,7 @@ describe("POST /api/pff/bio", () => {
       prospect(3, {}),
       prospect(4, { pff_match_status: "none" }),
     ];
-    const get = vi.fn(async () => ({ players: [{ id: 11, height: 603, weight: 214, dob: null, current_eligible_year: 2028 }] }));
+    const get = vi.fn(async () => ({ players: [{ id: 11, height: 603, weight: 214, dob: null, current_eligible_year: 2028, jersey_number: "26" }] }));
     h.getPffClient.mockReturnValue({ get });
 
     const res = await post([ID(1), ID(2), ID(3), ID(4)]);
@@ -81,8 +81,8 @@ describe("POST /api/pff/bio", () => {
     expect(body.retryAfterMs).toBeNull();
     expect(body.results[0]).toEqual({
       prospectId: ID(1), name: "Player 1",
-      current: { height: `6'1"`, weight: 200, birthday: null, eligibleThru: 2027 },
-      pff: { heightIn: 75, weight: 214, dob: null, eligibleThru: 2028 },
+      current: { height: `6'1"`, weight: 200, birthday: null, eligibleThru: 2027, jersey: null },
+      pff: { heightIn: 75, weight: 214, dob: null, eligibleThru: 2028, jersey: "26" },
     });
     expect(body.results.slice(1).map((r) => [r.pff, r.note])).toEqual([
       [null, "His PFF match is waiting on you in PFF Links"],
@@ -121,13 +121,15 @@ describe("POST /api/pff/bio", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
-  it("says to apply migration 071 when the column is missing", async () => {
-    loadError = { message: "column prospects.eligible_thru_year does not exist", code: "42703" };
+  it("says to apply migrations 071 and 104 when a column is missing", async () => {
+    loadError = { message: "column prospects.jersey_number does not exist", code: "42703" };
     const get = vi.fn();
     h.getPffClient.mockReturnValue({ get });
     const res = await post([ID(1)]);
     expect(res.status).toBe(500);
-    expect(JSON.stringify(await res.json())).toContain("071");
+    const text = JSON.stringify(await res.json());
+    expect(text).toContain("071");
+    expect(text).toContain("104");
     expect(get).not.toHaveBeenCalled();
   });
 

@@ -11,6 +11,8 @@
 // birthday, but one PFF disagrees with is only offered, unticked.
 // Eligible thru (2026-10-13): PFF's current_eligible_year, the last draft he
 // can enter (his eligibility runs out), not the first; PFF's wins.
+// Jersey (2026-11-23, migration 104): PFF's jersey_number, the number he
+// wears now (shown after his name on the charting boards); PFF's wins.
 // Client-safe: pure functions, no PFF client.
 // ============================================================
 
@@ -29,12 +31,20 @@ export function pffHeightInches(raw: number | null | undefined): number | null {
 /** Inches → the sheet's text format, 6'2". */
 export const heightText = (inches: number): string => `${Math.floor(inches / 12)}'${inches % 12}"`;
 
+/** A jersey number as one or two digits (migration 104's CHECK), else null. "26", 26 and " 26 " → "26". */
+export function jerseyNumber(raw: string | number | null | undefined): string | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  return /^\d{1,2}$/.test(s) ? s : null;
+}
+
 /** One PFF directory row → the numbers worth saving (implausible values dropped). */
 export function readPffBio(p: {
   height: number | null;
   weight: number | null;
   dob: string | null;
   current_eligible_year?: number | null;
+  jersey_number?: string | number | null;
 }): PffBio {
   const weight = p.weight != null && Number.isInteger(p.weight) && p.weight >= 120 && p.weight <= 400 ? p.weight : null;
   const day = p.dob?.slice(0, 10) ?? "";
@@ -45,11 +55,12 @@ export function readPffBio(p: {
     dob: /^\d{4}-\d{2}-\d{2}$/.test(day) && !Number.isNaN(Date.parse(day)) ? day : null,
     // Same range as migration 071's CHECK.
     eligibleThru: thru != null && Number.isInteger(thru) && thru >= 2000 && thru <= 2100 ? thru : null,
+    jersey: jerseyNumber(p.jersey_number),
   };
 }
 
 /** Each field is its prospects column, so a change saves as `{ [field]: to }`. */
-export type BioField = "height" | "weight" | "birthday" | "eligible_thru_year";
+export type BioField = "height" | "weight" | "birthday" | "eligible_thru_year" | "jersey_number";
 
 export interface BioChange {
   /** `${prospectId}:${field}` */
@@ -59,7 +70,7 @@ export interface BioChange {
   field: BioField;
   /** As on file now: "" or null when blank. */
   from: string | number | null;
-  /** What gets saved: height text, pounds, YYYY-MM-DD, or a draft year. */
+  /** What gets saved: height text, pounds, YYYY-MM-DD, a draft year, or a jersey number ("26"). */
   to: string | number;
   /** fill: his field is blank. update: PFF's differs. differs: a birthday PFF disagrees on. */
   kind: "fill" | "update" | "differs";
@@ -74,14 +85,14 @@ export interface BioRow {
   pff: PffBio;
 }
 
-/** Every field PFF would change, in prospect order then height, weight, birthday, eligible thru. */
+/** Every field PFF would change, in prospect order then height, weight, birthday, eligible thru, jersey. */
 export function bioChanges(rows: readonly BioRow[]): BioChange[] {
   const out: BioChange[] = [];
   for (const r of rows) {
     const add = (field: BioField, from: string | number | null, to: string | number, kind: BioChange["kind"]) =>
       out.push({ key: `${r.prospectId}:${field}`, prospectId: r.prospectId, name: r.name, field, from, to, kind, on: kind !== "differs" });
 
-    const { heightIn, weight, dob, eligibleThru } = r.pff;
+    const { heightIn, weight, dob, eligibleThru, jersey } = r.pff;
     if (heightIn != null && parseHeightInches(r.current.height) !== heightIn) {
       add("height", r.current.height, heightText(heightIn), r.current.height.trim() === "" ? "fill" : "update");
     }
@@ -94,6 +105,10 @@ export function bioChanges(rows: readonly BioRow[]): BioChange[] {
     // PFF is the only source for this one, so its year wins like height and weight.
     if (eligibleThru != null && r.current.eligibleThru !== eligibleThru) {
       add("eligible_thru_year", r.current.eligibleThru, eligibleThru, r.current.eligibleThru == null ? "fill" : "update");
+    }
+    // His number now: a transfer or a switch shows up as an update, PFF's wins.
+    if (jersey != null && r.current.jersey !== jersey) {
+      add("jersey_number", r.current.jersey, jersey, r.current.jersey == null ? "fill" : "update");
     }
   }
   return out;
