@@ -806,13 +806,13 @@ describe("BigBoard RB baseline", () => {
   const POOL = AES.map((_, i) => prospect(`pr${i}`, `Pool RB ${i}`, "RB", 40 + i));
   afterEach(() => { AES.forEach((_, i) => { delete TABLES.rb[`pr${i}`]; }); });
 
-  it("sets every RB 0.2 lower and says so", () => {
+  it("sets every RB 0.1 lower and says so", () => {
     AES.forEach((ae, i) => { TABLES.rb[`pr${i}`] = ae; });
     renderBoard([...PROSPECTS, ...POOL]);
     const score = cell("Running One", "AE Score")!;
     const title = within(rowFor("Running One")).getAllByRole("cell")[headerLabels().indexOf("AE Score")].getAttribute("title")!;
     expect(title.split("\n")[0]).toBe(`${score} true-talent SDs vs the average charted RB, after the RB baseline`);
-    expect(title).toContain("RB baseline: every RB sits 0.2 lower → -0.20");
+    expect(title).toContain("RB baseline: every RB sits 0.1 lower → -0.10");
     expect(title).toContain("taken as real (full at 160 runs)");
   });
 });
@@ -1054,7 +1054,7 @@ describe("BigBoard Pre grade mirrors the Dynasty Score", () => {
   });
   afterEach(() => { vi.useRealTimers(); });
 
-  it("shows the Dynasty Score on the curve, read only, while the class is still to be drafted", () => {
+  it("shows the Dynasty Score on the curve, read only", () => {
     renderBoard(BOARD);
     const dyn = Number(cell("Quarter One", "Dynasty"));
     const pre = Number(cell("Quarter One", "Pre"));
@@ -1065,14 +1065,24 @@ describe("BigBoard Pre grade mirrors the Dynasty Score", () => {
     expect(screen.queryByRole("textbox", { name: /Pre-draft grade for Quarter One/ })).toBeNull();
   });
 
-  it("keeps the typed grade, editable, without a Dynasty Score or in a drafted class", () => {
-    const board = BOARD.map((p) => (p.id === "pq3" ? { ...p, draft_class_year: 2026, pre_draft_grade: 77.7 } : p));
+  it("keeps the typed grade, editable, without a Dynasty Score", () => {
+    const board = BOARD.map((p) => (p.id === "rb1" ? { ...p, pre_draft_grade: 77.7 } : p));
     renderBoard(board);
     expect(cell("Running One", "Dynasty")).toBe("—");
-    expect(cell("Running One", "Pre")).toBe("—");
-    expect(cell("Pool QB 3", "Pre")).toBe("77.7");
-    fireEvent.click(within(preCell("Pool QB 3")).getByText("77.7"));
-    expect(screen.getByRole("textbox", { name: /Pre-draft grade for Pool QB 3/ })).toBeTruthy();
+    expect(cell("Running One", "Pre")).toBe("77.7");
+    fireEvent.click(within(preCell("Running One")).getByText("77.7"));
+    expect(screen.getByRole("textbox", { name: /Pre-draft grade for Running One/ })).toBeTruthy();
+  });
+
+  it("mirrors in a drafted class too (the user, 2026-11-22)", () => {
+    const board = BOARD.map((p) => (p.id === "pq3" ? { ...p, draft_class_year: 2026, pre_draft_grade: 77.7 } : p));
+    renderBoard(board);
+    const dyn = Number(cell("Pool QB 3", "Dynasty"));
+    const pre = Number(cell("Pool QB 3", "Pre"));
+    expect(pre).not.toBe(77.7);
+    expect(Math.abs(pre - gradeFromDynasty(dyn))).toBeLessThanOrEqual(0.2);
+    fireEvent.click(preCell("Pool QB 3"));
+    expect(screen.queryByRole("textbox", { name: /Pre-draft grade for Pool QB 3/ })).toBeNull();
   });
 
   it("sorts by the grade it shows", () => {

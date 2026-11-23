@@ -1,26 +1,21 @@
 // The pre-draft grade mirrors the Dynasty Score (the user's call, 2026-11-12)
-// on the curve in prospectGrade.ts (gradeFromDynasty), while the prospect's
-// class is still to be drafted.
+// on the curve in prospectGrade.ts (gradeFromDynasty), in every class.
 //
 // The Big Board computes it from the live Dynasty Score and writes it to
 // prospects.pre_draft_grade (migration 098), so every surface that reads the
 // column (the prospect report, the charting header and Bio panel) shows the
-// same grade. Once the class is drafted (scoreLock.ts classDraftedBy, May 1 of
-// the draft year) the writes stop and the grade stays as it stood: the
-// pre-draft record. A prospect without a Dynasty Score (no AE Score yet) keeps
-// the grade typed by hand, and so does every drafted class.
+// same grade. Drafted classes mirror too (the user, 2026-11-22: "adjust the
+// Preranking to do it based on the Dynasty Score like the 2027 class and
+// beyond … for all the 2026 players"); until then a drafted class kept the
+// grade typed before its draft. A prospect without a Dynasty Score (no AE
+// Score yet) keeps the grade typed by hand.
 
 import type { Prospect } from "../types";
 import { gradeFromDynasty } from "./prospectGrade";
-import { classDraftedBy } from "./scoreLock";
 
-/** The grade his Dynasty Score maps to, or null when the Pre grade doesn't mirror it (no Dynasty, or a drafted class). */
-export function mirroredPreGrade(
-  p: { draft_class_year: number },
-  dynasty: number | null | undefined,
-  now: Date,
-): number | null {
-  if (dynasty == null || !Number.isFinite(dynasty) || classDraftedBy(p.draft_class_year, now)) return null;
+/** The grade his Dynasty Score maps to, or null without one (his typed grade stands). */
+export function mirroredPreGrade(dynasty: number | null | undefined): number | null {
+  if (dynasty == null || !Number.isFinite(dynasty)) return null;
   return gradeFromDynasty(dynasty);
 }
 
@@ -29,11 +24,8 @@ export function mirroredPreGrade(
  * the Dynasty Score the board last saved (board_scores), so a form doesn't
  * offer to type over it.
  */
-export function preGradeIsMirrored(
-  p: Pick<Prospect, "draft_class_year" | "board_scores">,
-  now: Date,
-): boolean {
-  return mirroredPreGrade(p, p.board_scores?.dynasty, now) != null;
+export function preGradeIsMirrored(p: Pick<Prospect, "board_scores">): boolean {
+  return mirroredPreGrade(p.board_scores?.dynasty) != null;
 }
 
 /**

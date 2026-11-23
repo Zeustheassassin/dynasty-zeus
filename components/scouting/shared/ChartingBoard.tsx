@@ -322,13 +322,13 @@ export default function ChartingBoard({
           </div>
           {/* Scout grades — 1.0–100.0, one decimal (e.g. 88.6). Blank = ungraded. */}
           <div className="grid grid-cols-2 gap-3 mb-3">
-            {preGradeIsMirrored(prospect, new Date()) ? (
-              // Mirrors the Dynasty Score until the class is drafted (the Big
-              // Board writes it): shown, not typed over.
+            {preGradeIsMirrored(prospect) ? (
+              // Mirrors the Dynasty Score (the Big Board writes it): shown,
+              // not typed over.
               <div>
                 <span className="block text-xs text-slate-500 mb-1">Pre-Draft Grade</span>
                 <div className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 rounded text-sm"
-                  title={`Mirrors the Dynasty Score on a curve (${dynastyGradeCurveText()}) until the class is drafted; the Big Board keeps it up to date`}>
+                  title={`Mirrors the Dynasty Score on a curve (${dynastyGradeCurveText()}); the Big Board keeps it up to date`}>
                   <span className={`font-semibold ${gradeColor(prospect.pre_draft_grade)}`}>{formatGrade(prospect.pre_draft_grade)}</span>
                   <span className="text-xs text-slate-500"> · mirrors Dynasty</span>
                 </div>

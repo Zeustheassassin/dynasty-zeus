@@ -197,7 +197,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
       setGameError(`Weighed must be ${FORTY_WEIGHT_MIN}–${FORTY_WEIGHT_MAX} lbs, or blank for his bio weight.`);
       return;
     }
-    if (preGradeIsMirrored(prospect, new Date())) delete fields.pre_draft_grade;
+    if (preGradeIsMirrored(prospect)) delete fields.pre_draft_grade;
     // Blank or 0 = no rank. Taking a ranked prospect off goes first, on the
     // class ladder he's ranked in now (before a class change below lands).
     if ("personal_rank" in fields && !fields.personal_rank) {

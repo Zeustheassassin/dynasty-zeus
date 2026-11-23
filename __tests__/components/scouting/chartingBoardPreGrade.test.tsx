@@ -5,10 +5,10 @@ import ChartingBoard, { type ChartingBoardProps } from "@/components/scouting/sh
 import type { OverviewData } from "@/components/scouting/overview/ProspectOverview";
 import type { BoardScores, Prospect } from "@/lib/types";
 
-// Nov 12 2026: the Pre grade mirrors the Dynasty Score until the class is
-// drafted, and the Big Board writes it. The Bio panel shows it instead of
-// offering to type over it; a drafted class, or a prospect without a Dynasty
-// Score, keeps the input.
+// Nov 12 2026: the Pre grade mirrors the Dynasty Score, and the Big Board
+// writes it (drafted classes too from Nov 22). The Bio panel shows it instead
+// of offering to type over it; a prospect without a Dynasty Score keeps the
+// input.
 
 vi.mock("@/components/scouting/overview/ProspectOverview", () => ({ default: () => null }));
 vi.mock("@/components/scouting/overview/ProspectScorePieces", () => ({ default: () => null }));
@@ -48,11 +48,14 @@ describe("Bio panel Pre-Draft Grade", () => {
     expect(screen.getByRole("textbox", { name: /^Post-Draft Grade/ })).toBeTruthy();
   });
 
-  it("keeps the input without a Dynasty Score, or once the class is drafted", () => {
+  it("keeps the input without a Dynasty Score", () => {
     render(<ChartingBoard {...props({ pre_draft_grade: 70, board_scores: scores(null) })} />);
     expect(screen.getByRole("textbox", { name: /^Pre-Draft Grade/ })).toBeTruthy();
-    cleanup();
+  });
+
+  it("mirrors in a drafted class too", () => {
     render(<ChartingBoard {...props({ draft_class_year: 2026, pre_draft_grade: 70, board_scores: scores(1) })} />);
-    expect(screen.getByRole("textbox", { name: /^Pre-Draft Grade/ })).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: /^Pre-Draft Grade/ })).toBeNull();
+    expect(screen.getByText("· mirrors Dynasty")).toBeTruthy();
   });
 });

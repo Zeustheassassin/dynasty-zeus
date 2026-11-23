@@ -498,14 +498,13 @@ export default function BigBoard({
   }, [canSaveScores, prospects, boardScores, onSaveBoardScores]);
   useEffect(() => () => flushScoresRef.current(), []);
 
-  // The Pre grade mirrors the live Dynasty Score on the curve while the class
-  // is still to be drafted (preGradeMirror.ts). Prospects without a Dynasty
-  // Score, and drafted classes, aren't in here: their stored grade shows.
+  // The Pre grade mirrors the live Dynasty Score on the curve, drafted classes
+  // too (preGradeMirror.ts). Prospects without a Dynasty Score aren't in
+  // here: their stored grade shows.
   const mirroredPre = useMemo(() => {
-    const now = new Date();
     const m = new Map<string, number>();
     for (const p of prospects) {
-      const g = mirroredPreGrade(p, savedDynasty.get(p.id)?.dynasty, now);
+      const g = mirroredPreGrade(savedDynasty.get(p.id)?.dynasty);
       if (g != null) m.set(p.id, g);
     }
     return m;
@@ -963,8 +962,8 @@ export default function BigBoard({
     `Before the draft a QB counts ${Math.round(QB_PREDRAFT_SCALE * 100)}% of his AE Score (no slider; off once his class is drafted and never in Dynasty+, where his pick takes over).`;
   const preGradeTooltip =
     `Pre-draft grade: mirrors the Dynasty Score on a curve (${dynastyGradeCurveText()}, straight lines between) ` +
-    "until the class is drafted, then stays as it stood. Read only while it mirrors. " +
-    "A prospect without a Dynasty Score, and every drafted class, keeps the grade you type.";
+    "in every class, drafted ones too. Read only while it mirrors. " +
+    "A prospect without a Dynasty Score keeps the grade you type.";
   const dynastyPlusTooltip =
     "Dynasty Score Plus: the Dynasty Score plus draft capital (initial opportunity), from 1st round +2.0 " +
     "to Undrafted −2.0 at the default 2× weight. Shows once the NFL draft round is set. " +
@@ -1088,7 +1087,7 @@ export default function BigBoard({
   }
 
   function gradeCell(p: ProspectWithStats, field: GradeField) {
-    // Pre mirrors the Dynasty Score until the class is drafted: read only.
+    // Pre mirrors the Dynasty Score: read only.
     const mirrored = field === "pre_draft_grade" ? mirroredPre.get(p.id) : undefined;
     if (mirrored != null) {
       const d = savedDynasty.get(p.id)!.dynasty;
@@ -1097,7 +1096,7 @@ export default function BigBoard({
         <td
           className={`${tdBase} border-r border-slate-800`}
           onClick={(e) => e.stopPropagation()}
-          title={`Mirrors Dynasty ${signed(d, 2)} on the curve (${dynastyGradeCurveText()}) until the class is drafted\n${t.label} (${gradeTierRange(t)})`}
+          title={`Mirrors Dynasty ${signed(d, 2)} on the curve (${dynastyGradeCurveText()})\n${t.label} (${gradeTierRange(t)})`}
         >
           <span className={`px-1 font-semibold ${gradeColor(mirrored)}`}>{formatGrade(mirrored)}</span>
         </td>
@@ -1524,7 +1523,7 @@ export default function BigBoard({
           </li>
         ))}
       </ul>
-      <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank or a grade to edit (1.0–100.0; Pre mirrors Dynasty until the draft) · Click any column header to sort</p>
+      <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank or a grade to edit (1.0–100.0; Pre mirrors Dynasty) · Click any column header to sort</p>
       <p className="text-xs text-slate-600 mb-2 text-center">AE Score true spread: {compositeStatus}</p>
       <p className="text-xs text-slate-600 mb-2 text-center">
         Opponent strength (scores only): {opponentStatus}

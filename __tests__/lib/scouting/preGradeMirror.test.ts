@@ -2,34 +2,26 @@ import { describe, it, expect } from "vitest";
 import { changedPreGrades, mirroredPreGrade, preGradeIsMirrored } from "@/lib/scouting/preGradeMirror";
 import type { BoardScores } from "@/lib/types";
 
-const NOV_2026 = new Date("2026-11-12T12:00:00Z");
 const scores = (dynasty: number | null) => ({ dynasty }) as BoardScores;
 
 describe("mirroredPreGrade", () => {
-  it("maps the Dynasty Score while the class is still to be drafted", () => {
-    expect(mirroredPreGrade({ draft_class_year: 2027 }, 2.25, NOV_2026)).toBe(95);
-    expect(mirroredPreGrade({ draft_class_year: 2028 }, 0, NOV_2026)).toBe(75);
-  });
-
-  it("stops at the draft (May 1 of the class year): the stored grade stands", () => {
-    expect(mirroredPreGrade({ draft_class_year: 2026 }, 2.25, NOV_2026)).toBeNull();
-    expect(mirroredPreGrade({ draft_class_year: 2027 }, 2.25, new Date("2027-04-30T23:59:00Z"))).toBe(95);
-    expect(mirroredPreGrade({ draft_class_year: 2027 }, 2.25, new Date("2027-05-01T00:00:00Z"))).toBeNull();
+  it("maps the Dynasty Score on the curve", () => {
+    expect(mirroredPreGrade(2.25)).toBe(95);
+    expect(mirroredPreGrade(0)).toBe(75);
   });
 
   it("leaves a prospect without a Dynasty Score alone", () => {
-    expect(mirroredPreGrade({ draft_class_year: 2027 }, null, NOV_2026)).toBeNull();
-    expect(mirroredPreGrade({ draft_class_year: 2027 }, undefined, NOV_2026)).toBeNull();
-    expect(mirroredPreGrade({ draft_class_year: 2027 }, NaN, NOV_2026)).toBeNull();
+    expect(mirroredPreGrade(null)).toBeNull();
+    expect(mirroredPreGrade(undefined)).toBeNull();
+    expect(mirroredPreGrade(NaN)).toBeNull();
   });
 });
 
 describe("preGradeIsMirrored", () => {
-  it("reads the Dynasty the Big Board last saved", () => {
-    expect(preGradeIsMirrored({ draft_class_year: 2027, board_scores: scores(1.2) }, NOV_2026)).toBe(true);
-    expect(preGradeIsMirrored({ draft_class_year: 2027, board_scores: scores(null) }, NOV_2026)).toBe(false);
-    expect(preGradeIsMirrored({ draft_class_year: 2027, board_scores: null }, NOV_2026)).toBe(false);
-    expect(preGradeIsMirrored({ draft_class_year: 2026, board_scores: scores(1.2) }, NOV_2026)).toBe(false);
+  it("reads the Dynasty the Big Board last saved, in any class (drafted ones too, 2026-11-22)", () => {
+    expect(preGradeIsMirrored({ board_scores: scores(1.2) })).toBe(true);
+    expect(preGradeIsMirrored({ board_scores: scores(null) })).toBe(false);
+    expect(preGradeIsMirrored({ board_scores: null })).toBe(false);
   });
 });
 

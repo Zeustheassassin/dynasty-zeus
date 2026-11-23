@@ -378,14 +378,17 @@ export const WR_ALL_FULL_TRUST = 232;
 export const QB_FULL_TRUST = 232;
 export const RB_FULL_TRUST = 160;
 
-// Every RB's AE Score sits 0.2 lower (the user's call, 2026-10-02). Each
-// position's 0 is its own average charted prospect, and on that footing RBs
-// crowded the board: 13 of the 2027 top 34, against about 10 in the user's own
-// rankings (15 WR, 10 RB, 9 QB). Scaling RB scores down couldn't fix that: it
-// pulls good RBs down but lifts below-average ones toward 0, right where the
-// cut sits. So the level moves instead. Real data: the 2027 top 34 went from
-// 8 QB, 13 RB, 13 WR to 8 / 11 / 15.
-export const POSITION_BASELINE: Partial<Record<CompositePos, number>> = { RB: -0.2 };
+// Every RB's AE Score sits 0.1 lower (the user's call; −0.2 on 2026-10-02,
+// halved 2026-11-22). Each position's 0 is its own average charted prospect,
+// and on that footing RBs crowded the board: 13 of the 2027 top 34, against
+// about 10 in the user's own rankings (15 WR, 10 RB, 9 QB). Scaling RB scores
+// down couldn't fix that: it pulls good RBs down but lifts below-average ones
+// toward 0, right where the cut sits. So the level moves instead. At −0.2 the
+// 2027 top 34 went from 8 QB, 13 RB, 13 WR to 8 / 11 / 15. By 11/22 (season
+// units, more charting) −0.2 left RBs at 8 of the Dynasty top 34; −0.1 gives
+// 7 QB / 10 RB / 14 WR / 3 TE and keeps Keyjuan Brown (2.19) under the 2.25
+// Generational line, where 0 would put him over it (2.29).
+export const POSITION_BASELINE: Partial<Record<CompositePos, number>> = { RB: -0.1 };
 
 // TE's ceiling is matched to WR's, so TE neither gains nor loses on WR when it
 // joins. A ceiling F lifts trust below it by (F + h) / F, where h is the

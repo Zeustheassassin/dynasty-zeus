@@ -308,15 +308,15 @@ describe("full-trust ceilings", () => {
 });
 
 describe("position baseline", () => {
-  it("sets every RB 0.2 lower, recorded on the score, and leaves the other positions alone", () => {
-    expect(POSITION_BASELINE).toEqual({ RB: -0.2 });
+  it("sets every RB 0.1 lower, recorded on the score, and leaves the other positions alone", () => {
+    expect(POSITION_BASELINE).toEqual({ RB: -0.1 });
     const rb = pool(SPREAD, 16);
     const comp = buildAEComposite({ qb: pool(SPREAD, 9), rb, wr: new Map(), wrCore: new Map(), teRoute: new Map(), teBlock: new Map() });
     const plain = buildPositionComposite("RB", [{ key: "srae", label: "SRAE", weight: 1, samples: rb, fullTrustAt: RB_FULL_TRUST }]);
     for (const [id, sc] of plain.scores) {
       const shifted = comp.positions.RB.scores.get(id)!;
-      expect(shifted.score).toBeCloseTo(sc.score - 0.2, 12);
-      expect(shifted.baseline).toBe(-0.2);
+      expect(shifted.score).toBeCloseTo(sc.score - 0.1, 12);
+      expect(shifted.baseline).toBe(-0.1);
       expect(shifted.components).toEqual(sc.components); // the parts are untouched
       expect(sc.baseline).toBeUndefined();
     }
