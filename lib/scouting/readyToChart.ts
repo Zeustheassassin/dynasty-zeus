@@ -5,9 +5,11 @@
 // game, and none of them charted (no game with a play: the Unwatched tab's
 // rule, chartedGamesByProspect). The Prospects lists' Rank sort puts the
 // ready prospects right after the ranked ones, best PFF grade first, so the
-// user can pick whom to chart next. No grade yet (games not linked to PFF, or
-// not imported) = the end of the ready group; every other unranked prospect
-// follows.
+// user can pick whom to chart next. Everyone with neither a rank nor a grade
+// (a ready prospect whose games aren't linked to PFF or imported yet, and
+// every other unranked prospect) follows by Eligible Thru, soonest first
+// (the user, 2026-11-23: "all the players that dont have the first 2 get
+// sorted by the last one").
 //
 // The grade is his position's headline PFF grade, the one his report shows
 // (PFF_GRADE), over exactly his logged games (lib/pff/totals.ts).
@@ -47,22 +49,24 @@ export function readyToChart(
   return out;
 }
 
-// Sort bands, far above any personal rank. Grades run 0–100.
+// Sort bands, far above any personal rank. Grades run 0–100; years sit under 10,000.
 const READY = 1_000_000;
-const READY_NO_GRADE = READY + 1_000;
 const UNRANKED = 2_000_000;
+/** No Eligible Thru year: after every year. */
+const NO_YEAR = 9_999;
 
 /**
  * The Rank sort's key, low first: ranked prospects by rank, then the ready
- * ones by PFF grade (best first, no grade last), then every other unranked
- * prospect.
+ * ones with a PFF grade (best first), then everyone else by Eligible Thru
+ * (2027, then 2028, …; no year last).
  */
 export function rankSortValue(
-  p: Pick<Prospect, "id" | "personal_rank">,
+  p: Pick<Prospect, "id" | "personal_rank" | "eligible_thru_year">,
   ready: ReadonlyMap<string, number | null> | null,
 ): number {
   if (p.personal_rank != null) return p.personal_rank;
-  if (!ready?.has(p.id)) return UNRANKED;
-  const grade = ready.get(p.id);
-  return grade == null ? READY_NO_GRADE : READY + (100 - grade);
+  const grade = ready?.get(p.id);
+  if (grade != null) return READY + (100 - grade);
+  const year = p.eligible_thru_year;
+  return UNRANKED + (year != null && Number.isInteger(year) && year > 0 && year < NO_YEAR ? year : NO_YEAR);
 }

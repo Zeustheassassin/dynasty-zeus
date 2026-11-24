@@ -8,7 +8,7 @@ import type { Prospect, ScoutingGame } from "../../../lib/types";
 // player who doesnt have a rank or a game manually charted who has a Game
 // logged … so i can decide who to tackle first out of the guys who are ready."
 
-type P = Pick<Prospect, "id" | "position" | "personal_rank">;
+type P = Pick<Prospect, "id" | "position" | "personal_rank" | "eligible_thru_year">;
 const prospect = (id: string, extra: Partial<P> = {}): P => ({ id, position: "WR", personal_rank: null, ...extra });
 const game = (prospect_id: string): Pick<ScoutingGame, "prospect_id"> => ({ prospect_id });
 
@@ -71,7 +71,7 @@ describe("rankSortValue", () => {
   const order = (ps: P[], ready: ReadonlyMap<string, number | null> | null) =>
     [...ps].sort((a, b) => rankSortValue(a, ready) - rankSortValue(b, ready)).map((p) => p.id);
 
-  it("ranked by rank, then the ready ones best PFF grade first (no grade last), then everyone else", () => {
+  it("ranked by rank, then the ready ones best PFF grade first, then everyone else", () => {
     const ps = [
       prospect("other"),
       prospect("ready-60", {}),
@@ -81,11 +81,27 @@ describe("rankSortValue", () => {
       prospect("rank-1", { personal_rank: 1 }),
     ];
     const ready = new Map<string, number | null>([["ready-60", 60], ["ready-none", null], ["ready-85", 85]]);
-    expect(order(ps, ready)).toEqual(["rank-1", "rank-200", "ready-85", "ready-60", "ready-none", "other"]);
+    expect(order(ps, ready)).toEqual(["rank-1", "rank-200", "ready-85", "ready-60", "other", "ready-none"]);
   });
 
-  it("falls back to rank only when readiness is unknown", () => {
-    const ps = [prospect("b"), prospect("rank-3", { personal_rank: 3 }), prospect("a")];
-    expect(order(ps, null)).toEqual(["rank-3", "b", "a"]);
+  // 2026-11-23, the user: "Can we then have it sort by eligibility date so 2027
+  // first 2028 next 2029 next", "so basically all the players that dont have the
+  // first 2 get sorted by the last one".
+  it("sorts everyone with neither a rank nor a PFF grade by Eligible Thru, soonest first, no year last", () => {
+    const ps = [
+      prospect("none-2029", { eligible_thru_year: 2029 }),
+      prospect("none-blank"),
+      prospect("ready-no-grade-2028", { eligible_thru_year: 2028 }),
+      prospect("graded-2029", { eligible_thru_year: 2029 }),
+      prospect("none-2027", { eligible_thru_year: 2027 }),
+      prospect("rank-5-2030", { personal_rank: 5, eligible_thru_year: 2030 }),
+    ];
+    const ready = new Map<string, number | null>([["ready-no-grade-2028", null], ["graded-2029", 70]]);
+    expect(order(ps, ready)).toEqual(["rank-5-2030", "graded-2029", "none-2027", "ready-no-grade-2028", "none-2029", "none-blank"]);
+  });
+
+  it("falls back to rank, then Eligible Thru, when readiness is unknown", () => {
+    const ps = [prospect("b"), prospect("rank-3", { personal_rank: 3 }), prospect("a-2028", { eligible_thru_year: 2028 })];
+    expect(order(ps, null)).toEqual(["rank-3", "a-2028", "b"]);
   });
 });
