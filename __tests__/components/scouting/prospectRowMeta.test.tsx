@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import { ChartedGamesCount, ProspectConference, ReadyPffGrade } from "@/components/scouting/ProspectRowMeta";
+import { ChartedGamesCount, EligibleThruChip, ProspectConference, ReadyPffGrade } from "@/components/scouting/ProspectRowMeta";
 
 // 2026-11-19: the Prospects lists show the conference after the school (Big Ten,
 // Big 12, Independents and FCS in red) and "6/8G" = charted / logged games. Both
@@ -65,6 +65,27 @@ describe("ProspectConference", () => {
   it("renders nothing when neither the prospect nor his school gives a conference", () => {
     const { container } = render(<ProspectConference conference="" school="Manual Check University" />);
     expect(container.firstChild).toBeNull();
+  });
+});
+
+// 2026-11-23: a sticker after the conference with the last year he's eligible
+// (eligible_thru_year), sm up only like the conference.
+describe("EligibleThruChip", () => {
+  it("shows his last eligible year, sm up only, and says what it means", () => {
+    const { container } = render(<EligibleThruChip year={2027} />);
+    const el = container.firstElementChild as HTMLElement;
+    expect(el.textContent).toBe("Eligible thru 2027"); // "Eligible thru " is screen-reader only
+    expect(el.lastChild?.textContent).toBe("2027");
+    expect(el.className).toContain("hidden sm:inline-flex");
+    expect(el.title).toContain("2027 draft is the last he can enter");
+  });
+
+  it("renders nothing when the year is unknown", () => {
+    for (const year of [null, undefined]) {
+      const { container } = render(<EligibleThruChip year={year} />);
+      expect(container.firstChild).toBeNull();
+      cleanup();
+    }
   });
 });
 

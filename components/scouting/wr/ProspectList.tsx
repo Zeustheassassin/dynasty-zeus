@@ -7,7 +7,7 @@ import { lookupConference } from "../../../lib/scouting/schoolConferences";
 import { BASE_YEAR, CLASS_YEARS } from "../../../lib/helpers/season";
 import RecruitStarBadge from "../RecruitStarBadge";
 import FocusTagChip from "../FocusTagChip";
-import { ChartedGamesCount, ProspectConference, ReadyPffGrade } from "../ProspectRowMeta";
+import { ChartedGamesCount, EligibleThruChip, ProspectConference, ReadyPffGrade } from "../ProspectRowMeta";
 import { focusSortValue } from "../../../lib/scouting/focusTag";
 import { rankSortValue } from "../../../lib/scouting/readyToChart";
 import { watchSortValue } from "../../../lib/scouting/watchRank";
@@ -296,6 +296,7 @@ export default function ProspectList({
               <FocusTagChip tag={p.focus_tag} className="hidden sm:inline-flex" />
               <span className="text-xs text-slate-400 truncate hidden sm:block">{p.school}</span>
               <ProspectConference conference={p.conference} school={p.school} />
+              <EligibleThruChip year={p.eligible_thru_year} />
               <span className="text-xs text-slate-600 hidden md:block">{p.position}</span>
               <div className="ml-[1.375rem] sm:ml-auto flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-1 min-w-0 sm:flex-shrink-0">
                 <FocusTagChip tag={p.focus_tag} className="inline-flex sm:hidden" />

@@ -19,6 +19,27 @@ export function ProspectConference({ conference, school }: { conference?: string
 }
 
 /**
+ * A Prospects-list row's last eligible year, after the conference: the last
+ * draft he can enter, when his college eligibility runs out
+ * (`eligible_thru_year`, migration 071; Fill from PFF or the Prospect Data
+ * sheet). The user asked for it 2026-11-23. Violet so it never reads as a
+ * Focus Tag. Shown from sm up only, like the conference. Renders nothing when
+ * the year is unknown.
+ */
+export function EligibleThruChip({ year }: { year?: number | null }) {
+  if (year == null) return null;
+  return (
+    <span
+      className="hidden sm:inline-flex flex-shrink-0 items-center rounded border border-violet-800 bg-violet-950/40 px-1.5 py-px text-[10px] font-medium leading-4 text-violet-300 whitespace-nowrap"
+      title={`Eligible thru ${year}: his college eligibility runs out, so the ${year} draft is the last he can enter`}
+    >
+      <span className="sr-only">Eligible thru </span>
+      {year}
+    </span>
+  );
+}
+
+/**
  * A Prospects-list row's games: "6/8G" = 6 charted of 8 logged. The charted
  * part shows from sm up only (phones keep the plain "8G") and is amber while
  * some logged games have no plays yet (the Unwatched tab lists them).
