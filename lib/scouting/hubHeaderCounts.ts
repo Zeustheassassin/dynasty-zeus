@@ -38,8 +38,9 @@ export interface HubHeaderYear {
 }
 
 /**
- * One row per draft class (oldest first), one entry per position that has a
- * prospect in that class, in `positions` order. `chartedGames` is
+ * One row per draft class (oldest first), one entry per position in
+ * `positions` order, all zeros where the class has none at that position (so
+ * every row lines up, the user 2026-11-24). `chartedGames` is
  * chartedGamesByProspect's map (null when its load failed: Games reads null and
  * Partial / Logged go by snaps alone); `snaps` is each prospect's charted snaps.
  */
@@ -67,6 +68,6 @@ export function hubHeaderBreakdown(
         games: chartedGames ? group.reduce((s, p) => s + (chartedGames.get(p.id) ?? 0), 0) : null,
         snaps: group.reduce((s, p) => s + (snaps.get(p.id) ?? 0), 0),
       };
-    }).filter((r) => r.prospects > 0),
+    }),
   }));
 }

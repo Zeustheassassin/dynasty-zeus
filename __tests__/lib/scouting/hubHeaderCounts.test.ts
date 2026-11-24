@@ -25,21 +25,21 @@ describe("hubHeaderBreakdown", () => {
     const snaps = new Map([["full", 400], ["charted", 60], ["snapsOnly", 5]]);
     const [{ year, positions }] = hubHeaderBreakdown(prospects, chartedGames, snaps, P);
     expect(year).toBe(2027);
-    expect(positions).toEqual([
+    expect(positions.find((r) => r.pos === "RB")).toEqual(
       { pos: "RB", prospects: 6, full: 1, partial: 2, logged: 2, games: 12, snaps: 465 },
-    ]);
+    );
   });
 
   it("counts charted games only, and reads Games as null when the per-game counts didn't load", () => {
     const prospects = [prospect("a", "WR", "partial_chart"), prospect("b", "WR", "partial_chart")];
     const snaps = new Map([["a", 30]]);
-    const [withGames] = hubHeaderBreakdown(prospects, new Map([["a", 1]]), snaps, P);
-    expect(withGames.positions[0]).toMatchObject({ games: 1, partial: 1, logged: 1 });
-    const [noGames] = hubHeaderBreakdown(prospects, null, snaps, P);
-    expect(noGames.positions[0]).toMatchObject({ games: null, partial: 1, logged: 1, snaps: 30 });
+    const wr = (rows: ReturnType<typeof hubHeaderBreakdown>) => rows[0].positions.find((r) => r.pos === "WR");
+    expect(wr(hubHeaderBreakdown(prospects, new Map([["a", 1]]), snaps, P))).toMatchObject({ games: 1, partial: 1, logged: 1 });
+    expect(wr(hubHeaderBreakdown(prospects, null, snaps, P))).toMatchObject({ games: null, partial: 1, logged: 1, snaps: 30 });
   });
 
-  it("orders classes oldest first and positions as given, dropping empty positions", () => {
+  // "probably should have TE 0 · 0 · 0 · 0 · 0 · 0 For 2026 TE's also to look clean"
+  it("orders classes oldest first and lists every position as given, all zeros where the class has none", () => {
     const prospects = [
       prospect("te", "TE", "pending", 2028),
       prospect("qb", "QB", "pending", 2026),
@@ -47,6 +47,7 @@ describe("hubHeaderBreakdown", () => {
     ];
     const out = hubHeaderBreakdown(prospects, new Map(), new Map(), P);
     expect(out.map((y) => y.year)).toEqual([2026, 2028]);
-    expect(out[1].positions.map((r) => r.pos)).toEqual(["WR", "TE"]);
+    expect(out[0].positions.map((r) => r.pos)).toEqual(["QB", "RB", "WR", "TE"]);
+    expect(out[0].positions[3]).toEqual({ pos: "TE", prospects: 0, full: 0, partial: 0, logged: 0, games: 0, snaps: 0 });
   });
 });

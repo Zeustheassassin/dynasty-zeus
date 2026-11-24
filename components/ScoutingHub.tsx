@@ -275,6 +275,9 @@ const HEADER_KEY = [
   { label: "Snaps", cls: "text-slate-400", hint: "Charted snaps" },
 ] as const;
 
+/** Grid columns per position in the header: its label, the six numbers, and a dot between each pair. */
+const HEADER_GROUP_COLS = 1 + HEADER_KEY.length * 2 - 1;
+
 /** One header cell spelled out, for its tooltip and screen readers. */
 function headerCellTitle(year: number, r: HubHeaderCounts): string {
   const games = r.games == null ? "charted games unknown" : `${r.games.toLocaleString()} charted games`;
@@ -958,37 +961,39 @@ export default function ScoutingHub() {
                   ))}
                 </div>
                 <div className="overflow-x-auto">
-                  {/* Year + one column per POSITIONS entry (4). */}
-                  <div className="w-max mx-auto text-xs">
-                    <div className="grid grid-cols-[auto_repeat(4,auto)] items-baseline gap-x-5 gap-y-0.5 text-left tabular-nums">
-                      {headerBreakdown.map(({ year, positions }) => {
-                        const byPos = new Map(positions.map((r) => [r.pos, r]));
-                        return (
-                          <Fragment key={year}>
-                            <span className="text-blue-400 font-semibold">{year}</span>
-                            {POSITIONS.map((pos) => {
-                              const r = byPos.get(pos);
-                              if (!r) return <span key={pos} />;
-                              const values = [r.prospects, r.full, r.partial, r.logged, r.games, r.snaps];
-                              return (
-                                <span key={pos} className="whitespace-nowrap" title={headerCellTitle(year, r)}>
-                                  <span className="sr-only">{headerCellTitle(year, r)}</span>
-                                  <span aria-hidden="true">
-                                    <span className="text-slate-300 font-medium">{pos}:</span>{" "}
-                                    {values.map((v, i) => (
-                                      <Fragment key={HEADER_KEY[i].label}>
-                                        {i > 0 && <span className="text-slate-600"> · </span>}
-                                        <span className={HEADER_KEY[i].cls}>{v == null ? "—" : v.toLocaleString()}</span>
-                                      </Fragment>
-                                    ))}
+                  {/* Every number in its own column, so each one lines up down
+                      the classes: the year, then per position (every class
+                      lists all four, zeros included) its label and the six
+                      numbers with a dot column between each pair. */}
+                  <div
+                    className="w-max mx-auto grid items-baseline gap-y-0.5 text-xs tabular-nums"
+                    style={{ gridTemplateColumns: `repeat(${1 + POSITIONS.length * HEADER_GROUP_COLS}, auto)` }}
+                  >
+                    {headerBreakdown.map(({ year, positions }) => (
+                      <Fragment key={year}>
+                        <span className="text-left text-blue-400 font-semibold">{year}</span>
+                        {positions.map((r) => {
+                          const title = headerCellTitle(year, r);
+                          const values = [r.prospects, r.full, r.partial, r.logged, r.games, r.snaps];
+                          return (
+                            <Fragment key={r.pos}>
+                              <span className="pl-6 pr-1.5 text-left text-slate-300 font-medium" title={title}>
+                                <span className="sr-only">{title}</span>
+                                <span aria-hidden="true">{r.pos}:</span>
+                              </span>
+                              {values.map((v, i) => (
+                                <Fragment key={HEADER_KEY[i].label}>
+                                  {i > 0 && <span aria-hidden="true" title={title} className="px-1 text-slate-600">·</span>}
+                                  <span aria-hidden="true" title={title} className={`text-right ${HEADER_KEY[i].cls}`}>
+                                    {v == null ? "—" : v.toLocaleString()}
                                   </span>
-                                </span>
-                              );
-                            })}
-                          </Fragment>
-                        );
-                      })}
-                    </div>
+                                </Fragment>
+                              ))}
+                            </Fragment>
+                          );
+                        })}
+                      </Fragment>
+                    ))}
                   </div>
                 </div>
               </>)}
