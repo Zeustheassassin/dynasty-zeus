@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { Fragment, useState, useEffect, useMemo, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "../lib/supabaseclient";
 import { logger } from "../lib/logger";
@@ -41,6 +41,7 @@ import type { LandingSaved } from "../lib/scouting/teamLanding";
 import type { RankUpdate } from "../lib/scouting/realignRanks";
 import { chartedGamesByProspect, countUnwatched, tapeSourceSuggestions, unwatchedByProspect } from "../lib/scouting/unwatchedGames";
 import { readyToChart } from "../lib/scouting/readyToChart";
+import { hubHeaderBreakdown, type HubHeaderCounts } from "../lib/scouting/hubHeaderCounts";
 
 const log = logger("ScoutingHub");
 
@@ -262,6 +263,25 @@ type HubTab = "prospects" | "big_board" | "games_log" | "analysis" | "compare" |
 type PositionTab = "WR" | "RB" | "QB" | "TE";
 
 const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
+
+// The header's colour key, in the order each cell lists its numbers
+// (Prospects · Full · Partial · Logged · Games · Snaps).
+const HEADER_KEY = [
+  { label: "Prospects", cls: "text-slate-100", hint: "Prospects in the class" },
+  { label: "Full", cls: "text-emerald-400", hint: "Fully Charted (the Big Board's full sample)" },
+  { label: "Partial", cls: "text-amber-400", hint: "Partial Chart with at least one hand-charted snap" },
+  { label: "Logged", cls: "text-rose-400", hint: "Partial Chart with logged games but no charted snap yet" },
+  { label: "Games", cls: "text-violet-300", hint: "Games with at least one charted play" },
+  { label: "Snaps", cls: "text-slate-400", hint: "Charted snaps" },
+] as const;
+
+/** One header cell spelled out, for its tooltip and screen readers. */
+function headerCellTitle(year: number, r: HubHeaderCounts): string {
+  const games = r.games == null ? "charted games unknown" : `${r.games.toLocaleString()} charted games`;
+  return `${year} ${r.pos}: ${r.prospects} prospects · ${r.full} fully charted · ${r.partial} partial · `
+    + `${r.logged} logged only · ${games} · ${r.snaps.toLocaleString()} charted snaps`;
+}
+
 const POSITION_LABELS: Record<PositionTab, string> = {
   QB: "Quarterback",
   RB: "Running Back",
@@ -873,26 +893,12 @@ export default function ScoutingHub() {
     return m;
   }, [prospectsWithStats, posSnapsRows]);
 
-  const headerBreakdown = useMemo(() => {
-    const years = [...new Set(prospectsWithStats.map((p) => p.draft_class_year))].sort();
-    return years.map((year) => ({
-      year,
-      positions: POSITIONS.map((pos) => {
-        const group = prospectsWithStats.filter((p) => p.draft_class_year === year && p.position === pos);
-        const groupIds = new Set(group.map((p) => p.id));
-        const groupGames = games.filter((g) => groupIds.has(g.prospect_id));
-        const snaps = group.reduce((s, p) => s + (snapsByProspect.get(p.id) ?? 0), 0);
-        return {
-          pos,
-          prospects: group.length,
-          fully: group.filter((p) => p.charting_decision === "fully_charted").length,
-          partial: group.filter((p) => p.charting_decision === "partial_chart").length,
-          games: groupGames.length,
-          snaps,
-        };
-      }).filter((r) => r.prospects > 0),
-    }));
-  }, [prospectsWithStats, games, snapsByProspect]);
+  // Prospects · Full · Partial · Logged · charted Games · charted Snaps, per
+  // class and position (lib/scouting/hubHeaderCounts.ts).
+  const headerBreakdown = useMemo(
+    () => hubHeaderBreakdown(prospectsWithStats, chartedGames, snapsByProspect, POSITIONS),
+    [prospectsWithStats, chartedGames, snapsByProspect],
+  );
 
   // A prospect's Overview page: the Big Board's inputs, so its AE Score,
   // Dynasty and percentiles match the board's (useProspectScores).
@@ -937,29 +943,55 @@ export default function ScoutingHub() {
       <div className="border-b border-slate-800 bg-slate-950">
         <div className="px-4 py-4">
           <div className="flex items-start justify-center flex-wrap gap-2">
-            <div className="text-center">
+            <div className="text-center w-full min-w-0">
               <h1 className="text-2xl font-bold text-white">Scouting Hub</h1>
-              <div className="mt-1.5 space-y-1">
-                {headerBreakdown.map(({ year, positions }) => (
-                  <div key={year} className="flex flex-wrap items-baseline justify-center gap-x-4 gap-y-0.5 text-xs">
-                    <span className="text-blue-400 font-semibold w-10 shrink-0">{year}</span>
-                    {positions.map((r) => (
-                      <span key={r.pos} className="text-slate-400">
-                        <span className="text-slate-300 font-medium">{r.pos}</span>
-                        {": "}
-                        {r.prospects} prospects
-                        {" · "}
-                        <span className="text-emerald-400">{r.fully} FC</span>
-                        {r.partial > 0 && <> · <span className="text-amber-400">{r.partial} PC</span></>}
-                        {" · "}
-                        {r.games} games
-                        {" · "}
-                        {r.snaps.toLocaleString()} snaps
-                      </span>
-                    ))}
+              {/* One colour key, then a class × position grid of bare numbers.
+                  Wider than a phone: it scrolls sideways there (as the tab bar
+                  does) instead of widening the page. */}
+              {headerBreakdown.length > 0 && (<>
+                <div className="mt-1.5 mb-1 flex flex-wrap justify-center gap-x-1.5 text-[11px] font-medium">
+                  {HEADER_KEY.map((k, i) => (
+                    <span key={k.label} title={k.hint}>
+                      {i > 0 && <span className="text-slate-600 mr-1.5">·</span>}
+                      <span className={k.cls}>{k.label}</span>
+                    </span>
+                  ))}
+                </div>
+                <div className="overflow-x-auto">
+                  {/* Year + one column per POSITIONS entry (4). */}
+                  <div className="w-max mx-auto text-xs">
+                    <div className="grid grid-cols-[auto_repeat(4,auto)] items-baseline gap-x-5 gap-y-0.5 text-left tabular-nums">
+                      {headerBreakdown.map(({ year, positions }) => {
+                        const byPos = new Map(positions.map((r) => [r.pos, r]));
+                        return (
+                          <Fragment key={year}>
+                            <span className="text-blue-400 font-semibold">{year}</span>
+                            {POSITIONS.map((pos) => {
+                              const r = byPos.get(pos);
+                              if (!r) return <span key={pos} />;
+                              const values = [r.prospects, r.full, r.partial, r.logged, r.games, r.snaps];
+                              return (
+                                <span key={pos} className="whitespace-nowrap" title={headerCellTitle(year, r)}>
+                                  <span className="sr-only">{headerCellTitle(year, r)}</span>
+                                  <span aria-hidden="true">
+                                    <span className="text-slate-300 font-medium">{pos}:</span>{" "}
+                                    {values.map((v, i) => (
+                                      <Fragment key={HEADER_KEY[i].label}>
+                                        {i > 0 && <span className="text-slate-600"> · </span>}
+                                        <span className={HEADER_KEY[i].cls}>{v == null ? "—" : v.toLocaleString()}</span>
+                                      </Fragment>
+                                    ))}
+                                  </span>
+                                </span>
+                              );
+                            })}
+                          </Fragment>
+                        );
+                      })}
+                    </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              </>)}
             </div>
           </div>
 
