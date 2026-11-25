@@ -41,7 +41,7 @@ export function buildLeagueLineupStatus(input: LeagueLineupStatusInput, now: num
   const coach = computeSuggestedLineup(lineupInput, now);
   const { lineup, swaps, currentLineupScore, suggestedLineupScore } = coach;
 
-  // The Thursday/Friday/Saturday game a player is in, if it hasn't kicked off. The T/F/S flags
+  // The Wednesday–Saturday game a player is in, if it hasn't kicked off. The W/T/F/S flags
   // price what the suggestion loses if that day's games lock before the lineup changes.
   const earlyLockDayOf = (id: string) => {
     const kickoffAt = input.upcomingKickoffFn(id);
@@ -52,7 +52,7 @@ export function buildLeagueLineupStatus(input: LeagueLineupStatusInput, now: num
     return stake.points > 0 ? [{ day, stake: stake.points, moves: stake.moves.map(playerName) }] : [];
   });
 
-  // A Thursday/Friday/Saturday starter in FLEX locks the flex at his kickoff — worth no points
+  // A Wednesday–Saturday starter in FLEX locks the flex at his kickoff — worth no points
   // now, but it costs the late swap, so it's a move of its own (user, 11/12).
   const flexMoves = getFlexSlotMoves(coach, (id) => earlyLockDayOf(id) != null).flatMap(
     (move): LineupStatusFlexMove[] => {

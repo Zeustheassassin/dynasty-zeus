@@ -120,6 +120,51 @@ describe("buildLeagueLineupStatus — early-game starters in FLEX", () => {
   });
 });
 
+describe("buildLeagueLineupStatus — Wednesday games", () => {
+  // User, 11/25: "Like Thursday, Friday and Saturday games, add Wednesday games to the To-Do
+  // list" — GB @ LAR, Wed Nov 25 8:00 PM EST, the night before Thanksgiving.
+  const WED = Date.parse("2026-11-26T01:00:00Z");
+  const THANKSGIVING = Date.parse("2026-11-26T17:30:00Z"); // Thu Nov 26, 12:30 PM EST
+  const SUN = Date.parse("2026-11-29T18:00:00Z");
+  const WED_MORNING = Date.parse("2026-11-25T15:00:00Z");
+
+  it("prices the Wednesday game's share (W flag) ahead of Thursday's", () => {
+    const players = {
+      rbOut: mk("rbOut", "RB", "Out"), rbWed: mk("rbWed", "RB"),
+      wrOut: mk("wrOut", "WR", "Out"), wrThu: mk("wrThu", "WR"),
+    };
+    const status = buildLeagueLineupStatus(input(
+      players,
+      { rosterPositions: ["RB", "WR"], starters: ["rbOut", "wrOut"], playerIds: ["rbOut", "rbWed", "wrOut", "wrThu"] },
+      {
+        scores: { rbOut: 14, rbWed: 10, wrOut: 12, wrThu: 8 },
+        kickoffs: { rbOut: SUN, rbWed: WED, wrOut: SUN, wrThu: THANKSGIVING },
+      }
+    ), WED_MORNING);
+    expect(status.earlyLocks).toEqual([
+      { day: "Wed", stake: 10, moves: ["Player rbWed"] },
+      { day: "Thu", stake: 8, moves: ["Player wrThu"] },
+    ]);
+    expect(status.swaps.find((s) => s.inId === "rbWed")?.lockAt).toBe(WED);
+  });
+
+  it("lists a Wednesday starter in FLEX as a move to his position", () => {
+    const players = { rbWed: mk("rbWed", "RB"), rbSun: mk("rbSun", "RB"), wrSun: mk("wrSun", "WR") };
+    const kickoffs = { rbWed: WED, rbSun: SUN, wrSun: SUN };
+    const status = buildLeagueLineupStatus(input(
+      players,
+      {
+        rosterPositions: ["RB", "WR", "FLEX"], starters: ["rbSun", "wrSun", "rbWed"], playerIds: ["rbWed", "rbSun", "wrSun"],
+        kickoffFn: (id) => kickoffs[id as keyof typeof kickoffs] ?? null, hasKickoffData: true,
+      },
+      { scores: { rbSun: 15, rbWed: 10, wrSun: 9 }, kickoffs }
+    ), WED_MORNING);
+    expect(status.flexMoves).toEqual([
+      { playerId: "rbWed", fromSlot: "FLEX", toSlot: "RB", swapWithId: "rbSun", lockAt: WED, day: "Wed" },
+    ]);
+  });
+});
+
 describe("buildLeagueLineupStatus — slots only a pickup can fill", () => {
   const players = {
     qbBye: mk("qbBye", "QB"),

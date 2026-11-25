@@ -556,7 +556,7 @@ export interface LeagueLineupStatus {
   /** Risky starters (Questionable etc.) whose inactive call lands after every
    *  bench player who could replace them has kicked off. */
   pivotRiskCount: number;
-  /** One entry per Thursday/Friday/Saturday whose not-yet-started games hold part of the
+  /** One entry per Wednesday/Thursday/Friday/Saturday whose not-yet-started games hold part of the
    *  suggested change (stake > 0), in kickoff order. */
   earlyLocks: EarlyLockStatus[];
   /** The suggested swaps themselves (swapCount of them) — the To-Do hub lists them. */
@@ -566,7 +566,7 @@ export interface LeagueLineupStatus {
   /** Starting slots the suggestion can only fill with a player on bye or ruled out, or with no
    *  one at all — only a pickup fixes them. */
   emptySlots: LineupStatusEmptySlot[];
-  /** Thursday / Friday / Saturday starters sitting in a flex slot the suggestion moves to a
+  /** Wednesday / Thursday / Friday / Saturday starters sitting in a flex slot the suggestion moves to a
    *  positional slot, so the flex holds a later game (getFlexSlotMoves). Worth no points, so not
    *  in swaps / delta / isOptimal — the To-Do hub lists them. */
   flexMoves: LineupStatusFlexMove[];
@@ -616,8 +616,10 @@ export interface LineupStatusFlexMove {
   day: EarlyLockDay;
 }
 
-/** Thursday, Friday or Saturday, US Eastern: game days that lock before the Sunday slate. */
-export type EarlyLockDay = "Thu" | "Fri" | "Sat";
+/** Wednesday, Thursday, Friday or Saturday, US Eastern: game days that lock before the Sunday
+ *  slate. Wednesday is rare (2026 week 12, GB @ LAR the night before Thanksgiving; Christmas
+ *  years) — user, 11/25: "Like Thursday, Friday and Saturday games". */
+export type EarlyLockDay = "Wed" | "Thu" | "Fri" | "Sat";
 
 export interface EarlyLockStatus {
   day: EarlyLockDay;

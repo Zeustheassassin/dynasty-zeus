@@ -149,6 +149,27 @@ describe("buildActionQueue — lineup items", () => {
     });
   });
 
+  it("badges a Wednesday game's swap and flex move W (user, 11/25: GB @ LAR the night before Thanksgiving)", () => {
+    const WED = Date.parse("2026-11-26T01:00:00Z"); // Wed Nov 25, 8:00 PM EST
+    const wed = {
+      ...LINEUP,
+      A: status({
+        swapCount: 1, delta: 4,
+        swaps: [{ slot: "FLEX", inId: "p1", outId: "p2", delta: 4, lockAt: WED }],
+        earlyLocks: [{ day: "Wed" as const, stake: 4, moves: ["Player p1"] }],
+      }),
+      B: status({
+        isOptimal: true, asOf: 300,
+        flexMoves: [{ playerId: "outB", fromSlot: "FLEX", toSlot: "RB", swapWithId: null, lockAt: WED, day: "Wed" as const }],
+      }),
+    };
+    const items = byKey(buildActionQueue({ ...INPUT, lineupStatus: wed }));
+    expect(items.get("lineup:A:p1:p2")).toMatchObject({ deadline: WED, earlyLockDay: "Wed" });
+    expect(items.get("flexMove:B:outB:RB")).toMatchObject({
+      detail: "Plays Wednesday · keep FLEX for a later game", deadline: WED, earlyLockDay: "Wed",
+    });
+  });
+
   it("badges T/F/S only when the League Overview flags that day", () => {
     const quiet = { ...LINEUP, A: { ...LINEUP.A!, earlyLocks: [{ day: "Thu" as const, stake: 0.3, moves: [] }] } };
     const item = byKey(buildActionQueue({ ...INPUT, lineupStatus: quiet })).get("lineup:A:p1:p2");

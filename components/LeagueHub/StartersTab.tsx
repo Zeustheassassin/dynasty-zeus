@@ -38,7 +38,7 @@ interface StartersTabProps {
   availability: LineupAvailability;
 }
 
-const DAY_LETTER = { Thu: "T", Fri: "F", Sat: "S" } as const;
+const DAY_LETTER = { Wed: "W", Thu: "T", Fri: "F", Sat: "S" } as const;
 
 const NEWS_LEAN_LABEL: Record<InjuryNewsFlag["lean"], string> = {
   "likely-out": "Likely out",

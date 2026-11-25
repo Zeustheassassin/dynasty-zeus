@@ -79,8 +79,8 @@ const KIND_TAG: Record<ActionKind, { label: string; cls: string }> = {
   irEligible: { label: "IR", cls: STATUS_CLASSES.serious },
 };
 
-const DAY_LETTER = { Thu: "T", Fri: "F", Sat: "S" } as const;
-const DAY_NAME = { Thu: "Thursday", Fri: "Friday", Sat: "Saturday" } as const;
+const DAY_LETTER = { Wed: "W", Thu: "T", Fri: "F", Sat: "S" } as const;
+const DAY_NAME = { Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday" } as const;
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 

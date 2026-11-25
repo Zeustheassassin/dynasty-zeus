@@ -48,7 +48,7 @@ export interface ActionItem {
   /** Past this the move can't be made (a lineup change's kickoff) or stops mattering (the
    *  inactive call) — the hub drops it. Null = it stays until the data changes. */
   expiresAt: number | null;
-  /** Thursday / Friday / Saturday — a lineup change the League Overview's T/F/S flags price
+  /** Wednesday / Thursday / Friday / Saturday — a lineup change the League Overview's W/T/F/S flags price
    *  at LINEUP_DELTA_FLOOR or more, locking at that day's kickoff. */
   earlyLockDay: EarlyLockDay | null;
   /** Can't be made until the week turns over: his game has kicked off, so Sleeper has locked him
@@ -89,7 +89,7 @@ const KIND_ORDER: Record<ActionKind, number> = {
 export const sleeperLeagueUrl = (leagueId: string) => `https://sleeper.com/leagues/${encodeURIComponent(leagueId)}`;
 
 const slotLabel = (slot: string) => (slot === "SUPER_FLEX" ? "SFLEX" : slot);
-const DAY_NAME: Record<EarlyLockDay, string> = { Thu: "Thursday", Fri: "Friday", Sat: "Saturday" };
+const DAY_NAME: Record<EarlyLockDay, string> = { Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday" };
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Every open move across the user's leagues, most urgent first within each league (see
@@ -325,7 +325,7 @@ export interface LeagueActionGroup {
   appTab: ActionAppTab;
 }
 
-/** By league: one group per league. Leagues with a move due before Sunday's main slate (Thursday /
+/** By league: one group per league. Leagues with a move due before Sunday's main slate (Wednesday / Thursday /
  *  Friday / Saturday games, Sunday-morning international games — isBeforeSundaySlate) come first,
  *  earliest deadline first; every other league follows in the user's Sleeper order (the user's
  *  call, 10/14), timed or not. */

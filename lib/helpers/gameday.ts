@@ -79,9 +79,9 @@ const ET_WEEKDAY = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_Yor
 
 /** Days whose games lock before the Sunday slate, in kickoff order. A lineup move involving
  *  one of their players has to be made by then. */
-export const EARLY_LOCK_DAYS: readonly EarlyLockDay[] = ["Thu", "Fri", "Sat"];
+export const EARLY_LOCK_DAYS: readonly EarlyLockDay[] = ["Wed", "Thu", "Fri", "Sat"];
 
-/** The early-lock day a kickoff falls on, US Eastern, or null for Sunday through Wednesday.
+/** The early-lock day a kickoff falls on, US Eastern, or null for Sunday through Tuesday.
  *  Eastern, not the viewer's zone: Thursday night's 8:15 PM ET kickoff is already Friday in UTC. */
 export const getEarlyLockDay = (kickoffAt: number): EarlyLockDay | null => {
   const day = ET_WEEKDAY.format(kickoffAt);
@@ -95,14 +95,14 @@ const ET_DAY_HOUR = new Intl.DateTimeFormat("en-US", {
  *  inactives come out at 11:30, and a deadline that late belongs with the main slate. */
 const SUNDAY_EARLY_BEFORE_HOUR_ET = 11;
 
-/** A deadline ahead of Sunday's main slate: Wednesday (Christmas), Thursday, Friday, Saturday, or
+/** A deadline ahead of Sunday's main slate: an early-lock day (Wednesday through Saturday), or
  *  Sunday before 11 a.m. ET (London / Germany games). Monday and Tuesday come after the slate. */
 export function isBeforeSundaySlate(at: number): boolean {
   const parts = ET_DAY_HOUR.formatToParts(at);
   const day = parts.find((p) => p.type === "weekday")?.value;
   const hour = Number(parts.find((p) => p.type === "hour")?.value);
   if (day === "Sun") return hour < SUNDAY_EARLY_BEFORE_HOUR_ET;
-  return day === "Wed" || EARLY_LOCK_DAYS.some((d) => d === day);
+  return EARLY_LOCK_DAYS.some((d) => d === day);
 }
 
 /** A scoreboard covering fewer teams than this is treated as a failed/partial

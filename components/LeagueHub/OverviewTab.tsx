@@ -54,9 +54,10 @@ interface OverviewTabProps {
 // isn't leaving the dots any staler than they'd already be getting refreshed to.
 const REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
 
-// The T/F/S flags' floor: the same 0.5-point noise floor below which the lineup dot stays green.
+// The W/T/F/S flags' floor: the same 0.5-point noise floor below which the lineup dot stays green.
 const EARLY_LOCK_STAKE_MIN = LINEUP_DELTA_FLOOR;
 const EARLY_LOCK_TAGS: Record<EarlyLockDay, { letter: string; name: string }> = {
+  Wed: { letter: "W", name: "Wednesday" },
   Thu: { letter: "T", name: "Thursday" },
   Fri: { letter: "F", name: "Friday" },
   Sat: { letter: "S", name: "Saturday" },

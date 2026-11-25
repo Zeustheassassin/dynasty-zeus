@@ -114,10 +114,15 @@ describe("getEarlyLockDay", () => {
     expect(getEarlyLockDay(Date.UTC(2026, 11, 19, 21, 30))).toBe("Sat"); // Sat Dec 19, 4:30 PM EST
   });
 
-  it("is null for Sunday and Monday, and for a Wednesday night that is Thursday in UTC", () => {
+  it("reads a Wednesday night game as Wednesday, though it is already Thursday in UTC", () => {
+    expect(getEarlyLockDay(Date.UTC(2026, 10, 26, 1, 0))).toBe("Wed"); // Wed Nov 25, 8:00 PM EST (GB @ LAR)
+    expect(getEarlyLockDay(Date.UTC(2026, 9, 8, 3, 0))).toBe("Wed"); // Wed Oct 7, 11:00 PM EDT
+  });
+
+  it("is null for Sunday, Monday and Tuesday", () => {
     expect(getEarlyLockDay(Date.UTC(2026, 9, 11, 17, 0))).toBeNull(); // Sun Oct 11, 1:00 PM EDT
     expect(getEarlyLockDay(Date.UTC(2026, 9, 13, 0, 15))).toBeNull(); // Mon Oct 12, 8:15 PM EDT
-    expect(getEarlyLockDay(Date.UTC(2026, 9, 8, 3, 0))).toBeNull(); // Wed Oct 7, 11:00 PM EDT
+    expect(getEarlyLockDay(Date.UTC(2026, 9, 14, 0, 15))).toBeNull(); // Tue Oct 13, 8:15 PM EDT
   });
 });
 
