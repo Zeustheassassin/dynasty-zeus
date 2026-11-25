@@ -221,7 +221,7 @@ const {
 } = useTradeAttempts(supabaseUser);
 const { leagueMateTradeIntel } = useLeagueMateIntel(selectedLeague, rosters, players);
 const [leagueMateProfileCache, setLeagueMateProfileCache] = useState<Record<string, LeagueMateView[]>>({});
-const { nflState, setNflState, loadNflState } = useNflState();
+const { nflState, setNflState, loadNflState, refreshNflState } = useNflState();
 const {
   gamedayMatchups, setGamedayMatchups,
   loadingGamedayMatchups, gamedayMatchupsUpdatedAt,
@@ -3552,22 +3552,36 @@ const leagueStepper = useLeagueStepper({
 });
 const backToTodo = useCallback(() => setMainTab("TODO"), [setMainTab]);
 
-// To-Do Refresh: Roster Overview's refresh (rosters past both caches + Sleeper's player map, at
-// most once a minute), then the selected league's own roster — its lineup items read `roster`,
-// not the overview copy. That reload reads what the overview pass just cached (zero new calls).
+// To-Do Refresh: everything the list reads, past every cache (user, 11/25: "full refresh the todo
+// list … it is reading old data"). First, together: Sleeper's week (/api/nfl-state?bypass=1, one
+// call), Roster Overview's refresh (every league's rosters past both caches + Sleeper's player map,
+// at most once a minute) and ESPN's injury report. Then, for the week that came back: this week's
+// scoreboard and projections past their caches, and the selected league's own roster — its lineup
+// items read `roster`, not the overview copy (that reload reads what the overview pass just cached,
+// zero new calls). When the week itself moved, the To-Do effect above loads the new week's
+// projections and schedule on its own; a Run All Sims pass owns the projections while it runs.
 const [refreshingTodo, setRefreshingTodo] = useState(false);
 const refreshTodo = useCallback(async () => {
   setRefreshingTodo(true);
   try {
-    await refreshRosterOverview();
+    const [state] = await Promise.all([refreshNflState(), refreshRosterOverview(), loadInjuries()]);
+    const week = state ? getCurrentNflWeek(state) : currentNflWeek;
+    const reloads: Promise<unknown>[] = [];
+    if (week > 0) {
+      reloads.push(loadSchedule(week, { bypass: true }));
+      if (week === projectionWeek && !simRunActive) {
+        reloads.push(loadProjections(week, enabledExtraSources, { fresh: true }));
+      }
+    }
     const league = selectedLeagueRef.current;
-    if (league) await loadRoster(league);
+    if (league) reloads.push(loadRoster(league));
+    await Promise.all(reloads);
   } catch (err) {
     log.error("To-Do refresh failed", { err: String(err) });
   } finally {
     setRefreshingTodo(false);
   }
-}, [refreshRosterOverview, loadRoster]);
+}, [refreshNflState, refreshRosterOverview, loadInjuries, currentNflWeek, projectionWeek, simRunActive, loadSchedule, loadProjections, enabledExtraSources, loadRoster]);
 
 const onOpenAllTrades = useCallback(() => {
   setShowAllOpenTrades(true);

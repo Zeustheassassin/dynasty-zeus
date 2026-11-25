@@ -257,7 +257,7 @@ function TodoHub({
             size="sm"
             onClick={onRefresh}
             disabled={refreshing || loadingOverview}
-            title="Re-pull every league's rosters and Sleeper's injury designations"
+            title="Re-pull everything the list reads: this NFL week, every league's rosters, injury designations and news, the game schedule and projections"
           >
             {refreshing || loadingOverview ? "Refreshing…" : "Refresh"}
           </Button>

@@ -10,12 +10,16 @@ const log = logger('api/nfl-state');
 // Proxies the Sleeper NFL state (current week, season type, etc.) with 1-hour server cache
 // (fetchSleeperJson: shared with the trades route's NFL state; a cache miss takes a global budget slot).
 // Keeps loadNflState() and the transaction feed off the Sleeper API directly.
+// `?bypass=1` (the To-Do hub's Refresh) goes straight to Sleeper and caches nothing, so a week that
+// flipped inside the hour is seen at once.
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const rl = await checkRateLimit(request, 30, 60_000, 'nfl-state');
   if (!rl.allowed) return rl.response;
+  const bypass = request.nextUrl.searchParams.get('bypass') === '1';
   try {
     return NextResponse.json(
-      await fetchSleeperJson<unknown>(`${SLEEPER_BASE_URL}/state/nfl`, { revalidate: NFL_STATE_REVALIDATE_S })
+      await fetchSleeperJson<unknown>(`${SLEEPER_BASE_URL}/state/nfl`, { revalidate: NFL_STATE_REVALIDATE_S, bypass }),
+      bypass ? { headers: { 'Cache-Control': 'no-store' } } : undefined
     );
   } catch (err) {
     if (err instanceof SleeperUpstreamError) {

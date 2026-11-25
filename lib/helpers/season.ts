@@ -77,6 +77,28 @@ export function getCurrentNflWeek(
   return nflState?.season_type === "regular" && rawWeek > 0 ? rawWeek : 0;
 }
 
+/** The NFL state to keep when another arrives: `incoming`, unless it is malformed (a failed fetch
+ *  answers null or an error body) or an older copy of the same season phase — an earlier season, or
+ *  the same season and season type at a lower week. /api/players and /api/nfl-state each cache
+ *  Sleeper's state for up to an hour, separately, so right after Sleeper's Wednesday week flip one can
+ *  still say last week after the other said this week; taking it would put the Lineup Coach, the
+ *  League Overview dots and the To-Do back on last week's (all final) games (user, 11/25: "it is
+ *  reading old data"). A new phase (preseason → regular, regular → post) is always taken. */
+export function newerNflState<T extends { season_type: string; week: number; season: string }>(
+  current: T | null,
+  incoming: unknown,
+): T | null {
+  if (!isValidNflState(incoming)) return current;
+  if (!isValidNflState(current)) return incoming as T;
+  if (Number(incoming.season) < Number(current.season)) return current;
+  if (
+    incoming.season === current.season &&
+    incoming.season_type === current.season_type &&
+    incoming.week < current.week
+  ) return current;
+  return incoming as T;
+}
+
 /** The fantasy championship week — Sleeper's default playoffs end in Week 17. */
 export const FANTASY_CHAMPIONSHIP_WEEK = 17;
 

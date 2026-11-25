@@ -9,6 +9,7 @@ import {
   getCurrentNflWeek,
   getSeasonYear,
   isValidNflState,
+  newerNflState,
   recentTransactionLegs,
   isDraftBoardDormant,
   isSeasonUnderway,
@@ -111,6 +112,43 @@ describe("isValidNflState", () => {
 });
 
 // ── YEARS ────────────────────────────────────────────────────────────────────
+
+// ── newerNflState ────────────────────────────────────────────────────────────
+// User, 11/25: the To-Do read old data on a Wednesday. /api/players and /api/nfl-state cache
+// Sleeper's state separately for up to an hour; an older copy must never move the app back a week.
+describe("newerNflState", () => {
+  const state = (week: number, season_type = "regular", season = "2026") => ({ week, season_type, season });
+
+  it("takes this week over last week, and keeps this week when last week's copy arrives after", () => {
+    expect(newerNflState(state(11), state(12))).toEqual(state(12));
+    const current = state(12);
+    expect(newerNflState(current, state(11))).toBe(current);
+  });
+
+  it("takes the same week again (a fresh copy of the same state)", () => {
+    const incoming = state(12);
+    expect(newerNflState(state(12), incoming)).toBe(incoming);
+  });
+
+  it("keeps what it has when the fetch failed (null, an error body)", () => {
+    const current = state(12);
+    expect(newerNflState(current, null)).toBe(current);
+    expect(newerNflState(current, { error: "Upstream Sleeper request failed" })).toBe(current);
+    expect(newerNflState(null, null)).toBeNull();
+  });
+
+  it("takes the first valid state", () => {
+    expect(newerNflState(null, state(1))).toEqual(state(1));
+  });
+
+  it("takes a new phase or season even at a lower week, never an earlier season", () => {
+    expect(newerNflState(state(3, "pre"), state(1, "regular"))).toEqual(state(1, "regular"));
+    expect(newerNflState(state(18), state(1, "post"))).toEqual(state(1, "post"));
+    expect(newerNflState(state(0, "off", "2026"), state(1, "pre", "2027"))).toEqual(state(1, "pre", "2027"));
+    const current = state(1, "pre", "2027");
+    expect(newerNflState(current, state(18, "regular", "2026"))).toBe(current);
+  });
+});
 
 describe("YEARS", () => {
   it("contains exactly 3 elements", () => {

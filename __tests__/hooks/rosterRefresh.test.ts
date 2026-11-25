@@ -56,6 +56,10 @@ let sleeper = {
 };
 const rosterCalls: { leagueId: string; bypass: boolean }[] = [];
 let urls: string[] = [];
+// Sleeper's state as /api/players and /api/nfl-state answer it — null (a failed state fetch) unless
+// a test sets it. `freshNflState` is what /api/nfl-state?bypass=1 (straight from Sleeper) answers.
+let playersNflState: unknown = null;
+let freshNflState: unknown = null;
 
 function installApi() {
   api.impl = {
@@ -81,9 +85,10 @@ const fetchMock = vi.fn(async (input: unknown) => {
   if (url.startsWith("/api/players")) {
     return json({
       players: { p1: player("p1", sleeper.p1Status), p2: player("p2", null), p9: player("p9", null), fa: player("fa", null) },
-      nflState: null,
+      nflState: playersNflState,
     });
   }
+  if (url === "/api/nfl-state?bypass=1") return json(freshNflState);
   if (url.startsWith("/api/fc-values")) {
     return json([
       { player: { sleeperId: "p1", name: "Player p1", position: "WR", maybeTeam: "KC" }, value: 5000 },
@@ -112,6 +117,8 @@ beforeEach(() => {
   sleeper = { myRoster: { players: ["p1", "p2"], starters: ["p1"], reserve: [] }, p1Status: "Questionable" };
   rosterCalls.length = 0;
   urls = [];
+  playersNflState = null;
+  freshNflState = null;
   installApi();
   vi.stubGlobal("fetch", fetchMock);
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -220,6 +227,32 @@ describe("To-Do hub (Stage 1, 10/14)", () => {
     expect(item!.asOf).toBeGreaterThanOrEqual(clickedAt);
     // The Injury Report's "See moves" knows p1 has a move.
     expect(result.current.hubRouterProps.todoPlayerIds.has("p1")).toBe(true);
+  });
+
+  it("Refresh re-reads Sleeper's week past the cache and ESPN's injury report", async () => {
+    // User, 11/25: "full refresh the todo list … it is reading old data".
+    const { result } = await mount();
+    await waitFor(() => expect(myEntry(result)?.roster).toBeTruthy());
+    urls = [];
+    await act(async () => { await result.current.hubRouterProps.refreshTodo(); });
+    expect(urls).toContain("/api/nfl-state?bypass=1");
+    expect(urls).toContain("/api/injuries/espn");
+  });
+
+  it("a stale cached week arriving with the player map never moves Refresh's fresh week back", async () => {
+    const week = (n: number) => ({
+      week: n, season_type: "regular", season: "2026", season_start_date: "2026-09-09",
+      previous_season: "2025", leg: n, league_create_season: "2026", display_week: n,
+    });
+    // Sleeper flipped to week 12; /api/players' cached state still says week 11.
+    playersNflState = week(11);
+    freshNflState = week(12);
+    const { result } = await mount();
+    await waitFor(() => expect(result.current.hubRouterProps.nflState?.week).toBe(11));
+
+    await act(async () => { await result.current.hubRouterProps.refreshTodo(); });
+    expect(urls).toContain("/api/players?fresh=1");
+    expect(result.current.hubRouterProps.nflState?.week).toBe(12);
   });
 
   it("Refresh also reloads the selected league, whose lineup reads its own roster", async () => {
