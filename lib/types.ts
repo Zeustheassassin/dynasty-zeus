@@ -1149,6 +1149,10 @@ export interface Prospect {
    *  from PFF or Edit Bio), shown after his name on the charting boards.
    *  Optional: absent before the migration, and never sent on insert. */
   jersey_number?: string | null;
+  /** Redacted on shared Big Board links (migration 105): the link shows
+   *  "Redacted" and hides his school, age, height and weight. His own board
+   *  is unchanged. Optional: absent before the migration, never sent on insert. */
+  share_redacted?: boolean | null;
   height: string;
   weight: number | null;
   /** 40-yard dash in seconds, where he ran it, and what he weighed in at

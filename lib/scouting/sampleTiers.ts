@@ -22,6 +22,13 @@ export const SAMPLE_TIERS: { tier: SampleTier; label: string; dot: string }[] = 
  */
 export const SAMPLE_FULL_PLAYS: Record<"QB" | "RB" | "WR" | "TE", number> = { QB: 180, RB: 100, WR: 160, TE: 140 };
 
+/** Whole percent of a full sample, rounded down and capped at 100: 100 of 150
+ *  routes is 66%. Integer maths, so 29 of 100 is 29 (0.29 × 100 is 28.999…). */
+export function samplePct(n: number, full: number): number {
+  if (!(full > 0) || !(n > 0)) return 0;
+  return Math.min(100, Math.floor((n * 100) / full));
+}
+
 export function sampleTier(n: number, full: number): SampleTier {
   if (n >= full) return "full";
   if (n >= full * 0.5) return "half";

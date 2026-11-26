@@ -43,9 +43,12 @@ import {
   type AEKey, type AEMaps, type ScoreView, type ScoreViewMode,
 } from "../../lib/scouting/prospectScores";
 import { useProspectScores, useDynastyWeights } from "./shared/hooks/useProspectScores";
-import { SAMPLE_FULL, SAMPLE_TIERS, sampleSizes, sampleText, type SampleSize } from "../../lib/scouting/sampleSize";
+import { SAMPLE_FULL, SAMPLE_TIERS, samplePct, sampleSizes, sampleText, type SampleSize } from "../../lib/scouting/sampleSize";
 import { CHARTED_PLAYS, chartedCounts, isChartedPos, type ChartedCounts } from "../../lib/scouting/chartedCounts";
 import { boardScoresKey, buildBoardScores, changedBoardScores, type BoardScoresValue } from "../../lib/scouting/boardScores";
+import { buildSharedBoardRows, sharedBoardKey, type BoardShare, type SharedBoardInputs, type SharedBoardRow } from "../../lib/scouting/sharedBoard";
+import type { SamplePlays } from "../../lib/scouting/aggregateMerge";
+import BoardShareControl from "./BoardShareControl";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
 
@@ -201,6 +204,21 @@ interface Props {
   /** PFF game rows and the migration-064 views, for the AE Score's per-player
    *  components (lib/scouting/aeComponents.ts). */
   gradingData?: GradingData;
+  /** Exact QB / RB / TE sample plays (prospect_sample_counts, migration 102),
+   *  for a shared board's Sample % under the dot's sample floor. */
+  samplePlays?: ReadonlyMap<string, SamplePlays>;
+  /** The user's shared board links by class year (migration 105); null while
+   *  loading. Without it (and onSaveBoardShare) the Share button doesn't show. */
+  boardShares?: ReadonlyMap<number, BoardShare> | null;
+  /** The shared links' table isn't there yet (migration 105 not applied). */
+  boardSharesMissing?: boolean;
+  /** Save one class's shared board rows; resolves with its link token, or null
+   *  if the write failed. */
+  onSaveBoardShare?: (year: number, rows: SharedBoardRow[]) => Promise<string | null>;
+  /** Mark a prospect Redacted on shared links (prospects.share_redacted,
+   *  migration 105), or clear it; false if the write failed. Without it the
+   *  toggle beside each name doesn't show. */
+  onSetShareRedacted?: (id: string, redacted: boolean) => Promise<boolean>;
 }
 
 function getSortValue(
@@ -322,6 +340,11 @@ export default function BigBoard({
   onApplyDraftResults,
   onUpdateWillPlayPost,
   onSaveLandingInputs,
+  samplePlays,
+  boardShares,
+  boardSharesMissing = false,
+  onSaveBoardShare,
+  onSetShareRedacted,
 }: Props) {
   // Trigger lazy load of all three position plays the first time the
   // board renders. ScoutingHub no-ops if a position is already loaded
@@ -528,6 +551,54 @@ export default function BigBoard({
     }, BOARD_SCORES_DELAY_MS);
     return () => clearTimeout(timer);
   }, [canSavePre, prospects, mirroredPre, onSavePreGrades]);
+
+  // ── Shared boards (sharedBoard.ts, migration 105) ─────────────
+  // A shared link shows one class's All board as this screen has it. Each
+  // shared class's rows are rebuilt from the same values the cells read and
+  // saved whenever they change, behind the same gate as the draft board's
+  // scores (every input loaded), once the sliders settle, one save after
+  // another. Leaving the board saves anything still pending.
+  const canSaveShares = scoresReady && inputsComplete && recruitsReady;
+  const shareInputs = useMemo<SharedBoardInputs>(
+    () => ({ samples, samplePlays, counts, preGrades: mirroredPre, ages }),
+    [samples, samplePlays, counts, mirroredPre, ages],
+  );
+  const sharedRows = useMemo(() => {
+    const m = new Map<number, SharedBoardRow[]>();
+    if (!boardShares || !canSaveShares) return m;
+    for (const year of boardShares.keys()) m.set(year, buildSharedBoardRows(prospects, year, shareInputs));
+    return m;
+  }, [boardShares, canSaveShares, prospects, shareInputs]);
+  const shareChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const flushSharesRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    flushSharesRef.current = () => {};
+    if (!onSaveBoardShare || !boardShares) return;
+    const changed = [...sharedRows].filter(([year, rows]) => {
+      const saved = boardShares.get(year);
+      return saved != null && sharedBoardKey(rows) !== sharedBoardKey(saved.rows);
+    });
+    if (changed.length === 0) return;
+    let flushed = false;
+    const flush = () => {
+      if (flushed) return;
+      flushed = true;
+      for (const [year, rows] of changed) {
+        shareChainRef.current = shareChainRef.current.then(() => onSaveBoardShare(year, rows)).catch(() => null);
+      }
+    };
+    flushSharesRef.current = flush;
+    const timer = setTimeout(flush, BOARD_SCORES_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [sharedRows, boardShares, onSaveBoardShare]);
+  useEffect(() => () => flushSharesRef.current(), []);
+  const createShare = async (year: number): Promise<string | null> => {
+    if (!onSaveBoardShare) return null;
+    const rows = buildSharedBoardRows(prospects, year, shareInputs);
+    const run = shareChainRef.current.then(() => onSaveBoardShare(year, rows)).catch(() => null);
+    shareChainRef.current = run;
+    return run;
+  };
 
   const sortCtx = useMemo<SortContext>(
     () => ({ aeScores: scoreViews, dynasty, ages, roles: roleFits, pff: pffVals, samples, counts, preGrades: mirroredPre }),
@@ -901,7 +972,7 @@ export default function BigBoard({
     const cls = "sticky z-10 bg-slate-950 border-r border-slate-800 text-center";
     if (!s) return <td style={style} className={cls} />;
     const t = SAMPLE_TIERS.find((x) => x.tier === s.tier)!;
-    const how = s.tier === "full" ? "full" : `${Math.floor(s.share * 100)}% of full`;
+    const how = s.tier === "full" ? "full" : `${samplePct(s.n ?? 0, s.full)}% of full`;
     return (
       <td style={style} className={cls} title={`Sample ${how}: ${sampleText(s)}`}>
         <span role="img" aria-label={`Sample: ${t.label}`} className={`inline-block w-2.5 h-2.5 rounded-full align-middle ${t.dot}`} />
@@ -1204,6 +1275,33 @@ export default function BigBoard({
   }
 
   const tdBase = "px-1.5 py-1.5 text-center whitespace-nowrap text-xs";
+  // The sticky Name column, a little wider when it carries the Redact eye.
+  const NAME_W = onSetShareRedacted ? 156 : 140;
+
+  // ── Redacted on shared links (prospects.share_redacted) ───────
+  // The eye beside his name: amber when the shared link hides who he is
+  // ("Redacted", no school / age / height / weight). His row here is unchanged.
+  function redactToggle(p: ProspectWithStats) {
+    const on = p.share_redacted === true;
+    return (
+      <button
+        type="button"
+        aria-pressed={on}
+        aria-label={on ? `Show ${p.name} on shared boards` : `Redact ${p.name} on shared boards`}
+        title={on
+          ? "Redacted on shared links: they read \"Redacted\" with no school, age, height or weight (rank, sample, counts and grades still show). Click to show him."
+          : "Redact on shared links: hide who he is (name, school, age, height, weight); his rank, sample, counts and grades still show"}
+        onClick={(e) => { e.stopPropagation(); void onSetShareRedacted?.(p.id, !on); }}
+        onMouseDown={(e) => e.stopPropagation()}
+        className={`ml-1 align-middle inline-flex rounded p-0.5 transition ${on ? "text-amber-400 hover:text-amber-300" : "text-slate-700 hover:text-slate-400"}`}
+      >
+        <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3">
+          <path fillRule="evenodd" clipRule="evenodd" d="M3.28 2.22a.75.75 0 0 0-1.06 1.06l14.5 14.5a.75.75 0 1 0 1.06-1.06l-1.745-1.745a10.029 10.029 0 0 0 3.3-4.38 1.651 1.651 0 0 0 0-1.185A10.004 10.004 0 0 0 9.999 3a9.956 9.956 0 0 0-4.744 1.194L3.28 2.22ZM7.752 6.69l1.092 1.092a2.5 2.5 0 0 1 3.374 3.373l1.091 1.092a4 4 0 0 0-5.557-5.557Z" />
+          <path d="m10.748 13.93 2.523 2.523a9.987 9.987 0 0 1-3.27.547c-4.258 0-7.894-2.66-9.337-6.41a1.651 1.651 0 0 1 0-1.186A10.007 10.007 0 0 1 2.839 6.02L6.07 9.252a4 4 0 0 0 4.678 4.678Z" />
+        </svg>
+      </button>
+    );
+  }
 
   // Shared sticky row cells (drag handle + rank + name)
   function stickyRowCells(p: ProspectWithStats) {
@@ -1231,9 +1329,10 @@ export default function BigBoard({
           )}
         </td>
         {sampleCell(p)}
-        <td style={{ left: 108, minWidth: 140, width: 140 }}
+        <td style={{ left: 108, minWidth: NAME_W, width: NAME_W }}
           className="sticky z-10 bg-slate-950 border-r border-slate-800 px-1.5 py-1.5 text-center text-white font-medium whitespace-nowrap">
           {p.name}
+          {onSetShareRedacted && redactToggle(p)}
         </td>
       </>
     );
@@ -1316,7 +1415,7 @@ export default function BigBoard({
             <th className="sticky left-0 z-20 bg-slate-950 w-6" />
             <th style={{ left: 24, minWidth: 44 }} className="sticky z-20 bg-slate-950" />
             <th style={{ left: 68, minWidth: 40 }} className="sticky z-20 bg-slate-950" />
-            <th style={{ left: 108, minWidth: 140 }} className="sticky z-20 bg-slate-950 border-r border-slate-800" />
+            <th style={{ left: 108, minWidth: NAME_W }} className="sticky z-20 bg-slate-950 border-r border-slate-800" />
             <th colSpan={3} className="px-2 py-1 text-center text-slate-600 font-medium border-r border-slate-800">Charted</th>
             <th colSpan={3} className="px-2 py-1 text-center text-amber-900 font-medium border-r border-slate-800">Grade</th>
             <th colSpan={1} className="px-2 py-1 text-center text-indigo-900 font-medium border-r border-slate-800">NFL Draft</th>
@@ -1338,7 +1437,7 @@ export default function BigBoard({
             <th className="sticky left-0 z-20 bg-slate-950 w-6 text-slate-700 text-center px-1">⠿</th>
             {stickyTh(primaryLabel, primaryKey, 24, 44)}
             {stickyTh("Smp", "sample", 68, 40, sampleTooltip, "px-0.5")}
-            {stickyTh("Name", "name", 108, 140)}
+            {stickyTh("Name", "name", 108, NAME_W)}
             {th("Games", "charted_games", "", "Games charted")}
             {th("Snaps", "charted_snaps", "", "Every play charted for him, whatever he did on it (runs, blocks, sacks and decoys included)")}
             {th(chartedPlaysHeader.label, "charted_plays", "border-r border-slate-800", chartedPlaysHeader.tooltip)}
@@ -1472,6 +1571,15 @@ export default function BigBoard({
           >{y}</button>
         ))}
         <span className="text-xs text-slate-500">{sorted.length} prospects</span>
+        {boardShares !== undefined && onSaveBoardShare && (
+          <BoardShareControl
+            year={draftYearFilter}
+            share={draftYearFilter != null ? boardShares?.get(draftYearFilter) : undefined}
+            status={boardSharesMissing ? "missing" : boardShares ? "ready" : "loading"}
+            ready={canSaveShares}
+            onCreate={createShare}
+          />
+        )}
         {onSetRanks && (
           <div role="group" aria-label="Realign ranks" className="flex items-center gap-1">
             <span className="text-sm text-slate-400">Realign ranks:</span>
@@ -1523,7 +1631,7 @@ export default function BigBoard({
           </li>
         ))}
       </ul>
-      <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank or a grade to edit (1.0–100.0; Pre mirrors Dynasty) · Click any column header to sort</p>
+      <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank or a grade to edit (1.0–100.0; Pre mirrors Dynasty) · Click any column header to sort{onSetShareRedacted ? " · The eye beside a name redacts him on shared links" : ""}</p>
       <p className="text-xs text-slate-600 mb-2 text-center">AE Score true spread: {compositeStatus}</p>
       <p className="text-xs text-slate-600 mb-2 text-center">
         Opponent strength (scores only): {opponentStatus}

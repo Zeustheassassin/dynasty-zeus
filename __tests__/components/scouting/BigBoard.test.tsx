@@ -10,6 +10,7 @@ import ProspectProduction from "@/components/scouting/overview/ProspectProductio
 import { EMPTY_GRADING_DATA } from "@/lib/scouting/aeComponents";
 import type { ProspectWithStats, AEScoreLock, BoardScores } from "@/lib/types";
 import type { RoleFit } from "@/lib/scouting/roleFit";
+import type { BoardShare, SharedBoardRow } from "@/lib/scouting/sharedBoard";
 import { totalsFor } from "@/lib/pff/totals";
 import { gradeFromDynasty } from "@/lib/scouting/prospectGrade";
 import { QB_PREDRAFT_SCALE } from "@/lib/scouting/dynastyScore";
@@ -1266,5 +1267,83 @@ describe("BigBoard rank 0 removes the rank", () => {
     typeRank("#1", "3");
     await vi.waitFor(() => expect(update).toHaveBeenCalledWith("wr1", 3));
     expect(set).not.toHaveBeenCalled();
+  });
+});
+
+describe("BigBoard shared board (migration 105)", () => {
+  // The user, 2026-11-25: "make my big board sharable ... per year ... and
+  // always full board not positional", with "a % value for each player on how
+  // much of there sample they reached".
+  type ShareFn = (year: number, rows: SharedBoardRow[]) => Promise<string | null>;
+  const TOKEN = "0123456789abcdef0123456789abcdef";
+  const share = (rows: SharedBoardRow[]): BoardShare => ({ classYear: 2027, token: TOKEN, rows, updatedAt: "2026-11-25T12:00:00Z" });
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] }); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("is off until a class year is picked", () => {
+    renderBoard(PROSPECTS, undefined, { scoresReady: true, boardShares: new Map(), onSaveBoardShare: vi.fn<ShareFn>() });
+    const btn = screen.getByRole("button", { name: "Share board" }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.title).toBe("Pick a class year to share its board");
+  });
+
+  it("makes the year's link from the full class in OVR order, each with his sample percent", async () => {
+    const save = vi.fn<ShareFn>(async () => TOKEN);
+    const board = [...PROSPECTS, prospect("x", "Next Year", "WR", 1, { draft_class_year: 2028 })];
+    renderBoard(board, undefined, { draftYearFilter: 2027, scoresReady: true, boardShares: new Map(), onSaveBoardShare: save });
+    fireEvent.click(screen.getByRole("button", { name: "Share 2027 board" }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(save).toHaveBeenCalledTimes(1);
+    const [year, rows] = save.mock.calls[0];
+    expect(year).toBe(2027);
+    expect(rows.map((r) => r.name)).toEqual(["Wide One", "Wide Two", "Quarter One", "Running One", "Tight One", "Tight Two"]);
+    // 50 of 180 throws = 27.7%, shown as 27%.
+    expect(rows.find((r) => r.name === "Quarter One")!.sample).toEqual({ n: 50, full: 180, pct: 27, tier: "quarter" });
+    expect(rows.find((r) => r.name === "Wide One")).toMatchObject({ ovr: 1, posRank: 1, pre: 92.4, pos: "WR" });
+  });
+
+  it("waits for the board to load before making a link", () => {
+    const save = vi.fn<ShareFn>(async () => TOKEN);
+    renderBoard(PROSPECTS, undefined, { draftYearFilter: 2027, scoresReady: false, boardShares: new Map(), onSaveBoardShare: save });
+    expect((screen.getByRole("button", { name: "Share 2027 board" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps a shared year up to date while the board is open, and leaves it alone when nothing changed", async () => {
+    const save = vi.fn<ShareFn>(async () => TOKEN);
+    const a = renderBoard(PROSPECTS, undefined, { scoresReady: true, boardShares: new Map([[2027, share([])]]), onSaveBoardShare: save });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(save).toHaveBeenCalledTimes(1);
+    const [, fresh] = save.mock.calls[0];
+    expect(fresh).toHaveLength(PROSPECTS.length);
+    a.unmount();
+    const again = vi.fn<ShareFn>(async () => TOKEN);
+    renderBoard(PROSPECTS, undefined, { scoresReady: true, boardShares: new Map([[2027, share(fresh)]]), onSaveBoardShare: again });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(again).not.toHaveBeenCalled();
+  });
+
+  it("the eye beside a name redacts him on shared links, and his shared row hides who he is", async () => {
+    const setRedacted = vi.fn(async () => true);
+    const save = vi.fn<ShareFn>(async () => TOKEN);
+    const board = PROSPECTS.map((p) => (p.id === "rb1" ? { ...p, share_redacted: true } : p));
+    renderBoard(board, undefined, {
+      scoresReady: true, boardShares: new Map([[2027, share([])]]), onSaveBoardShare: save, onSetShareRedacted: setRedacted,
+    });
+    const showBtn = screen.getByRole("button", { name: "Show Running One on shared boards" });
+    expect(showBtn.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Redact Wide One on shared boards" }));
+    expect(setRedacted).toHaveBeenCalledWith("wr1", true);
+    fireEvent.click(showBtn);
+    expect(setRedacted).toHaveBeenLastCalledWith("rb1", false);
+    await vi.advanceTimersByTimeAsync(1000);
+    const [, rows] = save.mock.calls[0];
+    expect(rows[3]).toMatchObject({ redacted: true, name: "Redacted", ovr: 4, pos: "RB", school: "" });
+    expect(JSON.stringify(rows)).not.toContain("Running One");
+  });
+
+  it("offers the link and a View of the shared page once the year has one", () => {
+    renderBoard(PROSPECTS, undefined, { draftYearFilter: 2027, scoresReady: true, boardShares: new Map([[2027, share([])]]), onSaveBoardShare: vi.fn<ShareFn>(async () => TOKEN) });
+    expect(screen.getByRole("button", { name: "Share 2027 board" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "View" }).getAttribute("href")).toBe(`/board/${TOKEN}`);
   });
 });

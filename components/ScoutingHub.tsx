@@ -42,6 +42,7 @@ import type { RankUpdate } from "../lib/scouting/realignRanks";
 import { chartedGamesByProspect, countUnwatched, tapeSourceSuggestions, unwatchedByProspect } from "../lib/scouting/unwatchedGames";
 import { readyToChart } from "../lib/scouting/readyToChart";
 import { hubHeaderBreakdown, type HubHeaderCounts } from "../lib/scouting/hubHeaderCounts";
+import { parseSharedBoardRows, type BoardShare, type SharedBoardRow } from "../lib/scouting/sharedBoard";
 
 const log = logger("ScoutingHub");
 
@@ -327,6 +328,10 @@ export default function ScoutingHub() {
     useState<Map<string, Record<TEBlockKey, TEBlockStat>>>(new Map());
   const [loading, setLoading] = useState(true);
   const [draftYearFilter, setDraftYearFilter] = useState<number | null>(null);
+  // The user's shared Big Board links by class year (migration 105); null
+  // while loading. boardSharesMissing: the table isn't there yet.
+  const [boardShares, setBoardShares] = useState<ReadonlyMap<number, BoardShare> | null>(null);
+  const [boardSharesMissing, setBoardSharesMissing] = useState(false);
 
   // Lazy-loaded raw plays for RB/QB/TE. Triggered by AnalysisHub or
   // GamesLog when they need the data — fetched at most once per parent
@@ -801,6 +806,57 @@ export default function ScoutingHub() {
     return true;
   }, []);
 
+  // The user's shared Big Board links (migration 105), once per visit. Owner-only
+  // RLS: only their own rows come back.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase.from("big_board_shares").select("class_year,token,rows,updated_at");
+      if (cancelled) return;
+      if (error) {
+        const missing = error.code === "42P01" || error.code === "PGRST205" || /does not exist|could not find/i.test(error.message ?? "");
+        if (missing) log.warn("big_board_shares missing (apply migration 105); Share board is off");
+        else log.error("big_board_shares load (Share board is off)", { msg: error.message, code: error.code });
+        setBoardSharesMissing(missing);
+        return;
+      }
+      const rows = (data ?? []) as { class_year: number; token: string; rows: unknown; updated_at: string }[];
+      setBoardShares(new Map(rows.map((r) => [r.class_year, {
+        classYear: r.class_year, token: r.token, rows: parseSharedBoardRows(r.rows), updatedAt: r.updated_at,
+      }])));
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Save one class's shared board rows (creates its link the first time) and
+  // keep them as saved, so the Big Board only writes again when they change.
+  // Resolves with the link token, or null on a failed write. Stable, so the
+  // Big Board's save delay isn't restarted by every render here.
+  const handleSaveBoardShare = useCallback(async (year: number, rows: SharedBoardRow[]): Promise<string | null> => {
+    const { data, error } = await supabase.rpc("save_big_board_share", { p_class_year: year, p_rows: rows });
+    if (error || typeof data !== "string") {
+      log.error("save shared board (needs migration 105)", { year, msg: error?.message, code: error?.code });
+      return null;
+    }
+    const share: BoardShare = { classYear: year, token: data, rows, updatedAt: new Date().toISOString() };
+    setBoardShares((prev) => new Map(prev ?? []).set(year, share));
+    return data;
+  }, []);
+
+  // Redacted on shared Big Board links (prospects.share_redacted, migration
+  // 105). Optimistic; a failed write (e.g. 105 not applied) rolls back, so the
+  // board never shows him hidden while the link still shows him.
+  const handleSetShareRedacted = useCallback(async (id: string, redacted: boolean): Promise<boolean> => {
+    setProspects((prev) => prev.map((p) => (p.id === id ? { ...p, share_redacted: redacted } : p)));
+    const { error } = await supabase.from("prospects").update({ share_redacted: redacted }).eq("id", id);
+    if (error) {
+      log.error("set share_redacted (needs migration 105)", { msg: error.message, code: error.code });
+      setProspects((prev) => prev.map((p) => (p.id === id ? { ...p, share_redacted: !redacted } : p)));
+      return false;
+    }
+    return true;
+  }, []);
+
   // The draft board's scores (prospects.board_scores, migration 068), many
   // prospects in one call. Not mirrored into state: the Big Board tracks what it
   // saved, and the Unwatched tab's order reads them as loaded (a Big Board
@@ -1091,6 +1147,11 @@ export default function ScoutingHub() {
             onApplyDraftResults={handleApplyDraftResults}
             onUpdateWillPlayPost={handleUpdateWillPlayPost}
             onSaveLandingInputs={handleSaveLandingInputs}
+            samplePlays={samplePlaysByProspect}
+            boardShares={boardShares}
+            boardSharesMissing={boardSharesMissing}
+            onSaveBoardShare={handleSaveBoardShare}
+            onSetShareRedacted={handleSetShareRedacted}
           />
         )}
 

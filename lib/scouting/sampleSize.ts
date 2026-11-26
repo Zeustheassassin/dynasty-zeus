@@ -20,7 +20,7 @@ import type { CompositePos } from "./aeComposite";
 import { isCompositePos, SAMPLE_UNIT, type CompositeInputs } from "./prospectScores";
 import { SAMPLE_FULL_PLAYS, sampleTier, type SampleTier } from "./sampleTiers";
 
-export { SAMPLE_TIERS, sampleTier, type SampleTier } from "./sampleTiers";
+export { SAMPLE_TIERS, samplePct, sampleTier, type SampleTier } from "./sampleTiers";
 
 /** A position's full sample: the metric whose plays count, and how many. */
 export interface SampleFull {
