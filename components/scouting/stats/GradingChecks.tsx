@@ -18,6 +18,8 @@ import {
 import { FIELD_TIME_MODIFIERS, MIN_POOL, type CompositePos } from "../../../lib/scouting/aeComposite";
 import type { ProspectGameRouteCellsRow } from "../../../lib/scouting/aggregateMerge";
 import GameContextChecks from "./GameContextChecks";
+import DueNowList, { type DueMarksState } from "./DueNowList";
+import { dataItems, type DueItem, type DueMarks } from "../../../lib/scouting/dueNow";
 
 interface Props {
   prospects: Prospect[];
@@ -28,7 +30,18 @@ interface Props {
   gameRouteCells: ProspectGameRouteCellsRow[] | null;
   gradingData: GradingData;
   loading?: boolean;
+  /** Due now (lib/scouting/dueNow.ts): the dated checks, built by ScoutingHub. */
+  dueCalendar?: readonly DueItem[];
+  dueMarks?: DueMarks | null;
+  dueMarksState?: DueMarksState;
+  /** The RB / QB / TE plays have all loaded, so the data checks can be read. */
+  playsReady?: boolean;
+  onMarkDue?: (key: string, cycle: string, value: string | null) => Promise<string | null>;
+  onUnmarkDue?: (key: string, cycle: string) => Promise<string | null>;
 }
+
+const NO_MARKS: DueMarks = new Map();
+const noMark = async () => "Can't mark from here";
 
 const th = "px-2 py-1 text-left font-medium text-slate-500 whitespace-nowrap";
 const td = "px-2 py-1 whitespace-nowrap text-slate-300";
@@ -139,15 +152,30 @@ function ComponentRows({ pos, checks }: { pos: CompositePos; checks: ComponentCh
   );
 }
 
-export default function GradingChecks({ prospects, games, qbPlays, rbPlays, tePlays, gameRouteCells, gradingData, loading }: Props) {
+export default function GradingChecks({
+  prospects, games, qbPlays, rbPlays, tePlays, gameRouteCells, gradingData, loading,
+  dueCalendar = [], dueMarks = null, dueMarksState = "loading", playsReady = false, onMarkDue = noMark, onUnmarkDue = noMark,
+}: Props) {
   const report = useMemo(
     () => buildGradingReport({ prospects, games, qbPlays, rbPlays, tePlays, gameRouteCells, gradingData }),
     [prospects, games, qbPlays, rbPlays, tePlays, gameRouteCells, gradingData],
+  );
+  // The data checks read the plays, so they wait for all three positions'.
+  const dueItems = useMemo(
+    () => [
+      ...dueCalendar,
+      ...(playsReady
+        ? dataItems({ report, games, qbPlays, rbPlays, tePlays, routeTagCells: gradingData.routeTagCells }, dueMarks ?? NO_MARKS)
+        : []),
+    ],
+    [dueCalendar, playsReady, report, games, qbPlays, rbPlays, tePlays, gradingData.routeTagCells, dueMarks],
   );
   if (loading) return <p className="text-sm text-slate-500">Loading…</p>;
   const POS: CompositePos[] = ["QB", "RB", "WR", "TE"];
   return (
     <div className="text-xs">
+      <DueNowList items={dueItems} dataReady={playsReady} marksState={dueMarksState} onMark={onMarkDue} onUnmark={onUnmarkDue} />
+
       <Section
         title="Difficulty tags (tag correction)"
         note="Each tag can only change how a TAGGED play is judged, on top of today's model; old plays are always judged as before. A tag stays off until there are enough tagged plays to test it held out by prospect, and is switched on only if the test shows lower held-out log loss with it."

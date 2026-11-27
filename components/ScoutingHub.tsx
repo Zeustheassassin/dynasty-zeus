@@ -43,6 +43,9 @@ import { chartedGamesByProspect, countUnwatched, tapeSourceSuggestions, unwatche
 import { readyToChart } from "../lib/scouting/readyToChart";
 import { hubHeaderBreakdown, type HubHeaderCounts } from "../lib/scouting/hubHeaderCounts";
 import { parseSharedBoardRows, type BoardShare, type SharedBoardRow } from "../lib/scouting/sharedBoard";
+import { calendarItems, markKey, slowTapeOpen, type DueMark } from "../lib/scouting/dueNow";
+import { buildChartNext, scoutingClassYear } from "../lib/scouting/chartNext";
+import type { DueMarksState } from "./scouting/stats/DueNowList";
 
 const log = logger("ScoutingHub");
 
@@ -333,6 +336,12 @@ export default function ScoutingHub() {
   // while loading. boardSharesMissing: the table isn't there yet.
   const [boardShares, setBoardShares] = useState<ReadonlyMap<number, BoardShare> | null>(null);
   const [boardSharesMissing, setBoardSharesMissing] = useState(false);
+  // Done marks on Analysis → Grading checks → Due now (migration 106), by
+  // markKey(check, cycle); null while loading or when they didn't load.
+  const [dueMarks, setDueMarks] = useState<ReadonlyMap<string, DueMark> | null>(null);
+  const [dueMarksState, setDueMarksState] = useState<DueMarksState>("loading");
+  // "Today" for the dated checks, fixed for the visit.
+  const [dueNow] = useState(() => new Date());
 
   // Lazy-loaded raw plays for RB/QB/TE. Triggered by AnalysisHub or
   // GamesLog when they need the data — fetched at most once per parent
@@ -829,6 +838,56 @@ export default function ScoutingHub() {
     return () => { cancelled = true; };
   }, []);
 
+  // The user's Due now marks (migration 106), once per visit. Owner-only RLS.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase.from("scouting_due_marks").select("item_key,cycle,value,done_at");
+      if (cancelled) return;
+      if (error) {
+        const missing = error.code === "42P01" || error.code === "PGRST205" || /does not exist|could not find/i.test(error.message ?? "");
+        if (missing) log.warn("scouting_due_marks missing (apply migration 106); Due now can't mark checks done");
+        else log.error("scouting_due_marks load", { msg: error.message, code: error.code });
+        setDueMarksState(missing ? "missing" : "failed");
+        return;
+      }
+      const rows = (data ?? []) as { item_key: string; cycle: string; value: string | null; done_at: string }[];
+      setDueMarks(new Map(rows.map((r) => [markKey(r.item_key, r.cycle), { doneAt: r.done_at, value: r.value }])));
+      setDueMarksState("ok");
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Mark a Due now check done for a cycle (marking again moves its date), with
+  // a choice or null. Resolves to an error message, or null.
+  const markDue = useCallback(async (key: string, cycle: string, value: string | null): Promise<string | null> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return "Not signed in";
+    const doneAt = new Date().toISOString();
+    const { error } = await supabase
+      .from("scouting_due_marks")
+      .upsert({ user_id: user.id, item_key: key, cycle, value, done_at: doneAt }, { onConflict: "user_id,item_key,cycle" });
+    if (error) {
+      log.error("save due mark (needs migration 106)", { msg: error.message, code: error.code });
+      return "Couldn't save (is migration 106 applied?)";
+    }
+    setDueMarks((prev) => new Map(prev ?? []).set(markKey(key, cycle), { doneAt, value }));
+    return null;
+  }, []);
+  const unmarkDue = useCallback(async (key: string, cycle: string): Promise<string | null> => {
+    const { error } = await supabase.from("scouting_due_marks").delete().eq("item_key", key).eq("cycle", cycle);
+    if (error) {
+      log.error("remove due mark", { msg: error.message, code: error.code });
+      return "Couldn't undo";
+    }
+    setDueMarks((prev) => {
+      const next = new Map(prev ?? []);
+      next.delete(markKey(key, cycle));
+      return next;
+    });
+    return null;
+  }, []);
+
   // Save one class's shared board rows (creates its link the first time) and
   // keep them as saved, so the Big Board only writes again when they change.
   // Resolves with the link token, or null on a failed write. Stable, so the
@@ -909,6 +968,20 @@ export default function ScoutingHub() {
     () => [...new Set(prospects.map((p) => p.draft_class_year))].sort((a, b) => a - b),
     [prospects],
   );
+
+  // Due now's dated checks (lib/scouting/dueNow.ts), with the top-60 goal read
+  // off Chart Next for the class being scouted. Their due count badges the
+  // Analysis tab; the data checks are read in Grading checks once the plays load.
+  const dueCalendar = useMemo(() => {
+    const goal = loading ? null : buildChartNext(scoutingClassYear(dueNow), {
+      prospects: prospectsWithStats, games, snapCounts: unwatchedLoadFailed ? null : gameSnapStatsRows,
+      samplePlays: samplePlaysByProspect, pffTotals, routeCounts,
+    }).goals.full;
+    return calendarItems(dueNow, dueMarks ?? new Map(), goal, prospects);
+  }, [loading, dueNow, prospectsWithStats, games, unwatchedLoadFailed, gameSnapStatsRows, samplePlaysByProspect, pffTotals, routeCounts, dueMarks, prospects]);
+  const dueCount = dueCalendar.filter((i) => i.state === "due").length;
+  // The Catapult call made for a class: Chart Next shows its slow-tape conferences.
+  const slowTapeShown = useCallback((year: number) => slowTapeOpen(dueMarks, year), [dueMarks]);
 
   // Unwatched / Chart Next tab → his board, on Chart Game with that game picked.
   const openGame = useCallback((p: Prospect, gameId: string) => {
@@ -1082,6 +1155,14 @@ export default function ScoutingHub() {
                   }`}
                 >
                   {t.label}
+                  {t.key === "analysis" && dueCount > 0 && (
+                    <span
+                      className="ml-1.5 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[11px] font-semibold text-amber-300"
+                      title={`${dueCount} dated ${dueCount === 1 ? "check is" : "checks are"} due (Analysis → Grading checks → Due now)`}
+                    >
+                      {dueCount}
+                    </span>
+                  )}
                   {t.key === "unwatched" && unwatchedCount > 0 && (
                     <span
                       className="ml-1.5 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[11px] font-semibold text-amber-300"
@@ -1178,6 +1259,7 @@ export default function ScoutingHub() {
             setDraftYearFilter={setDraftYearFilter}
             onOpenProspect={openProspect}
             onOpenGame={openGame}
+            slowTapeShown={slowTapeShown}
           />
         )}
 
@@ -1210,6 +1292,13 @@ export default function ScoutingHub() {
             pffTotals={pffTotals}
             gradingData={gradingData}
             gameRouteCells={gameRouteCells}
+            dueCalendar={dueCalendar}
+            dueMarks={dueMarks}
+            dueMarksState={dueMarksState}
+            dueCount={dueCount}
+            playsReady={scoresReady}
+            onMarkDue={markDue}
+            onUnmarkDue={unmarkDue}
             onSelectProspect={(p) => {
               setPendingProspect(p);
               setPositionTab(p.position as PositionTab);

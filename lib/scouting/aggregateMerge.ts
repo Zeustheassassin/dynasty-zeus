@@ -676,7 +676,7 @@ function wrRoleSkill(cells: RouteCell[], model: WRModelWith): WRRoleSkill {
 
 // Each WR's tagged press reps and releases won (migration 064), and the pool's
 // win rate, for the X bucket (roleFitWR.ts).
-function releaseByProspect(tagRows: readonly ProspectGameRouteTagCellsRow[]): { byProspect: Map<string, { won: number; n: number }>; league: number | null } {
+export function releaseByProspect(tagRows: readonly ProspectGameRouteTagCellsRow[]): { byProspect: Map<string, { won: number; n: number }>; league: number | null } {
   const byProspect = new Map<string, { won: number; n: number }>();
   let won = 0, n = 0;
   for (const row of tagRows) {

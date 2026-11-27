@@ -281,8 +281,13 @@ export function weeksAtPace(plays: number, perWeek: number): number | null {
  */
 export function chartNextDefaultClass(years: readonly number[], now = new Date()): number | null {
   if (years.length === 0) return null;
-  const scouting = now.getMonth() >= 4 ? now.getFullYear() + 1 : now.getFullYear();
+  const scouting = scoutingClassYear(now);
   return years.find((y) => y >= scouting) ?? years[years.length - 1];
+}
+
+/** The class being scouted at `now`: this year's until the draft closes it, next year's from May. */
+export function scoutingClassYear(now = new Date()): number {
+  return now.getMonth() >= 4 ? now.getFullYear() + 1 : now.getFullYear();
 }
 
 /**

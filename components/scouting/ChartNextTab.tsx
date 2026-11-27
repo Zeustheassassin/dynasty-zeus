@@ -60,6 +60,8 @@ interface Props {
   onOpenGame: (p: Prospect, gameId: string) => void;
   /** The pace read; tests pass their own. */
   loadPace?: () => Promise<PaceCounts | null>;
+  /** The Catapult call is made for this class (Due now): show the slow-tape conferences by default. */
+  slowTapeShown?: (year: number) => boolean;
 }
 
 const chip = (on: boolean) =>
@@ -70,10 +72,12 @@ const weeksText = (w: number | null) => (w == null ? "—" : w === 0 ? "done" : 
 
 export default function ChartNextTab({
   prospects, games, snapCounts, samplePlays, pffTotals, routeCounts, years, loading,
-  draftYearFilter, setDraftYearFilter, onOpenProspect, onOpenGame, loadPace = fetchChartingPace,
+  draftYearFilter, setDraftYearFilter, onOpenProspect, onOpenGame, loadPace = fetchChartingPace, slowTapeShown,
 }: Props) {
   const [position, setPosition] = useState<ChartNextPos | null>(null);
-  const [conf, setConf] = useState<string>(GOOD);
+  // Null until picked: good tape only, or every conference once the Catapult
+  // call is made for the class.
+  const [confPick, setConfPick] = useState<string | null>(null);
   const [pace, setPace] = useState<PaceState>({ kind: "loading" });
 
   useEffect(() => {
@@ -86,6 +90,8 @@ export default function ChartNextTab({
   }, [loadPace]);
 
   const year = draftYearFilter != null && years.includes(draftYearFilter) ? draftYearFilter : chartNextDefaultClass(years);
+  const catapultMade = year != null && (slowTapeShown?.(year) ?? false);
+  const conf = confPick ?? (catapultMade ? ALL : GOOD);
 
   const board = useMemo(
     () => (year == null ? null : buildChartNext(year, { prospects, games, snapCounts, samplePlays, pffTotals, routeCounts })),
@@ -133,7 +139,7 @@ export default function ChartNextTab({
           Conference:
           <select
             value={conf}
-            onChange={(e) => setConf(e.target.value)}
+            onChange={(e) => setConfPick(e.target.value)}
             className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-white focus:border-blue-500 focus:outline-none"
           >
             <option value={GOOD}>Good tape (hides {SLOW_LABEL})</option>
@@ -143,6 +149,12 @@ export default function ChartNextTab({
           </select>
         </label>
       </div>
+
+      {catapultMade && confPick == null && (
+        <p className="text-xs text-slate-500">
+          Every conference shows: the Catapult call for {year} is made (Analysis → Grading checks → Due now).
+        </p>
+      )}
 
       {!board.chartedKnown && (
         <div className="rounded border border-red-800 bg-red-900/30 px-3 py-2 text-xs text-red-300">

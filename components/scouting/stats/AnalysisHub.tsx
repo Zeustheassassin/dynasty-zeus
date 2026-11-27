@@ -7,6 +7,8 @@ import type { PffTotals } from "../../../lib/pff/totals";
 import { EMPTY_GRADING_DATA, type GradingData } from "../../../lib/scouting/aeComponents";
 import { contextExtras as contextExtrasFor } from "./contextCols";
 import type { ProspectGameRouteCellsRow } from "../../../lib/scouting/aggregateMerge";
+import type { DueItem, DueMarks } from "../../../lib/scouting/dueNow";
+import type { DueMarksState } from "./DueNowList";
 
 const WRStatsTable = dynamic(() => import("./WRStatsTable"), { ssr: false });
 const RBStatsTable = dynamic(() => import("./RBStatsTable"), { ssr: false });
@@ -36,6 +38,14 @@ interface Props {
   gradingData?: GradingData;
   /** prospect_game_route_cells (058), for the Grading checks' WR model. */
   gameRouteCells?: ProspectGameRouteCellsRow[] | null;
+  /** Due now (Grading checks): the dated checks, their marks, and how many are due. */
+  dueCalendar?: readonly DueItem[];
+  dueMarks?: DueMarks | null;
+  dueMarksState?: DueMarksState;
+  dueCount?: number;
+  playsReady?: boolean;
+  onMarkDue?: (key: string, cycle: string, value: string | null) => Promise<string | null>;
+  onUnmarkDue?: (key: string, cycle: string) => Promise<string | null>;
 }
 
 const POSITION_LABELS: Record<PositionTab, string> = {
@@ -58,6 +68,7 @@ export default function AnalysisHub({
   prospects, prospectsWithStats, games, rbPlays, qbPlays, tePlays,
   loadPositionPlays, loading, draftYearFilter, setDraftYearFilter, onSelectProspect, pffTotals,
   gradingData = EMPTY_GRADING_DATA, gameRouteCells = null,
+  dueCalendar, dueMarks, dueMarksState, dueCount = 0, playsReady, onMarkDue, onUnmarkDue,
 }: Props) {
   const [posTab, setPosTab] = useState<PositionTab>("WR");
   // Each prospect's game context (Stage 5), for every table.
@@ -102,6 +113,14 @@ export default function AnalysisHub({
             >
               <span className="hidden sm:inline">{POSITION_LABELS[pos]}</span>
               <span className="sm:hidden">{pos === "Grading" ? "Checks" : pos}</span>
+              {pos === "Grading" && dueCount > 0 && (
+                <span
+                  className="ml-1.5 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[11px] font-semibold text-amber-300"
+                  title={`${dueCount} dated ${dueCount === 1 ? "check is" : "checks are"} due (Due now)`}
+                >
+                  {dueCount}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -196,6 +215,12 @@ export default function AnalysisHub({
           gameRouteCells={gameRouteCells}
           gradingData={gradingData}
           loading={loading}
+          dueCalendar={dueCalendar}
+          dueMarks={dueMarks}
+          dueMarksState={dueMarksState}
+          playsReady={playsReady}
+          onMarkDue={onMarkDue}
+          onUnmarkDue={onUnmarkDue}
         />
       )}
     </div>

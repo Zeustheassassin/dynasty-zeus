@@ -111,6 +111,14 @@ describe("ChartNextTab", () => {
     expect(setDraftYearFilter).toHaveBeenCalledWith(2028);
   });
 
+  it("shows every conference once the class's Catapult call is made, until a pick", () => {
+    renderTab({ slowTapeShown: (y) => y === 2027 });
+    expect(within(section("Finish the top 60")).getByText("Slow RB")).toBeTruthy();
+    expect(screen.getByText(/the Catapult call for 2027 is made/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/Conference/), { target: { value: "__good" } });
+    expect(within(section("Finish the top 60")).queryByText("Slow RB")).toBeNull();
+  });
+
   it("says so when the pace or the play counts didn't load", async () => {
     renderTab({ loadPace: async () => null, snapCounts: null });
     expect(await screen.findByText(/couldn't load the recent plays/)).toBeTruthy();
