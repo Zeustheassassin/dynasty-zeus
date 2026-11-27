@@ -21,6 +21,7 @@ import type {
 import { ROUTE_LABELS, ROUTE_TYPES } from "../shared/chartingConstants";
 import { pct, fmtPct } from "../shared/chartingTypes";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
+import { SampleTotalLabel, SetAsideMark } from "../shared/SampleSwitch";
 import type { OverviewData } from "../overview/ProspectOverview";
 import { usePffGameLog } from "../pff/usePffGameLog";
 import { useGameContextLog } from "../context/useGameContextLog";
@@ -40,8 +41,9 @@ import {
 } from "../../../lib/scouting/teChartingDefaults";
 import {
   buildTERouteBaselines, computeTERouteAboveExpectedForPlays,
-  buildTEBlockBaselines, computeTEBlockAboveExpectedForPlays,
+  buildTEBlockBaselines, computeTEBlockAboveExpectedForPlays, isRatedTERoute,
 } from "../../../lib/scouting/aboveExpected";
+import { inSample, sampleSwitchFor, setAsideGameIds } from "../../../lib/scouting/sampleGames";
 
 const LOCATIONS: { key: TELocation; label: string }[] = [
   { key: "left",      label: "Left" },
@@ -154,7 +156,15 @@ export default function TEChartingBoard({ prospect, initialGameId, onBack, onDat
   const tagsMissing = tags.missing(tagFacts).length > 0;
   const variantMissing = playType === "route_run" && variant.missing(routeType);
 
+  // His sample: every game but an imported one he has set aside (sampleGames.ts).
+  // The career numbers read it; the per-game ones read every game.
+  const sampleAside = useMemo(() => setAsideGameIds(games), [games]);
+  const samplePlays = useMemo(() => inSample(plays, sampleAside), [plays, sampleAside]);
+  const sampleGameCount = games.length - sampleAside.size;
+  const sampleSwitch = useMemo(() => sampleSwitchFor("TE", games, plays, isRatedTERoute), [games, plays]);
+
   const stats = useMemo(() => {
+    const plays = samplePlays;
     const routePlays = plays.filter((p) => p.play_type === "route_run");
     const blockPlays = plays.filter((p) => p.play_type === "run_block" || p.play_type === "pass_block");
     const runBlocks  = plays.filter((p) => p.play_type === "run_block");
@@ -236,7 +246,7 @@ export default function TEChartingBoard({ prospect, initialGameId, onBack, onDat
       coverageBreakdown,
       posBreakdown,
     };
-  }, [plays]);
+  }, [samplePlays]);
 
   const gamePlayCounts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -447,6 +457,7 @@ export default function TEChartingBoard({ prospect, initialGameId, onBack, onDat
       onTabChange={onTabChange} onSelectGame={onSelectGame} onToggleAddGame={onToggleAddGame}
       onNewGameChange={onNewGameChange} onAddGame={onAddGame} onDeleteGame={onDeleteGame} onUpdateGame={onUpdateGame}
       onToggleEditBio={onToggleEditBio} onBioChange={onBioChange} onSaveBio={onSaveBio}
+      sampleSwitch={sampleSwitch} onSetCountInSample={cs.onSetCountInSample} sampleError={cs.sampleError}
       renderGameBadge={(g) => {
         const cov = gameStats.cov[g.id];
         const blk = gameStats.blk[g.id];
@@ -500,7 +511,7 @@ export default function TEChartingBoard({ prospect, initialGameId, onBack, onDat
       }}
       renderHeaderStats={() => (
         <>
-          <div>{stats.totalPlays} plays · {games.length} games</div>
+          <div>{stats.totalPlays} plays · {sampleGameCount} games</div>
           <div className="text-green-400">{stats.routeAttempts} routes · {stats.blockAttempts} blocks</div>
         </>
       )}
@@ -986,7 +997,7 @@ export default function TEChartingBoard({ prospect, initialGameId, onBack, onDat
                     return (
                       <tr key={g.id} className="hover:bg-slate-900/50 transition">
                         <td className="py-2 pr-4 text-slate-300">{g.season_year}</td>
-                        <td className="py-2 pr-4 text-white font-medium">{g.opponent}</td>
+                        <td className="py-2 pr-4 text-white font-medium">{g.opponent}<SetAsideMark game={g} /></td>
                         <td className="py-2 pr-4 text-slate-400 capitalize">{g.game_type}</td>
                         <td className="py-2 pr-4 text-right text-blue-400">{gp.length}</td>
                         <td className="py-2 pr-4 text-right text-green-400">{routes.length || "—"}</td>
@@ -1002,7 +1013,7 @@ export default function TEChartingBoard({ prospect, initialGameId, onBack, onDat
                 </tbody>
                 <tfoot>
                   <tr className="border-t border-slate-700 text-xs text-slate-500 font-medium">
-                    <td colSpan={3} className="pt-2">Total ({games.length} games)</td>
+                    <td colSpan={3} className="pt-2"><SampleTotalLabel games={games} /></td>
                     <td className="pt-2 text-right text-blue-400">{stats.totalPlays}</td>
                     <td className="pt-2 text-right text-green-400">{stats.routeAttempts}</td>
                     <td className="pt-2 text-right text-amber-400">{stats.targets}</td>

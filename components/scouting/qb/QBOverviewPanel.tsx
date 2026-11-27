@@ -15,6 +15,7 @@ import { ROUTE_TYPES } from "../shared/chartingConstants";
 import { splitByRouteVariant } from "../../../lib/scouting/routeVariants";
 import { pct, fmtPct } from "../shared/chartingTypes";
 import { computeQBAAEBreakdown } from "../../../lib/scouting/aboveExpected";
+import { countsInSample } from "../../../lib/scouting/sampleGames";
 import PlayerNotesList from "../PlayerNotesList";
 import {
   SNAP_POSITIONS,
@@ -33,13 +34,15 @@ import {
 interface Props {
   plays: QBPlay[];
   leaguePlays: QBPlay[];
-  /** This prospect's games: their seasons weight the AAE breakdown. */
+  /** This prospect's games: their seasons weight the AAE breakdown. `plays` are
+   *  his sample's (the board leaves out a set-aside imported game's), and so is
+   *  the Games count. */
   games: ScoutingGame[];
   loading?: boolean;
 }
 
 export default function QBOverviewPanel({ plays, leaguePlays, games, loading }: Props) {
-  const gamesCount = games.length;
+  const gamesCount = games.filter(countsInSample).length;
   const aaeBreakdown = useMemo(
     () => computeQBAAEBreakdown(plays, leaguePlays, games),
     [plays, leaguePlays, games],

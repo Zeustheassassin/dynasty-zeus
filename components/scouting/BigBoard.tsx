@@ -45,6 +45,7 @@ import {
 import { useProspectScores, useDynastyWeights } from "./shared/hooks/useProspectScores";
 import { SAMPLE_FULL, SAMPLE_TIERS, samplePct, sampleSizes, sampleText, type SampleSize } from "../../lib/scouting/sampleSize";
 import { CHARTED_PLAYS, chartedCounts, isChartedPos, type ChartedCounts } from "../../lib/scouting/chartedCounts";
+import { countsInSample } from "../../lib/scouting/sampleGames";
 import { boardScoresKey, buildBoardScores, changedBoardScores, type BoardScoresValue } from "../../lib/scouting/boardScores";
 import { buildSharedBoardRows, sharedBoardKey, type BoardShare, type SharedBoardInputs, type SharedBoardRow } from "../../lib/scouting/sharedBoard";
 import type { SamplePlays } from "../../lib/scouting/aggregateMerge";
@@ -266,7 +267,7 @@ function getSortValue(
   if (key === "forty") return fortyDisplay(p)?.sortValue ?? null;
   if (key === "age") return ctx.ages.get(p.id)?.years ?? BIG;
   if (key === "total_routes") return p.total_routes;
-  if (key === "total_games") return p.total_games;
+  if (key === "total_games") return p.sample_games ?? p.total_games;
   if (key === "targets") return p.targets;
   if (key === "catches") return p.catches;
   if (key === "drops") return p.drops;
@@ -460,6 +461,12 @@ export default function BigBoard({
   // Each prospect's charted sample against his position's full sample
   // (sampleSize.ts): the dot beside the rank. Always live, in either score view.
   const samples = useMemo(() => sampleSizes(prospects, compositeInputs), [prospects, compositeInputs]);
+  // Imported games each prospect has set aside (sampleGames.ts), for the dot's tooltip.
+  const setAsideBy = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const g of games) if (!countsInSample(g)) m.set(g.prospect_id, (m.get(g.prospect_id) ?? 0) + 1);
+    return m;
+  }, [games]);
 
   // Charted games, snaps and throws / runs / routes (chartedCounts.ts), counted
   // as the Analysis tables count them. QB / RB / TE wait for their plays.
@@ -973,8 +980,10 @@ export default function BigBoard({
     if (!s) return <td style={style} className={cls} />;
     const t = SAMPLE_TIERS.find((x) => x.tier === s.tier)!;
     const how = s.tier === "full" ? "full" : `${samplePct(s.n ?? 0, s.full)}% of full`;
+    const aside = setAsideBy.get(p.id) ?? 0;
+    const asideText = aside > 0 ? ` (${aside} imported game${aside === 1 ? "" : "s"} set aside)` : "";
     return (
-      <td style={style} className={cls} title={`Sample ${how}: ${sampleText(s)}`}>
+      <td style={style} className={cls} title={`Sample ${how}: ${sampleText(s)}${asideText}`}>
         <span role="img" aria-label={`Sample: ${t.label}`} className={`inline-block w-2.5 h-2.5 rounded-full align-middle ${t.dot}`} />
       </td>
     );

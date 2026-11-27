@@ -7,6 +7,7 @@ import { logger } from "../../../lib/logger";
 const log = logger("scouting/rb/RBChartingBoard");
 import PlayerNotesList from "../PlayerNotesList";
 import ChartingBoard from "../shared/ChartingBoard";
+import { SampleTotalLabel, SetAsideMark } from "../shared/SampleSwitch";
 import type { OverviewData } from "../overview/ProspectOverview";
 import { usePffGameLog } from "../pff/usePffGameLog";
 import { useGameContextLog } from "../context/useGameContextLog";
@@ -25,7 +26,8 @@ import { routeVariantSpec } from "../../../lib/scouting/routeVariants";
 import { RB_BACKFIELD_ROUTES, RB_ROUTE_RUN_DEFAULT, rbBucketFor, rbRouteOffered } from "../../../lib/scouting/rbRouteTree";
 import { isRBBlock, isRBCarry, usualRBPlay, type UsualRBPlay } from "../../../lib/scouting/usualAlignment";
 import RBPlayerCharts from "./RBPlayerCharts";
-import { buildRBBaselines, computeRBAboveExpectedForPlays } from "../../../lib/scouting/aboveExpected";
+import { buildRBBaselines, computeRBAboveExpectedForPlays, isKnownRun } from "../../../lib/scouting/aboveExpected";
+import { inSample, sampleSwitchFor, setAsideGameIds } from "../../../lib/scouting/sampleGames";
 import type {
   Prospect,
   ProspectWithStats,
@@ -251,8 +253,16 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
   // A route's bucket: from the tree route, or the one an older play was charted with.
   const routeBucket = routeDetail ? rbBucketFor(routeDetail, variant.value) : rbRouteType;
 
+  // His sample: every game but an imported one he has set aside (sampleGames.ts).
+  // The career numbers below read it; the per-game ones read every game.
+  const sampleAside = useMemo(() => setAsideGameIds(games), [games]);
+  const samplePlays = useMemo(() => inSample(plays, sampleAside), [plays, sampleAside]);
+  const sampleGameCount = games.length - sampleAside.size;
+  const sampleSwitch = useMemo(() => sampleSwitchFor("RB", games, plays, isKnownRun), [games, plays]);
+
   // ── Aggregate stats ───────────────────────────────────────────
   const stats = useMemo(() => {
+    const plays = samplePlays;
     const runPlays = plays.filter(isRunPlay);
     const routeRuns = plays.filter((p) => p.run_type === "route");
     const runAttempts = runPlays.length;
@@ -333,7 +343,7 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
         runStuff:      { count: runStuff,      pct: pct(runStuff,      runAttempts) },
       },
     };
-  }, [plays]);
+  }, [samplePlays]);
 
   // Per-game play counts
   const gamePlayCounts = useMemo(() => {
@@ -566,6 +576,7 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
       onTabChange={onTabChange} onSelectGame={onSelectGame} onToggleAddGame={onToggleAddGame}
       onNewGameChange={onNewGameChange} onAddGame={onAddGame} onDeleteGame={onDeleteGame} onUpdateGame={onUpdateGame}
       onToggleEditBio={onToggleEditBio} onBioChange={onBioChange} onSaveBio={onSaveBio}
+      sampleSwitch={sampleSwitch} onSetCountInSample={cs.onSetCountInSample} sampleError={cs.sampleError}
       renderGameBadge={(g) => {
         const rs = gameStats[g.id];
         const hasStats = !!rs && RUN_TYPE_KEYS.some((k) => rs[k].count > 0);
@@ -598,7 +609,7 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
       }}
       renderHeaderStats={() => (
         <>
-          <div>{stats.totalPlays} plays · {games.length} games</div>
+          <div>{stats.totalPlays} plays · {sampleGameCount} games</div>
           <div className="text-green-400">{stats.runAttempts} runs · {stats.routeAttempts} routes</div>
         </>
       )}
@@ -1168,7 +1179,7 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
                     return (
                       <tr key={g.id} className="hover:bg-slate-900/50 transition">
                         <td className="py-2 pr-4 text-slate-300">{g.season_year}</td>
-                        <td className="py-2 pr-4 text-white font-medium">{g.opponent}</td>
+                        <td className="py-2 pr-4 text-white font-medium">{g.opponent}<SetAsideMark game={g} /></td>
                         <td className="py-2 pr-4 text-slate-400 capitalize">{g.game_type}</td>
                         <td className="py-2 pr-4 text-right text-blue-400">{gPlays.length}</td>
                         <td className="py-2 pr-4 text-right text-green-400">{runs.length}</td>
@@ -1185,7 +1196,7 @@ export default function RBChartingBoard({ prospect, initialGameId, onBack, onDat
                 </tbody>
                 <tfoot>
                   <tr className="border-t border-slate-700 text-xs text-slate-500 font-medium">
-                    <td colSpan={3} className="pt-2">Total ({games.length} games)</td>
+                    <td colSpan={3} className="pt-2"><SampleTotalLabel games={games} /></td>
                     <td className="pt-2 text-right text-blue-400">{stats.totalPlays}</td>
                     <td className="pt-2 text-right text-green-400">{stats.runAttempts}</td>
                     <td className="pt-2 pr-4 text-right text-slate-400">—</td>

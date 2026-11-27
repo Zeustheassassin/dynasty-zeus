@@ -30,6 +30,7 @@
 import type { QBPlay, RBPlay, ScoutingGame } from "../types";
 import type { CountStatDef, GameCount } from "./countComponents";
 import { qbThrowDifficulty } from "./aboveExpected";
+import { sampleGameToProspect, setAsideGameIds } from "./sampleGames";
 
 /** prospect_game_route_counts (migration 064): a WR game's charted receiving counts. */
 export interface ProspectGameRouteCountsRow {
@@ -126,7 +127,8 @@ function fromPlays<T extends { game_id: string }>(
 }
 
 export interface ChartedInputs {
-  games: readonly Pick<ScoutingGame, "id" | "prospect_id">[];
+  /** His games; a set-aside one (sampleGames.ts) leaves his counts. */
+  games: readonly Pick<ScoutingGame, "id" | "prospect_id" | "count_in_sample">[];
   qbPlays: readonly QBPlay[];
   rbPlays: readonly RBPlay[];
   /** prospect_game_route_counts (migration 064); empty before it's applied. */
@@ -135,9 +137,9 @@ export interface ChartedInputs {
   qbDifficulty?: ReadonlyMap<string, number>;
 }
 
-/** A charted component's per-game counts. */
+/** A charted component's per-game counts, over each player's sample games. */
 export function chartedGameCounts(key: string, inp: ChartedInputs): GameCount[] {
-  const g2p = new Map(inp.games.map((g) => [g.id, g.prospect_id]));
+  const g2p = sampleGameToProspect(inp.games);
   if (key === QB_DIFFICULTY.key) {
     const diff = inp.qbDifficulty ?? qbThrowDifficulty(inp.qbPlays);
     return fromPlays(inp.qbPlays, (pl) => {
@@ -152,7 +154,9 @@ export function chartedGameCounts(key: string, inp: ChartedInputs): GameCount[] 
   const wr = WR_CHARTED.find((d) => d.key === key);
   if (!wr) return [];
   const out: GameCount[] = [];
+  const aside = setAsideGameIds(inp.games);
   for (const r of inp.wrRouteCounts) {
+    if (aside.has(r.game_id)) continue;
     const c = wr.of(r);
     if (c) out.push({ prospectId: r.prospect_id, gameId: r.game_id, ...c });
   }

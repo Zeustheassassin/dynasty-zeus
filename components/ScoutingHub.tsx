@@ -1020,11 +1020,19 @@ export default function ScoutingHub() {
 
   const positionTabs: PositionTab[] = ["QB", "RB", "WR", "TE"];
 
-  // Snaps per prospect, sourced from the four prospect_*_stats views.
-  // WR uses prospect_route_stats.total_snaps (already on prospectsWithStats);
-  // RB/QB/TE come from the position-stub views fetched in loadAll.
+  // Charted snaps per prospect, for the header: every game's
+  // (prospect_game_snap_stats), a set-aside imported game's included: the
+  // header counts tape work, not samples (sampleGames.ts). If that view didn't
+  // load, the four prospect_*_stats views' totals (WR's on prospectsWithStats),
+  // which leave set-aside games out.
   const snapsByProspect = useMemo(() => {
     const m = new Map<string, number>();
+    if (!unwatchedLoadFailed) {
+      for (const r of gameSnapStatsRows) {
+        if (r.snaps_charted > 0) m.set(r.prospect_id, (m.get(r.prospect_id) ?? 0) + r.snaps_charted);
+      }
+      return m;
+    }
     for (const p of prospectsWithStats) {
       if (p.total_snaps > 0) m.set(p.id, p.total_snaps);
     }
@@ -1032,7 +1040,7 @@ export default function ScoutingHub() {
       if (r.total_snaps > 0) m.set(r.prospect_id, r.total_snaps);
     }
     return m;
-  }, [prospectsWithStats, posSnapsRows]);
+  }, [unwatchedLoadFailed, gameSnapStatsRows, prospectsWithStats, posSnapsRows]);
 
   // Prospects · Full · Partial · Logged · charted Games · charted Snaps, per
   // class and position (lib/scouting/hubHeaderCounts.ts).

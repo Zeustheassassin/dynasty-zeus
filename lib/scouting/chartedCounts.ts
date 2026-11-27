@@ -7,8 +7,12 @@
 // WR counts come pre-aggregated on the prospect (prospect_route_stats). QB / RB
 // / TE counts need that position's raw plays, which the hub loads lazily: until
 // they land, snaps and plays are null (unknown), never 0.
+//
+// All of it is his sample: an imported game he has set aside (sampleGames.ts)
+// leaves his games, snaps and plays, as it leaves prospect_route_stats.
 
 import type { ProspectWithStats, ScoutingGame, QBPlay, RBPlay, RBRunType, TEPlay } from "../types";
+import { sampleGameCounts, sampleGameToProspect } from "./sampleGames";
 
 export type ChartedPos = "QB" | "RB" | "WR" | "TE";
 
@@ -59,12 +63,8 @@ export function chartedCounts(
   plays: { qb: readonly QBPlay[]; rb: readonly RBPlay[]; te: readonly TEPlay[] },
   playsLoaded: boolean,
 ): Map<string, ChartedCounts> {
-  const gameToProspect = new Map<string, string>();
-  const gamesBy = new Map<string, number>();
-  for (const g of games) {
-    gameToProspect.set(g.id, g.prospect_id);
-    gamesBy.set(g.prospect_id, (gamesBy.get(g.prospect_id) ?? 0) + 1);
-  }
+  const gameToProspect = sampleGameToProspect(games);
+  const gamesBy = sampleGameCounts(games);
 
   // Snaps and plays per prospect, from one pass over each position's plays.
   const tally = new Map<string, { snaps: number; plays: number }>();

@@ -185,7 +185,7 @@ export default function ChartNextTab({
       />
       <ListSection
         title="Re-chart imported"
-        blurb={`Ranked WRs with routes from imported games (before May 1, 2026), still short of a full sample charted in the app, in OVR order. To go = routes in the app to a full sample.${board.rechartFullInApp > 0 ? ` ${board.rechartFullInApp} more already have a full sample in the app.` : ""}`}
+        blurb={`Ranked WRs with routes from imported games (before May 1, 2026), still short of a full sample charted in the app, in OVR order. To go = routes in the app to a full sample. From half a sample in the app (80 routes) his board's Chart Game list can set the imported games aside ("switch open").${board.rechartFullInApp > 0 ? ` ${board.rechartFullInApp} more already have a full sample in the app.` : ""}`}
         rows={board.rechart} keep={keep} kind="rechart" known={board.chartedKnown}
         empty="No ranked WR leans on imported games."
         onOpenProspect={onOpenProspect} onOpenGame={onOpenGame}
@@ -353,6 +353,12 @@ function Row({ r, kind, known, onOpenProspect, onOpenGame }: {
       {kind === "rechart" && (
         <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap text-slate-400" title="Routes from games imported before May 1, 2026">
           {r.imported ? <>{r.imported.routes} <span className="text-slate-500">in {r.imported.games} G</span></> : "—"}
+          {r.imported && r.imported.setAside > 0 && (
+            <span className="ml-1.5 text-amber-300" title="Imported games set aside: not in his sample">{r.imported.setAside} set aside</span>
+          )}
+          {r.imported && r.imported.setAside === 0 && r.imported.switchOpen && (
+            <span className="ml-1.5 text-emerald-400" title="Half a sample in the app: his imported games can be set aside (Chart Game)">switch open</span>
+          )}
         </td>
       )}
       <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-amber-300" title={`${r.toGo} ${unit} to go`}>{r.toGo}</td>

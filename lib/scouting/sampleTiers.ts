@@ -22,6 +22,12 @@ export const SAMPLE_TIERS: { tier: SampleTier; label: string; dot: string }[] = 
  */
 export const SAMPLE_FULL_PLAYS: Record<"QB" | "RB" | "WR" | "TE", number> = { QB: 180, RB: 100, WR: 160, TE: 140 };
 
+/** Plays a half sample needs: QB 90, RB 50, WR 80, TE 70 (Chart Next's 61–150
+ *  goal, and the imported-game "Count in sample" switch's in-app floor). */
+export function halfSamplePlays(pos: "QB" | "RB" | "WR" | "TE"): number {
+  return Math.ceil(SAMPLE_FULL_PLAYS[pos] / 2);
+}
+
 /** Whole percent of a full sample, rounded down and capped at 100: 100 of 150
  *  routes is 66%. Integer maths, so 29 of 100 is 29 (0.29 × 100 is 28.999…). */
 export function samplePct(n: number, full: number): number {

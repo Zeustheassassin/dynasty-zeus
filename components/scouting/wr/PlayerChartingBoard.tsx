@@ -18,6 +18,7 @@ import type {
 } from "../../../lib/types";
 import { ROUTE_TYPES } from "../shared/chartingConstants";
 import ChartingBoard, { type ChartingBoardConfig } from "../shared/ChartingBoard";
+import { SampleTotalLabel, SetAsideMark } from "../shared/SampleSwitch";
 import type { OverviewData } from "../overview/ProspectOverview";
 import { useChartingState } from "../shared/hooks/useChartingState";
 import { usePlayTags } from "../shared/hooks/usePlayTags";
@@ -28,6 +29,10 @@ import { splitByRouteVariant } from "../../../lib/scouting/routeVariants";
 import { usualWRAlignment } from "../../../lib/scouting/usualAlignment";
 import type { PlayFacts } from "../../../lib/scouting/playTags";
 import { computeSAEForPlays, computeCoreSAEForPlays, type WRDifficultyModel } from "../../../lib/scouting/aggregateMerge";
+import { inSample, sampleGames, sampleSwitchFor, setAsideGameIds } from "../../../lib/scouting/sampleGames";
+
+// A WR's sample play: a route run (his SAE sample, the Big Board dot's count).
+const isWRSampleRoute = (p: RoutePlay) => !p.no_route_run;
 import { usePffGameLog } from "../pff/usePffGameLog";
 import { useGameContextLog } from "../context/useGameContextLog";
 import GameContextPanel from "../context/GameContextPanel";
@@ -155,7 +160,17 @@ export default function PlayerChartingBoard({ prospect, initialGameId, onBack, o
   const tagsMissing = tags.missing(tagFacts).length > 0;
   const variantMissing = !noRouteRun && variant.missing(routeType);
 
+  // His sample: every game but an imported one he has set aside (sampleGames.ts),
+  // as prospect_route_stats counts it. The career numbers read it; the per-game
+  // ones read every game.
+  const sampleAside = useMemo(() => setAsideGameIds(games), [games]);
+  const samplePlays = useMemo(() => inSample(plays, sampleAside), [plays, sampleAside]);
+  const sampleGameList = useMemo(() => sampleGames(games), [games]);
+  const sampleSwitch = useMemo(() => sampleSwitchFor("WR", games, plays, isWRSampleRoute), [games, plays]);
+
   const stats = useMemo(() => {
+    const plays = samplePlays;
+    const games = sampleGameList;
     const routePlays  = plays.filter((p) => !p.no_route_run);
     const totalSnaps  = plays.length;
     const totalRoutes = routePlays.length;
@@ -245,7 +260,7 @@ export default function PlayerChartingBoard({ prospect, initialGameId, onBack, o
       pctOffLine: totalSnaps > 0 ? (((totalSnaps - onLineN) / totalSnaps) * 100).toFixed(1) : null,
       routeStats, cvgStats,
     };
-  }, [plays, games]);
+  }, [samplePlays, sampleGameList]);
 
   const gameStats = useMemo(() => {
     const map: Record<string, {
@@ -424,6 +439,7 @@ export default function PlayerChartingBoard({ prospect, initialGameId, onBack, o
       onTabChange={onTabChange} onSelectGame={onSelectGame} onToggleAddGame={onToggleAddGame}
       onNewGameChange={onNewGameChange} onAddGame={onAddGame} onDeleteGame={onDeleteGame} onUpdateGame={onUpdateGame}
       onToggleEditBio={onToggleEditBio} onBioChange={onBioChange} onSaveBio={onSaveBio}
+      sampleSwitch={sampleSwitch} onSetCountInSample={cs.onSetCountInSample} sampleError={cs.sampleError}
       renderGameBadge={(g) => {
         const gs = gameStats[g.id] ?? { routes: 0, targets: 0, catches: 0, man: 0, manOpen: 0, press: 0, pressOpen: 0, zone: 0, zoneOpen: 0 };
         // Success rate WITHIN that coverage (% of snaps against it where he got open) — not
@@ -469,7 +485,7 @@ export default function PlayerChartingBoard({ prospect, initialGameId, onBack, o
       }}
       renderHeaderStats={() => (
         <>
-          <div>{stats.totalSnaps} snaps · {stats.totalRoutes} routes · {games.length} games</div>
+          <div>{stats.totalSnaps} snaps · {stats.totalRoutes} routes · {sampleGameList.length} games</div>
           {stats.successRate && <div className="text-emerald-400">{stats.successRate}% open</div>}
         </>
       )}
@@ -968,7 +984,7 @@ export default function PlayerChartingBoard({ prospect, initialGameId, onBack, o
                     return (
                       <tr key={g.id} className="hover:bg-slate-900/50 transition">
                         <td className="py-2 pr-4 text-slate-300">{g.season_year}</td>
-                        <td className="py-2 pr-4 text-white font-medium">{g.opponent}</td>
+                        <td className="py-2 pr-4 text-white font-medium">{g.opponent}<SetAsideMark game={g} /></td>
                         <td className="py-2 pr-4 text-slate-400 capitalize">{g.game_type}</td>
                         <td className="py-2 pr-4 text-right text-blue-400">{gs.routes}</td>
                         <td className="py-2 pr-4 text-right text-slate-300">{gs.targets}</td>
@@ -980,7 +996,7 @@ export default function PlayerChartingBoard({ prospect, initialGameId, onBack, o
                 </tbody>
                 <tfoot>
                   <tr className="border-t border-slate-700 text-xs text-slate-500 font-medium">
-                    <td colSpan={3} className="pt-2">Total ({games.length} games)</td>
+                    <td colSpan={3} className="pt-2"><SampleTotalLabel games={games} /></td>
                     <td className="pt-2 text-right text-blue-400">{stats.total}</td>
                     <td className="pt-2 text-right text-slate-300">{stats.targets}</td>
                     <td className="pt-2 text-right text-emerald-400">{stats.catches}</td>

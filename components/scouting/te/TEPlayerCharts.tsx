@@ -2,6 +2,7 @@
 import { useMemo } from "react";
 import type { Prospect, ProspectWithStats, ScoutingGame, TEPlay, TEPositioning } from "../../../lib/types";
 import { ROUTE_RADAR_TYPES, ROUTE_RADAR_LABEL, ROUTE_RADAR_ANGLE_DEG } from "../shared/routeTreeRadar";
+import { sampleGameToProspect } from "../../../lib/scouting/sampleGames";
 import RadarChartSVG, {
   computeRadarTier,
   RadarCardHeader,
@@ -43,7 +44,8 @@ interface Props {
 
 export default function TEPlayerCharts({ prospect, allProspects, allGames, leaguePlays }: Props) {
   const { routeSpokes, posSpokes, hasAnyData, chartedCount } = useMemo(() => {
-    const gameToProspect = new Map(allGames.map((g) => [g.id, g.prospect_id]));
+    // Every prospect's plays from his sample games (sampleGames.ts), his and the pool's.
+    const gameToProspect = sampleGameToProspect(allGames);
     const playsByProspect = new Map<string, TEPlay[]>();
     for (const pl of leaguePlays) {
       const pid = gameToProspect.get(pl.game_id);

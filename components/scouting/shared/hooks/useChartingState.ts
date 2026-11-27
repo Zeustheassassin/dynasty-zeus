@@ -48,6 +48,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
   const [editBio, setEditBio]                 = useState(false);
   const [bio, setBio]                         = useState<Partial<Prospect>>({});
   const [savingBio, setSavingBio]             = useState(false);
+  const [sampleError, setSampleError]         = useState<string | null>(null);
 
   const loadGames = useCallback(async () => {
     setLoading(true);
@@ -157,6 +158,28 @@ export function useChartingState(prospect: Prospect, options: Options) {
     }
   }
 
+  // The imported-game "Count in sample" switch (migration 107, sampleGames.ts):
+  // false sets the games aside from his own sample. The DB lets only an
+  // imported game (created before 2026-05-01) be set aside.
+  async function setCountInSample(ids: readonly string[], value: boolean) {
+    if (ids.length === 0) return;
+    setSampleError(null);
+    const { error } = await supabase.from("scouting_games").update({ count_in_sample: value }).in("id", [...ids]);
+    if (error) {
+      log.error("scouting_games count_in_sample update failed", { err: error.message, code: error.code });
+      const missing = error.code === "42703" || error.code === "PGRST204" || /count_in_sample/i.test(error.message ?? "");
+      setSampleError(
+        error.code === "23514" ? "Only an imported game can be set aside."
+          : missing ? "Couldn't save: Count in sample needs migration 107."
+          : "Couldn't save the switch — please try again.",
+      );
+      return;
+    }
+    const changed = new Set(ids);
+    setGames((prev) => prev.map((g) => (changed.has(g.id) ? { ...g, count_in_sample: value } : g)));
+    markDataDirty();
+  }
+
   // Blank or 0 in Personal Rank: off the position rank, and the rest of his
   // position + class ladder moves up one (unrankUpdates), in one
   // set_prospect_ranks call (migration 098). Null on success.
@@ -256,7 +279,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
     // State
     tab, games, selectedGameId, selectedGame, loading,
     showAddGame, newGame, savingGame, gameError,
-    editBio, bio, savingBio,
+    editBio, bio, savingBio, sampleError,
     // Raw setters (for boards that need fine-grained control)
     setTab, setSelectedGameId, setGames, setBio,
     // Helpers
@@ -272,6 +295,7 @@ export function useChartingState(prospect: Prospect, options: Options) {
     onAddGame:        addGame,
     onDeleteGame:     deleteGame,
     onUpdateGame:     updateGame,
+    onSetCountInSample: setCountInSample,
     onToggleEditBio:  () => setEditBio((e) => !e),
     onBioChange:      (update: Partial<Prospect>) => setBio((b) => ({ ...b, ...update })),
     onSaveBio:        saveBio,

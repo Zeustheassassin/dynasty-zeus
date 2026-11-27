@@ -35,6 +35,7 @@ import { parseHeightInches } from "./prospectAge";
 import type { AESum, Rate } from "./roleFit";
 import { wrRoleFit, type WRRoleSkill } from "./roleFitWR";
 import type { PffTotals } from "../pff/totals";
+import { inSample, sampleGameCounts, setAsideGameIds } from "./sampleGames";
 
 const ROUTE_TYPES: RouteType[] = [
   "nine", "post", "dig", "curl", "slant", "screen", "flat", "comeback", "out", "corner", "other",
@@ -309,7 +310,7 @@ const tagCellsByGame = (rows: readonly ProspectGameRouteTagCellsRow[]) => new Ma
 // into one cell per situation. Tagged routes split out (gameCells) only when
 // `tagRows` is given, and stay their own cells.
 function weightedCellsByProspect(
-  gameRows: ProspectGameRouteCellsRow[],
+  gameRows: readonly ProspectGameRouteCellsRow[],
   weights: Map<string, number>,
   eras: Map<string, CoverageEra>,
   tagRows?: readonly ProspectGameRouteTagCellsRow[],
@@ -594,7 +595,9 @@ export function buildWRGameSplits(
 
 // Every WR game cell's residual (open − n × expected) under the WR model, with
 // its season weight. `onRow` is called once per game row and returns the
-// visitor for that row's cells, or null to skip the row.
+// visitor for that row's cells, or null to skip the row. The model fits on
+// every game; the rows visited are each player's sample games only (an
+// imported game he has set aside is skipped, sampleGames.ts).
 type WRCellVisitor = (c: { n: number; w: number; route_type: string }, resid: number) => void;
 function visitWRGameResiduals(
   gameRows: ProspectGameRouteCellsRow[],
@@ -608,7 +611,9 @@ function visitWRGameResiduals(
   const weights = seasonWeights(games);
   const eras = coverageEras(games);
   const tagsBy = splitTagged(fitted) ? tagCellsByGame(tagRows) : null;
+  const aside = setAsideGameIds(games);
   for (const row of gameRows) {
+    if (aside.has(row.game_id)) continue;
     const visit = onRow(row);
     if (!visit) continue;
     const w = weights.get(row.game_id) ?? 1;
@@ -675,16 +680,23 @@ function wrRoleSkill(cells: RouteCell[], model: WRModelWith): WRRoleSkill {
 }
 
 // Each WR's tagged press reps and releases won (migration 064), and the pool's
-// win rate, for the X bucket (roleFitWR.ts).
-export function releaseByProspect(tagRows: readonly ProspectGameRouteTagCellsRow[]): { byProspect: Map<string, { won: number; n: number }>; league: number | null } {
+// win rate, for the X bucket (roleFitWR.ts). The pool counts every tagged rep;
+// a player's own count leaves out the games in `setAside` (sampleGames.ts).
+export function releaseByProspect(
+  tagRows: readonly ProspectGameRouteTagCellsRow[],
+  setAside: ReadonlySet<string> = new Set(),
+): { byProspect: Map<string, { won: number; n: number }>; league: number | null } {
   const byProspect = new Map<string, { won: number; n: number }>();
   let won = 0, n = 0;
   for (const row of tagRows) {
     for (const c of parseTagCells(row.cells)) {
       if (c.press_release == null) continue;
+      n += c.n;
+      if (c.press_release === "won") won += c.n;
+      if (setAside.has(row.game_id)) continue;
       const r = byProspect.get(row.prospect_id) ?? { won: 0, n: 0 };
-      r.n += c.n; n += c.n;
-      if (c.press_release === "won") { r.won += c.n; won += c.n; }
+      r.n += c.n;
+      if (c.press_release === "won") r.won += c.n;
       byProspect.set(row.prospect_id, r);
     }
   }
@@ -843,11 +855,18 @@ export function buildProspectsWithStats(
 ): ProspectWithStats[] {
   const byProspect = new Map(viewRows.map((r) => [r.prospect_id, r]));
   const eras = coverageEras(games);
-  const cellsByProspect = weightedCellsByProspect(gameCellRows, seasonWeights(games), eras, splitTagged(wrModel) ? tagRows : undefined);
-  const linedUp = linedUpByProspect(alignmentRows, eras);
+  // Each player's own numbers read his sample games only (sampleGames.ts); the
+  // WR model (fit by the caller, or by default above) keeps every game, and so
+  // does the release pool. prospect_route_stats skips set-aside games itself.
+  const aside = setAsideGameIds(games);
+  const sampleCells = inSample(gameCellRows, aside);
+  const sampleTags = inSample(tagRows, aside);
+  const cellsByProspect = weightedCellsByProspect(sampleCells, seasonWeights(games), eras, splitTagged(wrModel) ? sampleTags : undefined);
+  const linedUp = linedUpByProspect(inSample(alignmentRows, aside), eras);
   const { samplePlaysByProspect } = thresholdCounts;
-  const release = releaseByProspect(tagRows);
-  const taggedDouble = taggedDoubleByProspect(tagRows);
+  const release = releaseByProspect(tagRows, aside);
+  const taggedDouble = taggedDoubleByProspect(sampleTags);
+  const sampleGameCount = sampleGameCounts(games);
   const wrPff = wrPffRates(prospects, pff);
 
   return prospects.map((p) => {
@@ -873,6 +892,7 @@ export function buildProspectsWithStats(
       total_snaps: v?.total_snaps ?? 0,
       total_routes: v?.total_routes ?? 0,
       total_games,
+      sample_games: sampleGameCount.get(p.id) ?? 0,
       targets: v?.targets ?? 0,
       catches: v?.catches ?? 0,
       drops: v?.drops ?? 0,

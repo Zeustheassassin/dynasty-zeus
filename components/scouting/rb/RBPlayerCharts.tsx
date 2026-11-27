@@ -1,6 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import type { Prospect, ProspectWithStats, ScoutingGame, RBPlay, RBRunType } from "../../../lib/types";
+import { sampleGameToProspect } from "../../../lib/scouting/sampleGames";
 import RadarChartSVG, {
   computeRadarTier,
   RadarCardHeader,
@@ -40,7 +41,8 @@ interface Props {
 
 export default function RBPlayerCharts({ prospect, allProspects, allGames, leaguePlays }: Props) {
   const { spokes, hasAnyData, chartedCount } = useMemo(() => {
-    const gameToProspect = new Map(allGames.map((g) => [g.id, g.prospect_id]));
+    // Every prospect's plays from his sample games (sampleGames.ts), his and the pool's.
+    const gameToProspect = sampleGameToProspect(allGames);
     const playsByProspect = new Map<string, RBPlay[]>();
     for (const pl of leaguePlays) {
       const pid = gameToProspect.get(pl.game_id);

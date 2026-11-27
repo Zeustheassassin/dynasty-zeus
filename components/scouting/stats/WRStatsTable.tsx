@@ -153,7 +153,7 @@ export function buildWRStatRows(prospectsWithStats: ProspectWithStats[], pff?: M
         id: p.id,
         name: p.name,
         yr: p.draft_class_year,
-        g: p.total_games,
+        g: p.sample_games ?? p.total_games,
         snaps: p.total_snaps,
         routes: p.total_routes,
         ...roleFitRow("WR", p.role_fit),

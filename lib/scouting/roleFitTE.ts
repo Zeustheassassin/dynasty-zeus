@@ -15,6 +15,7 @@ import {
   buildRoleFit, skillFeature, usageFeature,
   type AESliceValue, type BucketRecipe, type FeatureSet, type RoleFit,
 } from "./roleFit";
+import { sampleGameToProspect } from "./sampleGames";
 
 // Fewer snaps than this: no bucket.
 export const TE_MIN_SNAPS = 40;
@@ -172,7 +173,8 @@ export function computeTERoleFits(prospects: Prospect[], games: ScoutingGame[], 
   const tes = prospects.filter((p) => p.position === "TE");
   if (tes.length === 0) return out;
   const slices = computeTERoleSlices(prospects, games, tePlays, ROUTE_SLICES, BLOCK_SLICES);
-  const gameToProspect = new Map(games.map((g) => [g.id, g.prospect_id]));
+  // His plays: his sample games only (sampleGames.ts); the league rates above read every play.
+  const gameToProspect = sampleGameToProspect(games);
   const playsBy = new Map<string, TEPlay[]>();
   for (const pl of tePlays) {
     const pid = gameToProspect.get(pl.game_id);

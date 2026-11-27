@@ -7,6 +7,7 @@ import type { Prospect, ScoutingGame, TEPlay, TEPositioning, TELocation, TECover
 import { roleFitCols, roleFitRow } from "./roleFitCols";
 import { pffCols, pffRow } from "./pffCols";
 import { tagCols, tagRow, tagValuesFor } from "./tagCols";
+import { sampleGameCounts, sampleGameToProspect } from "../../../lib/scouting/sampleGames";
 import { contextCols } from "./contextCols";
 import type { TagStatValue } from "../../../lib/scouting/tagStats";
 import type { PffTotals } from "../../../lib/pff/totals";
@@ -155,8 +156,9 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
     const teSaerMap = computeTERouteAboveExpected(prospects, games, tePlays);
     const teSaebMap = computeTEBlockAboveExpected(prospects, games, tePlays);
     const roleFits = computeTERoleFits(prospects, games, tePlays);
-    const gameToProspect = new Map<string, string>();
-    for (const g of games) gameToProspect.set(g.id, g.prospect_id);
+    // His plays and games: his sample games only (sampleGames.ts: an imported
+    // game he has set aside is left out).
+    const gameToProspect = sampleGameToProspect(games);
 
     const playsByProspect = new Map<string, TEPlay[]>();
     for (const pl of tePlays) {
@@ -166,10 +168,7 @@ export function buildTEStatRows(prospects: Prospect[], games: ScoutingGame[], te
       playsByProspect.get(pid)!.push(pl);
     }
 
-    const gamesByProspect = new Map<string, number>();
-    for (const g of games) {
-      gamesByProspect.set(g.prospect_id, (gamesByProspect.get(g.prospect_id) ?? 0) + 1);
-    }
+    const gamesByProspect = sampleGameCounts(games);
 
     return prospects
       .filter((p) => p.position === "TE")

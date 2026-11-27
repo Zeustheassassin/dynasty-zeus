@@ -32,6 +32,7 @@ import { chartedSeasonRows, middleAdjustment, type MiddleUsage } from "./middleU
 import type { RushingBonus } from "./qbRushing";
 import type { RoleFit } from "./roleFit";
 import { buildWRGameSplits, buildWRTierSplits, type ProspectGameRouteCellsRow } from "./aggregateMerge";
+import { sampleGames } from "./sampleGames";
 import type { ContextCovariates, GameContext } from "./gameContext";
 import { contextAdjust, type HeadlineKey, type MetricContext } from "./contextGrading";
 import { buildComponents, type GradingData } from "./aeComponents";
@@ -364,12 +365,12 @@ export function dynastyScores(
   return m;
 }
 
-/** Each prospect's charted games by opponent tier, for the AE Score tooltip. */
+/** Each prospect's charted games by opponent tier, for the AE Score tooltip: his sample games (sampleGames.ts). */
 export function gamesByTierFrom(
   games: readonly ScoutingGame[], tiers: ReadonlyMap<string, OpponentTier>,
 ): Map<string, Record<OpponentTier, number>> {
   const m = new Map<string, Record<OpponentTier, number>>();
-  for (const g of games) {
+  for (const g of sampleGames(games)) {
     const t = tiers.get(g.id);
     if (!t) continue;
     const r = m.get(g.prospect_id) ?? { P4: 0, G5: 0, FCS: 0 };
@@ -379,12 +380,12 @@ export function gamesByTierFrom(
   return m;
 }
 
-/** Each prospect's charted opponents' average defensive SP+ (FBS opponents), for the tooltip. */
+/** Each prospect's charted opponents' average defensive SP+ (FBS opponents), for the tooltip: his sample games. */
 export function defenseFacedFrom(
   games: readonly ScoutingGame[], contexts: ReadonlyMap<string, GameContext>,
 ): Map<string, { avg: number; games: number }> {
   const acc = new Map<string, { sum: number; games: number }>();
-  for (const g of games) {
+  for (const g of sampleGames(games)) {
     const sp = contexts.get(g.id)?.oppDefSp;
     if (sp == null) continue;
     const a = acc.get(g.prospect_id) ?? { sum: 0, games: 0 };

@@ -2,6 +2,7 @@
 import { useMemo } from "react";
 import type { Prospect, ProspectWithStats, ScoutingGame, QBPlay } from "../../../lib/types";
 import { ROUTE_RADAR_TYPES, ROUTE_RADAR_LABEL, ROUTE_RADAR_ANGLE_DEG } from "../shared/routeTreeRadar";
+import { sampleGameToProspect } from "../../../lib/scouting/sampleGames";
 import RadarChartSVG, {
   computeRadarTier,
   RadarCardHeader,
@@ -36,7 +37,8 @@ interface Props {
 
 export default function QBPlayerCharts({ prospect, allProspects, allGames, leaguePlays }: Props) {
   const { spokes, hasAnyData, chartedCount } = useMemo(() => {
-    const gameToProspect = new Map(allGames.map((g) => [g.id, g.prospect_id]));
+    // Every prospect's plays from his sample games (sampleGames.ts), his and the pool's.
+    const gameToProspect = sampleGameToProspect(allGames);
     const playsByProspect = new Map<string, QBPlay[]>();
     for (const pl of leaguePlays) {
       const pid = gameToProspect.get(pl.game_id);

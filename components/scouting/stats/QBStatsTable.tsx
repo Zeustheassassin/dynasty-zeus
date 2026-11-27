@@ -7,6 +7,7 @@ import type { Prospect, ScoutingGame, QBPlay, QBDepthZone, QBPressureHandling } 
 import { roleFitCols, roleFitRow } from "./roleFitCols";
 import { pffCols, pffRow } from "./pffCols";
 import { tagCols, tagRow, tagValuesFor } from "./tagCols";
+import { sampleGameCounts, sampleGameToProspect } from "../../../lib/scouting/sampleGames";
 import { contextCols } from "./contextCols";
 import type { TagStatValue } from "../../../lib/scouting/tagStats";
 import type { PffTotals } from "../../../lib/pff/totals";
@@ -158,8 +159,9 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
     const aaeMap = computeQBAboveExpected(prospects, games, qbPlays);
     const sliceMap = computeQBThrowSliceAAE(prospects, games, qbPlays);
     const roleFits = computeQBRoleFits(prospects, games, qbPlays, pff);
-    const gameToProspect = new Map<string, string>();
-    for (const g of games) gameToProspect.set(g.id, g.prospect_id);
+    // His plays and games: his sample games only (sampleGames.ts: an imported
+    // game he has set aside is left out).
+    const gameToProspect = sampleGameToProspect(games);
 
     const playsByProspect = new Map<string, QBPlay[]>();
     for (const pl of qbPlays) {
@@ -169,10 +171,7 @@ export function buildQBStatRows(prospects: Prospect[], games: ScoutingGame[], qb
       playsByProspect.get(pid)!.push(pl);
     }
 
-    const gamesByProspect = new Map<string, number>();
-    for (const g of games) {
-      gamesByProspect.set(g.prospect_id, (gamesByProspect.get(g.prospect_id) ?? 0) + 1);
-    }
+    const gamesByProspect = sampleGameCounts(games);
 
     return prospects
       .filter((p) => p.position === "QB")

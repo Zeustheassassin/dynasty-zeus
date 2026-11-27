@@ -25,10 +25,11 @@
 import type { ProspectWithStats, ScoutingGame } from "../types";
 import type { PffTotals } from "../pff/totals";
 import type { SamplePlays } from "./aggregateMerge";
-import { SAMPLE_FULL_PLAYS, samplePct, sampleTier, type SampleTier } from "./sampleTiers";
+import { SAMPLE_FULL_PLAYS, halfSamplePlays, samplePct, sampleTier, type SampleTier } from "./sampleTiers";
 import { displayConference, isRedConference } from "./schoolConferences";
 import { readyToChart } from "./readyToChart";
 import { coverageEra } from "./coverageEra";
+import { countsInSample } from "./sampleGames";
 import type { GameSnapCount } from "./unwatchedGames";
 
 export type ChartNextPos = "QB" | "RB" | "WR" | "TE";
@@ -46,7 +47,7 @@ export const PACE_DAYS = 28;
 
 /** Plays a half sample needs: QB 90, RB 50, WR 80, TE 70. */
 export function halfSample(pos: ChartNextPos): number {
-  return Math.ceil(SAMPLE_FULL_PLAYS[pos] / 2);
+  return halfSamplePlays(pos);
 }
 
 export interface ChartNextRow {
@@ -79,8 +80,10 @@ export interface ChartNextRow {
   gamesNeeded: number | null;
   /** First looks: his position's headline PFF grade over his logged games (readyToChart). */
   pffGrade?: number | null;
-  /** Re-chart: routes from imported games, how many such games, and routes charted in the app. */
-  imported?: { routes: number; games: number; inApp: number };
+  /** Re-chart: routes from imported games, how many such games, and routes charted in the app;
+   *  how many of those games he has set aside, and whether his "Count in sample" switch is open
+   *  (half a sample in the app, sampleGames.ts). */
+  imported?: { routes: number; games: number; inApp: number; setAside: number; switchOpen: boolean };
 }
 
 export interface GoalBand {
@@ -231,11 +234,11 @@ export function buildChartNext(year: number, inputs: ChartNextInputs): ChartNext
   let rechartFullInApp = 0;
   for (const p of inClass) {
     if (p.position !== "WR" || p.overall_rank == null) continue;
-    let routes = 0, importedGames = 0, inApp = 0;
+    let routes = 0, importedGames = 0, inApp = 0, setAside = 0;
     for (const g of gamesBy.get(p.id) ?? []) {
       const n = routesByGame.get(g.id) ?? 0;
       if (coverageEra(g) === "old") {
-        if (n > 0) { routes += n; importedGames++; }
+        if (n > 0) { routes += n; importedGames++; if (!countsInSample(g)) setAside++; }
       } else {
         inApp += n;
       }
@@ -247,7 +250,7 @@ export function buildChartNext(year: number, inputs: ChartNextInputs): ChartNext
     // The goal here is a full sample in the app alone.
     const toGo = full - inApp;
     rechart.push({
-      ...it, toGo, imported: { routes, games: importedGames, inApp },
+      ...it, toGo, imported: { routes, games: importedGames, inApp, setAside, switchOpen: inApp >= halfSamplePlays("WR") },
       gamesNeeded: it.perGame && it.perGame > 0 ? Math.ceil(toGo / it.perGame) : null,
     });
   }

@@ -1249,6 +1249,10 @@ export interface ScoutingGame {
   /** Where the tape of this game is, e.g. "Dynasty Nerds" or a link (migration 101; Scouting →
    *  Unwatched). Optional: absent before the migration. */
   tape_source?: string | null;
+  /** Count in sample (migration 107): false = an imported game set aside from his own
+   *  sample and grades (lib/scouting/sampleGames.ts). Absent before the migration
+   *  (every game counts). */
+  count_in_sample?: boolean;
 }
 
 // PFF match states (migration 062). auto = linked by the matcher, confirmed =
@@ -1597,9 +1601,15 @@ export interface LinedUp {
 }
 
 export interface ProspectWithStats extends Prospect {
+  /** WR (prospect_route_stats): snaps and routes in his sample games (a set-aside imported game's
+   *  are left out, migration 107). */
   total_snaps: number;
   total_routes: number;
+  /** Every logged game, charted or not, set aside or not (the tape-work count). */
   total_games: number;
+  /** His sample games: logged games minus set-aside imported ones (lib/scouting/sampleGames.ts).
+   *  Absent on rows built without the games; read it as total_games then. */
+  sample_games?: number;
   targets: number;
   catches: number;
   drops: number;

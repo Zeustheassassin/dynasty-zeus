@@ -35,6 +35,7 @@ import type { CountStatDef, GameCount } from "./countComponents";
 import { GARBAGE_TIME_WEIGHT, type CorrectionKey } from "./tagCorrection";
 import { parseTagCells, type ProspectGameRouteTagCellsRow, type RouteTagCell } from "./aggregateMerge";
 import type { TagPosition } from "./playEra";
+import { inSample, sampleGameToProspect, setAsideGameIds } from "./sampleGames";
 
 const POS_KEY: Record<TagPosition, CorrectionKey> = { QB: "qb_aae", RB: "rb_srae", WR: "wr_sae", TE: "te_saer" };
 
@@ -133,7 +134,8 @@ function repsFromCells(rows: readonly ProspectGameRouteTagCellsRow[], of: CellSt
 }
 
 export interface TagStatInputs {
-  games: readonly Pick<ScoutingGame, "id" | "prospect_id">[];
+  /** His games; a set-aside one (sampleGames.ts) leaves his reps. */
+  games: readonly Pick<ScoutingGame, "id" | "prospect_id" | "count_in_sample">[];
   qbPlays: readonly QBPlay[];
   rbPlays: readonly RBPlay[];
   tePlays: readonly TEPlay[];
@@ -141,14 +143,15 @@ export interface TagStatInputs {
   wrTagRows: readonly ProspectGameRouteTagCellsRow[];
 }
 
-/** Every tag stat's reps by prospect. */
+/** Every tag stat's reps by prospect, over each player's sample games. */
 export function tagStatReps(inp: TagStatInputs): Map<string, RepsByProspect> {
-  const g2p = new Map(inp.games.map((g) => [g.id, g.prospect_id]));
+  const g2p = sampleGameToProspect(inp.games);
+  const wrTagRows = inSample(inp.wrTagRows, setAsideGameIds(inp.games));
   const out = new Map<string, RepsByProspect>();
   for (const s of QB_STATS) out.set(s.key, repsFromPlays(inp.qbPlays, s.of, g2p));
   for (const s of RB_STATS) out.set(s.key, repsFromPlays(inp.rbPlays, s.of, g2p));
   for (const s of TE_STATS) out.set(s.key, repsFromPlays(inp.tePlays, s.of, g2p));
-  for (const s of WR_STATS) out.set(s.key, repsFromCells(inp.wrTagRows, s.of));
+  for (const s of WR_STATS) out.set(s.key, repsFromCells(wrTagRows, s.of));
   return out;
 }
 

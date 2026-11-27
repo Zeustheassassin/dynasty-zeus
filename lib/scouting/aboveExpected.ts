@@ -62,6 +62,7 @@ import { isTaggedPlay, type TagPosition } from "./playEra";
 import { correctionFor, withGarbageWeight, type CorrectionKey } from "./tagCorrection";
 import { runMixWeight, type RunMix } from "./runMix";
 import { routeCoverageOffset } from "./routeCoveragePattern";
+import { sampleGameToProspect } from "./sampleGames";
 
 // A model fit on `plays` (its training set, already filtered), with the tag
 // correction for `key` on top when one is switched on.
@@ -206,10 +207,11 @@ function buildPlaysByProspect<T extends { game_id: string }>(
   return m;
 }
 
-function buildGameToProspect(games: ScoutingGame[]): Map<string, string> {
-  const m = new Map<string, string>();
-  for (const g of games) m.set(g.id, g.prospect_id);
-  return m;
+// Per player: each prospect's plays come from the games in his sample only
+// (sampleGames.ts: an imported game he has set aside is left out). The league
+// models below fit on every play passed in, set-aside games included.
+function buildGameToProspect(games: readonly ScoutingGame[]): Map<string, string> {
+  return sampleGameToProspect(games);
 }
 
 // ── RB SRAE ──────────────────────────────────────────────────────────────
@@ -230,7 +232,7 @@ function buildGameToProspect(games: ScoutingGame[]): Map<string, string> {
 // protection for the thin buckets (under center, unblocked: ~100 runs each).
 const RB_RIDGE_LAMBDA = 3;
 
-const isKnownRun = (pl: RBPlay) =>
+export const isKnownRun = (pl: RBPlay) =>
   RB_RUN_TYPES.includes(pl.run_type as RBRunType) && pl.success !== null;
 const rbSuccess = (pl: RBPlay) => (pl.success ? 1 : 0);
 const RB_DIMS: DifficultyDim<RBPlay>[] = [
@@ -399,7 +401,7 @@ export function computeRBRunSliceSRAE(
 //   - Run plays (no throw)
 //   - Plays with accuracy == null (sack / scramble / throw_away)
 //   - Tipped balls (the intended trajectory is unknowable after a deflection)
-const isQBGradedThrow = (pl: QBPlay) =>
+export const isQBGradedThrow = (pl: QBPlay) =>
   // Include RPO throws — they're real pass attempts with accuracy ratings.
   pl.play_type !== "run" && pl.accuracy != null && pl.accuracy !== "tipped_ball";
 
@@ -827,7 +829,7 @@ const TE_RIDGE_LAMBDA = 10;
 // better), and coverage, which added nothing on 2026-10-19, now earns its
 // place. Location (left / right) is left out — a side of the field, not a
 // difficulty.
-const isRatedTERoute = (pl: TEPlay) => pl.play_type === "route_run" && pl.was_open !== null;
+export const isRatedTERoute = (pl: TEPlay) => pl.play_type === "route_run" && pl.was_open !== null;
 const teOpen = (pl: TEPlay) => (pl.was_open ? 1 : 0);
 const TE_ROUTE_DESIGN = makeDesign<TEPlay>([
   [ROUTE_TYPES,     (pl) => pl.route_type],

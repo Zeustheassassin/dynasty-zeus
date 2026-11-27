@@ -8,6 +8,7 @@ import { isRBRun } from "../../../lib/scouting/chartedCounts";
 import { roleFitCols, roleFitRow } from "./roleFitCols";
 import { pffCols, pffRow } from "./pffCols";
 import { tagCols, tagRow, tagValuesFor } from "./tagCols";
+import { sampleGameCounts, sampleGameToProspect } from "../../../lib/scouting/sampleGames";
 import { contextCols } from "./contextCols";
 import type { TagStatValue } from "../../../lib/scouting/tagStats";
 import type { PffTotals } from "../../../lib/pff/totals";
@@ -115,8 +116,9 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
     const sliceMap = computeRBRunSliceSRAE(prospects, games, rbPlays);
     const roleFits = computeRBRoleFits(prospects, games, rbPlays, pff);
     // Build game → prospect map
-    const gameToProspect = new Map<string, string>();
-    for (const g of games) gameToProspect.set(g.id, g.prospect_id);
+    // His plays and games: his sample games only (sampleGames.ts: an imported
+    // game he has set aside is left out).
+    const gameToProspect = sampleGameToProspect(games);
 
     // Group plays by prospect
     const playsByProspect = new Map<string, RBPlay[]>();
@@ -128,10 +130,7 @@ export function buildRBStatRows(prospects: Prospect[], games: ScoutingGame[], rb
     }
 
     // Game count per prospect
-    const gamesByProspect = new Map<string, number>();
-    for (const g of games) {
-      gamesByProspect.set(g.prospect_id, (gamesByProspect.get(g.prospect_id) ?? 0) + 1);
-    }
+    const gamesByProspect = sampleGameCounts(games);
 
     return prospects
       .filter((p) => p.position === "RB")

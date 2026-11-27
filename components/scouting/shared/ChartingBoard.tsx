@@ -13,6 +13,8 @@ import ProspectProduction from "../overview/ProspectProduction";
 import { getLocalStorageItem, setLocalStorageItem } from "../../../lib/hooks/useLocalStorage";
 import type { RolePos } from "../../../lib/scouting/roleFit";
 import { ShouldPlayField, WillPlayPostSelect } from "./RoleFields";
+import { GameSampleToggle, SampleSwitchPanel, SetAsideNote } from "./SampleSwitch";
+import { countInSampleReady, countsInSample, type SampleSwitch } from "../../../lib/scouting/sampleGames";
 
 export interface ChartingBoardConfig {
   positionLabel: string;
@@ -71,6 +73,11 @@ export interface ChartingBoardProps {
   renderGameBadge?: (game: ScoutingGame) => React.ReactNode;
   renderPlayLogger: (selectedGame: ScoutingGame | null) => React.ReactNode;
   renderGamesTable: () => React.ReactNode;
+  /** The imported-game "Count in sample" switch, the board's read of his games and
+   *  plays (sampleGames.ts sampleSwitchFor). Omitted: no switch. */
+  sampleSwitch?: SampleSwitch | null;
+  onSetCountInSample?: (ids: string[], value: boolean) => void | Promise<void>;
+  sampleError?: string | null;
 }
 
 /**
@@ -182,8 +189,10 @@ export default function ChartingBoard({
   onBack, onTabChange, onSelectGame, onToggleAddGame, onNewGameChange,
   onAddGame, onDeleteGame, onUpdateGame, onToggleEditBio, onBioChange, onSaveBio,
   renderGameBadge, renderHeaderStats, renderBreakdown, renderCharts, renderPlayLogger, renderGamesTable,
+  sampleSwitch, onSetCountInSample, sampleError,
 }: ChartingBoardProps) {
   const a = ACCENT[config.accentColor];
+  const sampleReady = countInSampleReady(games) !== false;
   const selectedGame = games.find((g) => g.id === selectedGameId) ?? null;
 
   const [gamesCollapsed, setGamesCollapsedState] = useState<boolean>(
@@ -404,6 +413,7 @@ export default function ChartingBoard({
       </div>
 
       {/* Overview tab */}
+      {(tab === "overview" || tab === "breakdown" || tab === "games") && <SetAsideNote sw={sampleSwitch} />}
       {tab === "overview" && <ProspectOverview prospectId={prospect.id} data={overviewData} />}
 
       {/* Breakdown tab: how the AE Score adds up, the detail tables, the charts */}
@@ -463,6 +473,9 @@ export default function ChartingBoard({
                 {gameError && <p className="text-red-400 text-xs">{gameError}</p>}
               </div>
             )}
+            {sampleSwitch && !loading && (
+              <SampleSwitchPanel sw={sampleSwitch} games={games} onSet={onSetCountInSample} error={sampleError} />
+            )}
             <div className="space-y-1">
               {loading ? (
                 <div className="text-slate-500 text-xs py-4 text-center">Loading…</div>
@@ -473,7 +486,7 @@ export default function ChartingBoard({
                   <div key={g.id}
                     className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer border transition ${
                       selectedGameId === g.id ? a.gameSelected : "bg-slate-900 border-slate-800 hover:border-slate-600"
-                    }`}
+                    }${countsInSample(g) ? "" : " opacity-70"}`}
                     onClick={() => editingGameId !== g.id && onSelectGame(g.id)}
                   >
                     <div className="flex-1 min-w-0">
@@ -511,6 +524,9 @@ export default function ChartingBoard({
                         </>
                       )}
                     </div>
+                    {sampleSwitch && editingGameId !== g.id && (
+                      <GameSampleToggle game={g} sw={sampleSwitch} ready={sampleReady} onSet={onSetCountInSample} />
+                    )}
                     {renderGameBadge
                       ? <div className="flex-shrink-0">{renderGameBadge(g)}</div>
                       : <div className={`text-xs ${a.playCount} flex-shrink-0`}>{gamePlayCounts[g.id] ?? 0}pl</div>

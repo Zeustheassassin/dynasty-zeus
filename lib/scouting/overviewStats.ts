@@ -20,6 +20,7 @@ import type { PffValues } from "../pff/totals";
 import { pastFirstRead } from "./chartedComponents";
 import { middleAdjustment } from "./middleUsage";
 import type { QBFullSeasons, QBPocket } from "./qbStyle";
+import { sampleGameCounts, sampleGameToProspect } from "./sampleGames";
 
 export type OverviewFmt = "pct0" | "pct1" | "dec1" | "dec2" | "int" | "text";
 /** Which bar colour: the user's charting or PFF. */
@@ -138,7 +139,8 @@ const NO_PFF = "Your charting (no PFF stats imported for his games)";
 
 // ── WR ───────────────────────────────────────────────────────
 
-export function wrOverview(p: ProspectWithStats, pff: PffValues, cover: PffCover | null): OverviewPage {
+/** `games`: his sample games (logged minus set aside, sampleGames.ts), for the header counts. */
+export function wrOverview(p: ProspectWithStats, pff: PffValues, cover: PffCover | null, games: number = p.sample_games ?? p.total_games): OverviewPage {
   const PFF = pffSource(cover);
   const cv = p.coverage_stats;
   const open = p.has_charted_open_data;
@@ -200,7 +202,7 @@ export function wrOverview(p: ProspectWithStats, pff: PffValues, cover: PffCover
   });
 
   return {
-    meta: [count(p.total_games, "game"), count(p.total_snaps, "snap"), count(p.total_routes, "route")],
+    meta: [count(games, "game"), count(p.total_snaps, "snap"), count(p.total_routes, "route")],
     main: [
       {
         key: "coverage", title: "Winning routes · open rate vs coverage", size: "lg", stats: [
@@ -670,8 +672,11 @@ export function overviewPagesFor(inp: OverviewPoolInput): Map<string, OverviewPa
   const me = inp.prospects.find((x) => x.id === inp.prospectId);
   const pos = me?.position;
   if (pos !== "QB" && pos !== "RB" && pos !== "WR" && pos !== "TE") return out;
+  // PFF's cover reads every logged game (PFF's numbers keep set-aside games);
+  // the page's own counts and plays read his sample games (sampleGames.ts).
   const gameCount = new Map<string, number>();
   for (const g of inp.games) gameCount.set(g.prospect_id, (gameCount.get(g.prospect_id) ?? 0) + 1);
+  const sampleCount = sampleGameCounts(inp.games);
   const coverOf = (id: string): PffCover | null => {
     const g = inp.pffGames.get(id);
     return g == null ? null : { games: g, charted: gameCount.get(id) ?? 0 };
@@ -679,23 +684,23 @@ export function overviewPagesFor(inp: OverviewPoolInput): Map<string, OverviewPa
   const pffOf = (id: string) => inp.pffVals.get(id) ?? {};
   const atPos = inp.prospects.filter((x) => x.position === pos);
   if (pos === "WR") {
-    for (const x of atPos) out.set(x.id, wrOverview(x, pffOf(x.id), coverOf(x.id)));
+    for (const x of atPos) out.set(x.id, wrOverview(x, pffOf(x.id), coverOf(x.id), sampleCount.get(x.id) ?? 0));
   } else if (pos === "QB") {
     const by = playsByProspect(inp.qbPlays, inp.games);
-    for (const x of atPos) out.set(x.id, qbOverview(by.get(x.id) ?? [], pffOf(x.id), coverOf(x.id), gameCount.get(x.id) ?? 0, inp.qbFull?.get(x.id) ?? null));
+    for (const x of atPos) out.set(x.id, qbOverview(by.get(x.id) ?? [], pffOf(x.id), coverOf(x.id), sampleCount.get(x.id) ?? 0, inp.qbFull?.get(x.id) ?? null));
   } else if (pos === "RB") {
     const by = playsByProspect(inp.rbPlays, inp.games);
-    for (const x of atPos) out.set(x.id, rbOverview(by.get(x.id) ?? [], pffOf(x.id), coverOf(x.id), gameCount.get(x.id) ?? 0));
+    for (const x of atPos) out.set(x.id, rbOverview(by.get(x.id) ?? [], pffOf(x.id), coverOf(x.id), sampleCount.get(x.id) ?? 0));
   } else {
     const by = playsByProspect(inp.tePlays, inp.games);
-    for (const x of atPos) out.set(x.id, teOverview(by.get(x.id) ?? [], pffOf(x.id), coverOf(x.id), gameCount.get(x.id) ?? 0));
+    for (const x of atPos) out.set(x.id, teOverview(by.get(x.id) ?? [], pffOf(x.id), coverOf(x.id), sampleCount.get(x.id) ?? 0));
   }
   return out;
 }
 
-/** Each prospect's plays, by the games that are his. */
-export function playsByProspect<P extends { game_id: string }>(plays: readonly P[], games: readonly Pick<ScoutingGame, "id" | "prospect_id">[]): Map<string, P[]> {
-  const g2p = new Map(games.map((g) => [g.id, g.prospect_id]));
+/** Each prospect's plays, by the games in his sample (sampleGames.ts). */
+export function playsByProspect<P extends { game_id: string }>(plays: readonly P[], games: readonly Pick<ScoutingGame, "id" | "prospect_id" | "count_in_sample">[]): Map<string, P[]> {
+  const g2p = sampleGameToProspect(games);
   const out = new Map<string, P[]>();
   for (const pl of plays) {
     const pid = g2p.get(pl.game_id);

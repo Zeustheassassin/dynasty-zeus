@@ -18,6 +18,7 @@ import { chartedSeasonRows, middleUsageByProspect, type MiddleUsage } from "../.
 import { qbFullSeasons, qbStyleValues, type QBFullSeasons } from "../../../../lib/scouting/qbStyle";
 import { qbRushingByProspect, rushingBonuses, type QBRushing, type RushingBonus } from "../../../../lib/scouting/qbRushing";
 import { pastFirstRead } from "../../../../lib/scouting/chartedComponents";
+import { sampleGameToProspect } from "../../../../lib/scouting/sampleGames";
 import {
   computeAEScores, defenseFacedFrom, gamesByTierFrom, liveScoresFrom,
   type AEScores, type ProspectScoresInput, type ScoreView,
@@ -140,7 +141,7 @@ export function useProspectScores(
   // rate join the PFF values as the Big Board's QB style columns (qs_*).
   const qbFull = useMemo(() => qbFullSeasons(seasonRows), [seasonRows]);
   const qbReads = useMemo(() => {
-    const g2p = new Map(games.map((g) => [g.id, g.prospect_id]));
+    const g2p = sampleGameToProspect(games);
     const m = new Map<string, { num: number; den: number }>();
     for (const pl of qbPlays) {
       const r = pastFirstRead(pl);

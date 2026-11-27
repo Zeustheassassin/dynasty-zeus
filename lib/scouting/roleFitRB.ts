@@ -64,6 +64,7 @@ import {
   buildRoleFit, contrastFeature, rateFeature, shrinkAE, signed, skillFeature, usageFeature, NO_RATE, RUN_SIDE_GAP, RUN_SIDE_MIN_RUNS,
   type AESliceValue, type BucketRecipe, type Feature, type FeatureSet, type Rate, type RoleFit, type RoleTag,
 } from "./roleFit";
+import { sampleGameToProspect } from "./sampleGames";
 
 // Fewer known runs than this: no bucket.
 export const RB_MIN_RUNS = 25;
@@ -523,7 +524,8 @@ export function computeRBRoleFits(
   const pffYprr = pffRate((s) => s.rec_yards, (s) => s.routes);
   const slices = computeRBRoleSlices(prospects, games, rbPlays, RB_SLICES);
   const league = Object.fromEntries((Object.keys(RATES) as RateKey[]).map((k) => [k, RATES[k](rbPlays)])) as Record<RateKey, Rate>;
-  const gameToProspect = new Map(games.map((g) => [g.id, g.prospect_id]));
+  // His plays: his sample games only (sampleGames.ts); the league rates above read every play.
+  const gameToProspect = sampleGameToProspect(games);
   const playsBy = new Map<string, RBPlay[]>();
   for (const pl of rbPlays) {
     const pid = gameToProspect.get(pl.game_id);

@@ -32,6 +32,7 @@ import { GRADE_TIERS } from "./prospectGrade";
 import { QB_RUN_TAG_MIN } from "./roleFitQB";
 import { X_RELEASE_REPS } from "./roleFitWR";
 import { scoutingClassYear } from "./chartNext";
+import { sampleGameToProspect } from "./sampleGames";
 
 export type DueState = "due" | "soon" | "waiting" | "later" | "watch" | "done";
 
@@ -367,7 +368,7 @@ export const DOUBLE_COVERAGE_ROUTES = 30;
 
 export interface DueDataInputs {
   report: GradingReport;
-  games: readonly { id: string; prospect_id: string }[];
+  games: readonly { id: string; prospect_id: string; count_in_sample?: boolean }[];
   qbPlays: readonly Pick<QBPlay, "game_id" | "run_success">[];
   rbPlays: readonly Pick<RBPlay, "created_at" | "run_type" | "success">[];
   tePlays: readonly Pick<TEPlay, "game_id" | "created_at" | "play_type" | "was_open">[];
@@ -481,8 +482,8 @@ export function dataItems(inp: DueDataInputs, marks: DueMarks): DueItem[] {
     when: `at ${TE_FIELD_TIME_GAMES} TE games since Oct 21, 2026`,
   }, teGames, TE_FIELD_TIME_GAMES, "TE games", marks));
 
-  // TE-SAER spread: TEs with enough rated routes.
-  const prospectOf = new Map(games.map((g) => [g.id, g.prospect_id]));
+  // TE-SAER spread: TEs with enough rated routes in their sample (sampleGames.ts).
+  const prospectOf = sampleGameToProspect(games);
   const rated = new Map<string, number>();
   for (const pl of tePlays) {
     if (pl.play_type !== "route_run" || pl.was_open == null) continue;

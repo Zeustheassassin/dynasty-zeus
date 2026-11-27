@@ -8,6 +8,7 @@
 import type { ColDef } from "./StatsTableShell";
 import type { ScoutingGame } from "../../../lib/types";
 import { COLD_F, RAIN_IN, resolveGameContexts, type GameContextData } from "../../../lib/scouting/gameContext";
+import { sampleGames } from "../../../lib/scouting/sampleGames";
 
 const CONTEXT = "Game Context";
 
@@ -44,8 +45,9 @@ export function contextExtras(
   data: GameContextData | undefined,
 ): Map<string, Record<string, number | null>> {
   const contexts = resolveGameContexts(games, data ?? { rows: [], cfdGames: [], teamSeasons: [] });
+  // The context of his sample: his sample games only (sampleGames.ts).
   const byProspect = new Map<string, ScoutingGame[]>();
-  for (const g of games) (byProspect.get(g.prospect_id) ?? byProspect.set(g.prospect_id, []).get(g.prospect_id)!).push(g);
+  for (const g of sampleGames(games)) (byProspect.get(g.prospect_id) ?? byProspect.set(g.prospect_id, []).get(g.prospect_id)!).push(g);
   const out = new Map<string, Record<string, number | null>>();
   for (const p of prospects) {
     const gs = byProspect.get(p.id) ?? [];

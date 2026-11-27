@@ -191,9 +191,19 @@ describe("buildChartNext: re-chart imported WRs", () => {
 
   it("lists ranked WRs with imported routes, short of a full sample in the app; to go = in-app routes to full", () => {
     expect(b.rechart.map((r) => [r.prospect.id, r.imported, r.toGo])).toEqual([
-      ["mixed", { routes: 110, games: 2, inApp: 40 }, 120],
+      ["mixed", { routes: 110, games: 2, inApp: 40, setAside: 0, switchOpen: false }, 120],
     ]);
     expect(b.rechartFullInApp).toBe(1);
+  });
+
+  it("marks the Count in sample switch open at half a sample in the app, and counts set-aside games", () => {
+    const g2 = [
+      game("s-old1", "mixed", { ...imported, count_in_sample: false }), game("s-old2", "mixed", imported), game("s-new", "mixed"),
+    ];
+    const rc = [{ game_id: "s-old1", routes: 60 }, { game_id: "s-old2", routes: 50 }, { game_id: "s-new", routes: 80 }];
+    const r = buildChartNext(2027, inputs({ prospects: [prospects[0]], games: g2, routeCounts: rc })).rechart[0];
+    expect(r.imported).toEqual({ routes: 110, games: 2, inApp: 80, setAside: 1, switchOpen: true });
+    expect(r.toGo).toBe(80);
   });
 });
 

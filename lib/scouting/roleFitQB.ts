@@ -23,6 +23,7 @@ import {
   buildRoleFit, inverseUsageFeature, skillFeature, usageFeature,
   type AESliceValue, type BucketRecipe, type FeatureSet, type RoleFit,
 } from "./roleFit";
+import { sampleGameToProspect } from "./sampleGames";
 
 // Fewer graded throws than this: no bucket.
 export const QB_MIN_THROWS = 30;
@@ -208,7 +209,8 @@ export function computeQBRoleFits(
   const taggedRuns = qbPlays.filter((pl) => pl.run_success != null);
   const leagueRunSucc = taggedRuns.length ? taggedRuns.filter((pl) => pl.run_success === true).length / taggedRuns.length : null;
   const slices = computeQBRoleSlices(prospects, games, qbPlays, QB_SLICES);
-  const gameToProspect = new Map(games.map((g) => [g.id, g.prospect_id]));
+  // His plays: his sample games only (sampleGames.ts); the league rates above read every play.
+  const gameToProspect = sampleGameToProspect(games);
   const playsBy = new Map<string, QBPlay[]>();
   for (const pl of qbPlays) {
     const pid = gameToProspect.get(pl.game_id);
