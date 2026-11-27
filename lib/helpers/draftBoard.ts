@@ -208,6 +208,8 @@ export interface DraftBoardSnapshotRow {
   fc_value: number;
   dynasty: number | null;
   plus: number | null;
+  /** Dynasty+ was projected from his consensus big board rank (no round set yet); absent on older snapshots. */
+  plus_projected?: boolean;
   nfl_draft: { team: string; round: number | null; pick: number | null } | null;
 }
 
@@ -230,6 +232,7 @@ export function draftBoardSnapshotRows(
     fc_value: fcFor(p),
     dynasty: p.board_scores?.dynasty ?? null,
     plus: p.board_scores?.plus ?? null,
+    ...(p.board_scores?.plus != null && p.board_scores.plus_projected ? { plus_projected: true } : {}),
     nfl_draft: p.draft_team || p.draft_round != null || p.draft_pick != null
       ? { team: p.draft_team ?? "", round: p.draft_round, pick: p.draft_pick }
       : null,

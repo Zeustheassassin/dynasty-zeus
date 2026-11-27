@@ -23,6 +23,8 @@ type SnapshotPlayer = {
   fc_value: number;
   dynasty?: number | null;
   plus?: number | null;
+  /** Dynasty+ projected from the consensus board (no round set yet when saved). */
+  plus_projected?: boolean;
   nfl_draft: NflDraft;
 };
 
@@ -186,8 +188,10 @@ export default function HistoricalBigBoards() {
                     </span>
                   )}
                   {p.plus != null && (
-                    <span className="text-[10px] shrink-0 text-slate-500" title="Dynasty Score Plus when saved">
+                    <span className="text-[10px] shrink-0 text-slate-500"
+                      title={p.plus_projected ? "Dynasty Score Plus when saved, projected from his consensus big board rank (no round set yet)" : "Dynasty Score Plus when saved"}>
                       Dyn+ <span className={`font-semibold ${p.plus >= 0 ? "text-emerald-400" : "text-red-400"}`}>{signed(p.plus)}</span>
+                      {p.plus_projected && <sup className="ml-0.5 text-[8px] font-semibold text-sky-400" aria-label="projected">P</sup>}
                     </span>
                   )}
                   {p.fc_value > 0 && (

@@ -11,6 +11,11 @@ import { roleFitTooltip, roleInfo, roleLabel } from "../../../lib/scouting/roleF
 import { poolRankText } from "../../../lib/scouting/roleStanding";
 import { PFF_GRADE } from "../../../lib/scouting/readyToChart";
 import { measuredFact } from "../../../lib/scouting/measuredSize";
+import { consensusRankOf, projectedCapitalLabel } from "../../../lib/scouting/consensusBoard";
+
+/** His class's consensus upload checked him and he isn't on it (migration 109). */
+const offConsensus = (p: ProspectWithStats) =>
+  p.consensus_class != null && p.consensus_class === p.draft_class_year && consensusRankOf(p) == null;
 import { aeScoreMissingReason, dynastyScores, scorePieces, type AEKey } from "../../../lib/scouting/prospectScores";
 import type { OverviewPage } from "../../../lib/scouting/overviewStats";
 import { COLLEGE_ZONE_ACCURACY, COLLEGE_ZONE_SHARE, type QBFullSeasons } from "../../../lib/scouting/qbStyle";
@@ -148,6 +153,14 @@ function ScoreStrip({ p, pos, report }: { p: ProspectWithStats; pos: CompositePo
     tiles.push(d.plus != null && d.draftCapital != null && p.draft_round != null
       ? <ScoreTile key="plus" label="DYNASTY+" value={signed(d.plus, 2)} tone={toneOf(d.plus)} lines={[`${p.draft_round === UNDRAFTED_ROUND ? "Undrafted" : p.draft_pick ? `pick ${p.draft_pick}` : `${draftRoundLabel(p.draft_round)} rd avg`} capital ${signed(weights.draft * d.draftCapital, 2)}`, ...(d.landing?.competition?.value ? [`competition ${signed(weights.landing * d.landing.competition.value, 2)}`] : []), ...(d.landing?.standing?.value ? [`role standing ${signed(weights.role * d.landing.standing.value, 2)}`] : []), ...(teamLandingTotal(d.landing?.team, weights) ? [`team ${signed(teamLandingTotal(d.landing?.team, weights), 2)}`] : [])]}
           title={[`Draft capital from the ${draftCapitalLabel(p.draft_round, p.draft_pick, p.position)}, × the Big Board's Draft slider (${weights.draft}).`, ...landingLines(d.landing, p.draft_class_year, weights)].join("\n")} />
+      : d.plus != null && d.draftCapital != null && d.projected
+      // Projected from his consensus big board rank (consensusBoard.ts): capital only until his real pick.
+      ? <ScoreTile key="plus" label="DYNASTY+ (PROJ)" value={signed(d.plus, 2)} tone={toneOf(d.plus)}
+          lines={[`consensus #${d.projected.rank} · capital ${signed(weights.draft * d.draftCapital, 2)}`]}
+          title={[`Projected: draft capital from his ${projectedCapitalLabel(d.projected.rank, p.position, p.consensus_at)}, × the Big Board's Draft slider (${weights.draft}).`, "Capital only: the landing spot waits for his real pick, which replaces this."].join("\n")} />
+      : offConsensus(p)
+      ? <ScoreTile key="plus" label="DYNASTY+" value="—" tone="dim" lines={["not on consensus"]}
+          title="Not on the consensus big board uploaded for his class, so there's no projected pick: Dynasty+ shows once his real round is set." />
       : <ScoreTile key="plus" label="DYNASTY+" value="—" tone="dim" lines={["shows once a round is set"]} />);
   } else {
     tiles.push(<ScoreTile key="dyn" label="DYNASTY" value="—" tone="dim" lines={["needs an AE Score"]} />);

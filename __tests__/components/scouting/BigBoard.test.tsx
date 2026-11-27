@@ -13,7 +13,7 @@ import type { RoleFit } from "@/lib/scouting/roleFit";
 import type { BoardShare, SharedBoardRow } from "@/lib/scouting/sharedBoard";
 import { totalsFor } from "@/lib/pff/totals";
 import { gradeFromDynasty } from "@/lib/scouting/prospectGrade";
-import { QB_PREDRAFT_SCALE } from "@/lib/scouting/dynastyScore";
+import { QB_PREDRAFT_SCALE, projectedCapital } from "@/lib/scouting/dynastyScore";
 import { GAME_STAT_KEYS, SEASON_STAT_KEYS, type PffGameRow, type PffSeasonRow } from "@/lib/pff/stats";
 
 // The Big Board's Above Exp group: one column per metric (AAE, SRAE, SAE, cSAE,
@@ -574,7 +574,40 @@ describe("BigBoard Dynasty Score", () => {
     expect(cell("Running One", "Dynasty")).toBe("—"); // RB pool too small for an AE Score
     expect(cell("Quarter One", "Dynasty")).toMatch(/^[+-]\d\.\d\d$/);
     expect(cell("Quarter One", "Dynasty+")).toBe("—");
-    expect(scoreCellOf("Quarter One", "Dynasty+").getAttribute("title")).toBe("Set the NFL draft round to see Dynasty Score Plus");
+    expect(scoreCellOf("Quarter One", "Dynasty+").getAttribute("title")).toBe("Set the NFL draft round, or upload the consensus big board (Consensus board above), to see Dynasty Score Plus");
+  });
+
+  // Stage 6 of the 2026-11-26 scouting plan (migration 109).
+  const AT = "2026-11-27T18:00:00Z";
+  const onConsensus = (id: string, rank: number | null) => (p: ProspectWithStats) =>
+    p.id === id ? { ...p, consensus_rank: rank, consensus_class: 2027, consensus_at: AT } : p;
+
+  it("projects Dynasty+ from the consensus rank before a round is set, marked P", () => {
+    renderBoard([...PROSPECTS.map(onConsensus("qb1", 12)), ...POOL]);
+    const { full } = qbDynasty();
+    const text = cell("Quarter One", "Dynasty+")!;
+    expect(text).toMatch(/^[+-]\d\.\d\dP$/);
+    near(Number(text.slice(0, -1)), full + 2 * projectedCapital(12, "QB"));
+    const title = scoreCellOf("Quarter One", "Dynasty+").getAttribute("title")!;
+    expect(title).toContain("QB pre-draft discount comes off (the projected pick prices it in)");
+    expect(title).toMatch(/Projected: consensus #12 \(Nov 2\d, 2026\), picks 9–15 averaged, on the QB scale → \+/);
+    expect(title).toContain("Capital only: the landing spot waits for his real pick");
+    expect(title).toMatch(/= Dynasty\+ [+-]\d\.\d\d \(projected\)$/);
+    expect(screen.getByText(/Dynasty\+ P = projected from the consensus board/)).toBeTruthy();
+  });
+
+  it("a real round replaces the projection", () => {
+    renderBoard([...PROSPECTS.map(onConsensus("qb1", 12)).map((p) => (p.id === "qb1" ? { ...p, draft_round: 1, draft_pick: 3 } : p)), ...POOL]);
+    expect(cell("Quarter One", "Dynasty+")).toMatch(/^[+-]\d\.\d\d$/);
+    expect(scoreCellOf("Quarter One", "Dynasty+").getAttribute("title")).toContain("Drafted: 1st round, pick 3");
+  });
+
+  it("shows NC for a player his class's consensus upload doesn't name", () => {
+    renderBoard([...PROSPECTS.map(onConsensus("qb1", null)).map(onConsensus("wr1", 5)), ...POOL]);
+    expect(cell("Quarter One", "Dynasty+")).toBe("NC not on the consensus board");
+    expect(scoreCellOf("Quarter One", "Dynasty+").getAttribute("title")).toMatch(/^Not on the consensus big board of Nov 2\d, 2026, so there's no projected pick/);
+    // A 2027 pool QB the upload never saw (added since): not checked.
+    expect(scoreCellOf("Pool QB 0", "Dynasty+").getAttribute("title")).toMatch(/^Not checked against the consensus board: he joined the 2027 class after the upload/);
   });
 
   it("adds age and draft capital, and explains each piece", () => {
@@ -1209,7 +1242,7 @@ describe("BigBoard Realign ranks", () => {
   it("keeps Dynasty+ off until a draft round gives someone one", () => {
     renderBoard(BOARD, undefined, { onSetRanks: vi.fn<SetFn>(async () => true) });
     expect((button("By Dynasty+") as HTMLButtonElement).disabled).toBe(true);
-    expect(button("By Dynasty+").getAttribute("title")).toBe("No Dynasty+ in the 2027 class yet: it needs the NFL draft round");
+    expect(button("By Dynasty+").getAttribute("title")).toBe("No Dynasty+ in the 2027 class yet: it needs the NFL draft round or a consensus upload");
     cleanup();
     renderBoard(BOARD.map((p) => (p.id === "qb1" ? { ...p, draft_round: 1 } : p)), undefined, { onSetRanks: vi.fn<SetFn>(async () => true) });
     expect((button("By Dynasty+") as HTMLButtonElement).disabled).toBe(false);

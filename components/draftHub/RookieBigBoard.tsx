@@ -38,7 +38,7 @@ const signed = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
 
 const OVR_TOOLTIP = "OVR: your Scouting Big Board's overall rank for the class. Change it there. Unranked prospects sit below, by Dynasty Score.";
 const DYN_TOOLTIP = "Dynasty Score as of your last Scouting Big Board visit (live, without traits, at the sliders' weights then).";
-const PLUS_TOOLTIP = "Dynasty Score Plus: Dynasty plus draft capital. Shows once the NFL draft round is set on the Scouting Big Board.";
+const PLUS_TOOLTIP = "Dynasty Score Plus: Dynasty plus draft capital. Shows once the NFL draft round is set on the Scouting Big Board; before that, projected (P) from the consensus big board uploaded there.";
 const FC_TOOLTIP = "FantasyCalc Superflex dynasty value, matched by name to FantasyCalc's rookies of this class. Blank until FantasyCalc lists him.";
 const NO_SCORES = "No saved scores yet: open Scouting → Big Board to save them";
 
@@ -80,11 +80,13 @@ function sampleDot(pos: string, s: BoardScores["sample"] | undefined) {
   );
 }
 
-function scoreCell(v: number | null | undefined, title: string) {
+function scoreCell(v: number | null | undefined, title: string, projected = false) {
   if (v == null) return <span className="text-right text-xs text-slate-600" title={title}>—</span>;
   return (
     <span className={`text-right text-xs font-semibold tabular-nums ${v >= 0 ? "text-emerald-400" : "text-red-400"}`} title={title}>
       {signed(v)}
+      {/* Projected from his consensus big board rank (Scouting Big Board → Consensus board). */}
+      {projected && <sup className="ml-0.5 text-[8px] text-sky-400" aria-label="projected">P</sup>}
     </span>
   );
 }
@@ -512,8 +514,10 @@ export default function RookieBigBoard({
           : s.dynasty == null ? "Needs an AE Score first (chart more of him in Scouting)"
           : `${DYN_TOOLTIP} Age ×${s.weights.age}, size ×${s.weights.size}.`;
         const plusTitle = !s ? NO_SCORES
-          : s.plus == null ? (s.dynasty == null ? "Needs an AE Score first" : "Shows once the NFL draft round is set on the Scouting Big Board")
-          : `Dynasty Score Plus as of your last Big Board visit. Draft capital ×${s.weights.draft}.`;
+          : s.plus == null ? (s.dynasty == null ? "Needs an AE Score first" : "Shows once the NFL draft round is set, or once he's on the consensus big board uploaded on the Scouting Big Board")
+          : s.plus_projected
+            ? `Projected Dynasty Score Plus as of your last Big Board visit: draft capital ×${s.weights.draft} read from his consensus big board rank (the picks within 25% of it averaged), capital only. His real pick replaces it.`
+            : `Dynasty Score Plus as of your last Big Board visit. Draft capital ×${s.weights.draft}.`;
 
         return (
           <div key={p.id}>
@@ -557,7 +561,7 @@ export default function RookieBigBoard({
                 </div>
               </div>
               {scoreCell(s?.dynasty, dynTitle)}
-              {scoreCell(s?.plus, plusTitle)}
+              {scoreCell(s?.plus, plusTitle, !!s?.plus_projected)}
               <span className="text-right text-[10px] font-mono text-slate-400 tabular-nums" title={FC_TOOLTIP}>
                 {fc > 0 ? fc.toLocaleString() : "—"}
               </span>

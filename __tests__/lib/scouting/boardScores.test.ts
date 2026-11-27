@@ -7,8 +7,8 @@ import { SAMPLE_FULL, type SampleSize } from "../../../lib/scouting/sampleSize";
 const prospect = (id: string, position: string, board_scores: BoardScores | null = null) =>
   ({ id, name: id, position, board_scores }) as ProspectWithStats;
 
-const dyn = (dynasty: number, plus: number | null): DynastyBreakdown =>
-  ({ aeScore: dynasty, rookieAge: null, window: null, flags: [], speed: null, lightInside: null, rushing: null, qbDiscount: null, dynasty, draftCapital: null, plus });
+const dyn = (dynasty: number, plus: number | null, projected: DynastyBreakdown["projected"] = null): DynastyBreakdown =>
+  ({ aeScore: dynasty, rookieAge: null, window: null, flags: [], speed: null, lightInside: null, rushing: null, qbDiscount: null, dynasty, draftCapital: null, projected, plus });
 
 const sample = (pos: "QB" | "WR", n: number | null, share: number, tier: SampleSize["tier"]): SampleSize =>
   ({ ...SAMPLE_FULL[pos], n, share, tier });
@@ -35,6 +35,16 @@ describe("buildBoardScores", () => {
   it("leaves Dynasty+ null before a round is set", () => {
     const m = buildBoardScores(prospects, new Map([["q", dyn(0.5, null)]]), samples, DEFAULT_DYNASTY_WEIGHTS);
     expect(m.get("q")).toMatchObject({ dynasty: 0.5, plus: null });
+    expect(m.get("q")).not.toHaveProperty("plus_projected");
+  });
+
+  it("says when Dynasty+ is projected from the consensus board, and the key tells them apart", () => {
+    const projected = { rank: 40, from: 30, to: 50 };
+    const m = buildBoardScores(prospects, new Map([["q", dyn(0.5, 1.7, projected)]]), samples, DEFAULT_DYNASTY_WEIGHTS);
+    expect(m.get("q")).toMatchObject({ plus: 1.7, plus_projected: true });
+    const real = buildBoardScores(prospects, new Map([["q", dyn(0.5, 1.7)]]), samples, DEFAULT_DYNASTY_WEIGHTS);
+    expect(real.get("q")).not.toHaveProperty("plus_projected");
+    expect(boardScoresKey(m.get("q"))).not.toBe(boardScoresKey(real.get("q")));
   });
 });
 

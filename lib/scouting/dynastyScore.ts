@@ -7,7 +7,8 @@
 //                        + rushing weight × a QB's rushing bonus (qbRushing.ts)
 //                        + a QB's pre-draft discount (QB_PREDRAFT_SCALE; off once his class is drafted)
 //   Dynasty Score Plus = Dynasty Score, less the QB pre-draft discount (his pick prices that in)
-//                        + draft weight × draft capital (once a round is set)
+//                        + draft weight × draft capital (once a round is set; before that,
+//                          projected from his consensus big board rank, capital only)
 //                        + landing weight × (rookie competition + vets ahead + path by year 2)
 //                        + role weight × role standing
 //                        + offense weight × (QB + pass/run offense)
@@ -272,6 +273,39 @@ export function draftCapitalAt(round: number | null, pick: number | null, pos?: 
   return DRAFT_CAPITAL[round] ?? null;
 }
 
+// ── Projected pick (Dynasty Score Plus, before the draft) ─────────────────
+// Stage 6 of the 2026-11-26 scouting plan: until his real pick is applied, a
+// prospect's rank on the consensus big board the user uploads (migration 109,
+// consensusBoard.ts) stands in for his pick. Boards miss by a lot, so the
+// capital is his position's curve averaged over the picks within
+// CONSENSUS_WINDOW of his rank (the user's examples: #40 → picks 30–50, #12 →
+// 9–15, #100 → 75–125). Picks past LAST_PICK count as going undrafted, so a
+// rank of 220 (165–275) averages in 18 undrafted slots, and from about 343
+// on (257 / 0.75) every slot is. Capital only: no team, role, depth or
+// offense (the landing pieces wait for the real pick). A QB's pre-draft
+// discount comes off as it does for a real pick. Players not on the list get
+// no Dynasty+ (shown as "not on consensus").
+/** ±25% of the consensus rank. */
+export const CONSENSUS_WINDOW = 0.25;
+/** A draft's last pick (2025's 257); a projected slot past it is undrafted. */
+export const LAST_PICK = ROUND_PICKS[7][1];
+
+/** The picks a consensus rank projects to: within CONSENSUS_WINDOW of it, never before pick 1. */
+export function projectedPickWindow(rank: number): { from: number; to: number } {
+  return {
+    from: Math.max(1, Math.ceil(rank * (1 - CONSENSUS_WINDOW))),
+    to: Math.max(1, Math.floor(rank * (1 + CONSENSUS_WINDOW))),
+  };
+}
+
+/** Draft capital for a consensus rank: his position's curve averaged over projectedPickWindow, undrafted past LAST_PICK. */
+export function projectedCapital(rank: number, pos?: string | null): number {
+  const { from, to } = projectedPickWindow(rank);
+  let s = 0;
+  for (let p = from; p <= to; p++) s += p > LAST_PICK ? DRAFT_CAPITAL[UNDRAFTED_ROUND] : draftCapitalForPick(p, pos);
+  return s / (to - from + 1);
+}
+
 // ── Landing spot (Dynasty Score Plus) ──────────────────────────────────────
 // What his NFL team's room does to his early opportunity, on top of draft
 // capital (the user's plan, 2026-11-10). Only classes from LANDING_FIRST_CLASS:
@@ -417,6 +451,8 @@ export interface DynastyInputs {
   draftRound: number | null;
   /** Overall pick (1 = first), or null when only the round is known. */
   draftPick: number | null;
+  /** His consensus big board rank for his class (consensusBoard.ts consensusRankOf): the projected pick Dynasty+ reads while no round is set. */
+  consensusRank?: number | null;
   /** Landing-spot inputs; absent for classes before LANDING_FIRST_CLASS and before the draft. */
   landing?: LandingInputs | null;
   /** A QB's rushing bonus before the Rushing slider (qbRushing.ts); absent off QB or under the median. */
@@ -438,9 +474,11 @@ export interface DynastyBreakdown {
   /** A QB's pre-draft discount, already in `dynasty` and backed out of `plus` (no slider); null when it doesn't apply. */
   qbDiscount: { value: number; label: string } | null;
   dynasty: number;
-  /** Before the draft weight; null when no round is set. */
+  /** Before the draft weight; from his pick or round, else projected from his consensus rank; null with neither. */
   draftCapital: number | null;
-  /** Null until a round is set. */
+  /** Set when draftCapital is projected from his consensus rank (no round set yet): the rank and the picks averaged. */
+  projected: { rank: number; from: number; to: number } | null;
+  /** Null until a round is set or a consensus rank projects one. */
   plus: number | null;
   /** The landing-spot piece of Plus, before its weight; absent when it doesn't apply. */
   landing?: LandingBreakdown | null;
@@ -460,10 +498,15 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
   const dynasty = inp.aeScore + w.age * (window ?? 0) + w.size * size + (w.speed ?? 0) * (speed?.value ?? 0)
     + (w.lightInside ?? 0) * (lightInside?.value ?? 0)
     + (w.rushing ?? 0) * (rushing?.value ?? 0) + (qbDiscount?.value ?? 0);
-  const draftCapital = draftCapitalAt(inp.draftRound, inp.draftPick, inp.pos);
+  const real = draftCapitalAt(inp.draftRound, inp.draftPick, inp.pos);
+  // A real round wins; else his consensus rank projects the pick (capital only).
+  const rank = inp.consensusRank;
+  const projected = real == null && rank != null && Number.isInteger(rank) && rank >= 1
+    ? { rank, ...projectedPickWindow(rank) } : null;
+  const draftCapital = real ?? (projected ? projectedCapital(projected.rank, inp.pos) : null);
   let landing: LandingBreakdown | null = null;
-  if (inp.landing && draftCapital != null) {
-    const competition = inp.landing.competitors ? rookieCompetition(draftCapital, inp.landing.competitors) : null;
+  if (inp.landing && real != null) {
+    const competition = inp.landing.competitors ? rookieCompetition(real, inp.landing.competitors) : null;
     landing = {
       competition, standing: inp.landing.standing ?? null, team: inp.landing.team ?? null,
       ...(inp.landing.note ? { note: inp.landing.note } : {}),
@@ -480,7 +523,8 @@ export function scoreDynasty(inp: DynastyInputs, w: DynastyWeights): DynastyBrea
     qbDiscount,
     dynasty,
     draftCapital,
-    // The QB discount stands in for an unknown pick, so Dynasty+ (which has the pick) backs it out.
+    projected,
+    // The QB discount stands in for an unknown pick, so Dynasty+ (which has the pick, real or projected) backs it out.
     plus: draftCapital != null ? dynasty - (qbDiscount?.value ?? 0) + w.draft * draftCapital + landingTotal(landing, w) : null,
     landing,
   };

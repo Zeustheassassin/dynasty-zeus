@@ -33,6 +33,7 @@ import { QB_RUN_TAG_MIN } from "./roleFitQB";
 import { X_RELEASE_REPS } from "./roleFitWR";
 import { scoutingClassYear } from "./chartNext";
 import { sampleGameToProspect } from "./sampleGames";
+import { latestConsensusAt } from "./consensusBoard";
 
 export type DueState = "due" | "soon" | "waiting" | "later" | "watch" | "done";
 
@@ -122,9 +123,17 @@ export function consensusMilestones(year: number): { label: string; at: Date }[]
   ];
 }
 
-function consensusItem(now: Date, year: number, marks: DueMarks): DueItem {
+/**
+ * The consensus upload, due 30 days after the last one or at the next
+ * milestone before then. The last one is the newest of: a save on the Big
+ * Board's Consensus board panel (prospects' consensus_at, migration 109), a
+ * Mark done (an upload made another way), and the Nov 5 CSV.
+ */
+function consensusItem(now: Date, year: number, marks: DueMarks, uploadedAt: string | null): DueItem {
   const mark = marks.get(markKey("consensus_upload", "")) ?? null;
-  const last = new Date(mark?.doneAt ?? CONSENSUS_LAST_UPLOAD);
+  const times = [CONSENSUS_LAST_UPLOAD, mark?.doneAt, uploadedAt]
+    .map((t) => (t ? Date.parse(t) : NaN)).filter((t) => Number.isFinite(t));
+  const last = new Date(Math.max(...times));
   const byAge = new Date(last.getTime() + CONSENSUS_EVERY_DAYS * DAY);
   const milestones = [...consensusMilestones(year - 1), ...consensusMilestones(year)]
     .filter((m) => m.at.getTime() > last.getTime());
@@ -135,7 +144,7 @@ function consensusItem(now: Date, year: number, marks: DueMarks): DueItem {
   return {
     key: "consensus_upload", cycle: "",
     title: "Upload the consensus big board",
-    detail: "Re-upload the consensus big board CSV (the same source as Nov 5). Until the in-app upload is built (plan stage 6), hand Claude the CSV. Mark it done after each upload.",
+    detail: "Re-upload the consensus big board CSV (the same source as Nov 5) on Big Board → Consensus board: its ranks are the projected picks Dynasty+ reads until the draft. Saving it counts as the upload; Mark done is for one made another way.",
     when: `${dayText(dueAt)}, ${why}`,
     state: now.getTime() >= dueAt.getTime() ? "due" : dueAt.getTime() - now.getTime() <= SOON_DAYS * DAY ? "soon" : "later",
     at: dueAt.getTime(),
@@ -282,7 +291,7 @@ export function calendarItems(
   now: Date,
   marks: DueMarks,
   goal: GoalProgress | null,
-  prospects: readonly Pick<Prospect, "name" | "draft_class_year" | "pre_draft_grade">[],
+  prospects: readonly Pick<Prospect, "name" | "draft_class_year" | "pre_draft_grade" | "consensus_at">[],
 ): DueItem[] {
   const year = scoutingClassYear(now);
   // The class flips in May, with draft-week checks still open: last class's
@@ -300,7 +309,7 @@ export function calendarItems(
       mark: s.mark ?? "done", choices: s.choices, done,
     };
   });
-  items.push(consensusItem(now, year, marks), goalItem(now, year, goal), generationalItem(prospects, marks));
+  items.push(consensusItem(now, year, marks, latestConsensusAt(prospects)), goalItem(now, year, goal), generationalItem(prospects, marks));
   return items;
 }
 

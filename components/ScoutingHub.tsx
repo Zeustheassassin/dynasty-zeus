@@ -44,6 +44,7 @@ import { readyToChart } from "../lib/scouting/readyToChart";
 import { hubHeaderBreakdown, type HubHeaderCounts } from "../lib/scouting/hubHeaderCounts";
 import { parseSharedBoardRows, type BoardShare, type SharedBoardRow } from "../lib/scouting/sharedBoard";
 import { calendarItems, markKey, slowTapeOpen, type DueMark } from "../lib/scouting/dueNow";
+import { applyConsensusSave } from "../lib/scouting/consensusBoard";
 import { buildChartNext, scoutingClassYear } from "../lib/scouting/chartNext";
 import type { DueMarksState } from "./scouting/stats/DueNowList";
 
@@ -917,6 +918,22 @@ export default function ScoutingHub() {
     return true;
   }, []);
 
+  // One class's consensus big board ranks (migration 109's save_prospect_consensus):
+  // every QB / RB / WR / TE in the class gets his rank or null, all or nothing,
+  // and state takes the same values (consensusBoard.ts applyConsensusSave), so
+  // Dynasty+ projects the picks at once. Resolves to an error message, or null.
+  const handleSaveConsensus = useCallback(async (year: number, ranks: ReadonlyMap<string, number>): Promise<string | null> => {
+    const { error } = await supabase.rpc("save_prospect_consensus", { p_class: year, p_ranks: Object.fromEntries(ranks) });
+    if (error) {
+      const missing = error.code === "PGRST202" || error.code === "42883" || /could not find the function|does not exist/i.test(error.message ?? "");
+      log.error("save consensus ranks (needs migration 109)", { year, msg: error.message, code: error.code });
+      return missing ? "Couldn't save: is migration 109 applied? Nothing changed." : `Couldn't save (${error.message}). Nothing changed.`;
+    }
+    const at = new Date().toISOString();
+    setProspects((prev) => applyConsensusSave(prev, year, ranks, at));
+    return null;
+  }, []);
+
   // The draft board's scores (prospects.board_scores, migration 068), many
   // prospects in one call. Not mirrored into state: the Big Board tracks what it
   // saved, and the Unwatched tab's order reads them as loaded (a Big Board
@@ -1250,6 +1267,7 @@ export default function ScoutingHub() {
             boardSharesMissing={boardSharesMissing}
             onSaveBoardShare={handleSaveBoardShare}
             onSetShareRedacted={handleSetShareRedacted}
+            onSaveConsensus={handleSaveConsensus}
           />
         )}
 

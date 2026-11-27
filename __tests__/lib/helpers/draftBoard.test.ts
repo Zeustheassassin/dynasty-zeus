@@ -138,6 +138,13 @@ describe("fcValueFor", () => {
 });
 
 describe("draftBoardSnapshotRows", () => {
+  it("carries a projected Dynasty+ mark (consensus board) into the snapshot", () => {
+    const board = [prospect("p1", "Cy First", 1, { ...scores(1.2, undefined, 2.5), plus_projected: true })];
+    expect(draftBoardSnapshotRows(board, new Map(), () => 0)[0]).toMatchObject({ plus: 2.5, plus_projected: true });
+    const plain = draftBoardSnapshotRows([prospect("p2", "Al", 2, scores(1.2, undefined, 2.5))], new Map(), () => 0)[0];
+    expect(plain).not.toHaveProperty("plus_projected");
+  });
+
   it("saves each row's place, OVR, tier, FC, Dynasty, Dynasty+ and prospect id", () => {
     const board = [
       prospect("p1", "Cy First", 1, scores(1.234, undefined, 3.234), { draft_team: "NYJ", draft_round: 1, draft_pick: 3 }),

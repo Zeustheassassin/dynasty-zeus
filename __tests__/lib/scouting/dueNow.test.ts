@@ -70,6 +70,18 @@ describe("calendarItems", () => {
     expect([c.state, c.when]).toEqual(["due", "Jan 16, 2027, after early-entry declarations (mid-January)"]);
   });
 
+  it("a consensus save on the Big Board counts as the upload (the newest of it, a mark and Nov 5)", () => {
+    const saved = [{ name: "A", draft_class_year: 2027, pre_draft_grade: null, consensus_at: new Date(2026, 11, 10, 12).toISOString() }];
+    const c = find(calendarItems(day(2026, 12, 20), none, null, saved), "consensus_upload")!;
+    expect([c.state, c.when]).toEqual(["soon", "Jan 9, 2027, 30 days after the last one"]);
+    expect(c.note).toMatch(/^Last upload Dec 10, 2026 \(10 days ago\)/);
+    // A later mark wins over an older save.
+    const jan5 = marks([["consensus_upload", "", { doneAt: new Date(2027, 0, 5, 12).toISOString(), value: null }]]);
+    expect(find(calendarItems(day(2027, 1, 6), jan5, null, saved), "consensus_upload")!.note).toMatch(/^Last upload Jan 5, 2027/);
+    // Before any save, Nov 5's CSV.
+    expect(find(calendarItems(day(2026, 11, 27), none, null, []), "consensus_upload")!.note).toMatch(/^Last upload Nov 5, 2026/);
+  });
+
   it("the class flips in May; last class's open checks carry over until marked", () => {
     const may10 = day(2027, 5, 10);
     const items = calendarItems(may10, none, null, []);

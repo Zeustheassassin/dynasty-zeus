@@ -20,6 +20,10 @@ import {
   qbSlotValue,
   RB_DRAFT_CAPITAL,
   ROUND_PICKS,
+  CONSENSUS_WINDOW,
+  LAST_PICK,
+  projectedCapital,
+  projectedPickWindow,
   type DynastyInputs,
 } from "@/lib/scouting/dynastyScore";
 import { UNDRAFTED_ROUND, draftCapitalLabel } from "@/lib/draftRound";
@@ -420,5 +424,71 @@ describe("a QB's draft capital", () => {
     expect(draftCapitalLabel(1, 5, "QB")).toBe("1st round, pick 5");
     expect(draftCapitalLabel(2, 40, "WR")).toBe("2nd round, pick 40");
     expect(draftCapitalLabel(8, 300, "QB")).toBe("Undrafted");
+  });
+});
+
+// Stage 6 of the 2026-11-26 scouting plan: a consensus big board rank stands
+// in for the pick until the real one is set (capital only, ±25% window).
+describe("projected pick from the consensus board", () => {
+  it("the window is the picks within 25% of the rank (the user's examples)", () => {
+    expect(projectedPickWindow(40)).toEqual({ from: 30, to: 50 });
+    expect(projectedPickWindow(12)).toEqual({ from: 9, to: 15 });
+    expect(projectedPickWindow(100)).toEqual({ from: 75, to: 125 });
+    expect(projectedPickWindow(1)).toEqual({ from: 1, to: 1 });
+    expect(projectedPickWindow(7)).toEqual({ from: 6, to: 8 }); // 5.25–8.75: whole picks inside
+    expect(CONSENSUS_WINDOW).toBe(0.25);
+  });
+
+  it("averages his position's curve over the window", () => {
+    const mean = (pos: string, from: number, to: number) => {
+      let s = 0;
+      for (let p = from; p <= to; p++) s += draftCapitalForPick(p, pos);
+      return s / (to - from + 1);
+    };
+    expect(projectedCapital(40, "WR")).toBeCloseTo(mean("WR", 30, 50), 12);
+    expect(projectedCapital(40, "RB")).toBeCloseTo(mean("RB", 30, 50), 12);
+    expect(projectedCapital(12, "QB")).toBeCloseTo(mean("QB", 9, 15), 12);
+    expect(projectedCapital(1, "QB")).toBeCloseTo(draftCapitalForPick(1, "QB"), 12);
+    // A QB at #24 sits on the QB taper, a WR there doesn't.
+    expect(projectedCapital(24, "QB")).toBeLessThan(projectedCapital(24, "WR"));
+  });
+
+  it("runs into the undrafted value past the last pick", () => {
+    expect(LAST_PICK).toBe(257);
+    // #220 → 165–275: 93 drafted slots and 18 undrafted ones.
+    let s = 0;
+    for (let p = 165; p <= 257; p++) s += draftCapitalForPick(p, "WR");
+    expect(projectedCapital(220, "WR")).toBeCloseTo((s + 18 * DRAFT_CAPITAL[UNDRAFTED_ROUND]) / 111, 12);
+    // From 343 on (343 × 0.75 = 257.25), every slot is undrafted.
+    expect(projectedCapital(343, "RB")).toBe(-1);
+    expect(projectedCapital(1000, "QB")).toBe(-1);
+    expect(projectedCapital(342, "RB")).toBeGreaterThan(-1);
+  });
+
+  const qb: DynastyInputs = { pos: "QB", aeScore: 1.5, rookieAge: null, heightIn: null, weightLb: null, draftRound: null, draftPick: null };
+
+  it("gives Dynasty+ from the rank when no round is set, backing out the QB discount", () => {
+    const d = scoreDynasty({ ...qb, consensusRank: 40 }, DEFAULT_DYNASTY_WEIGHTS);
+    expect(d.projected).toEqual({ rank: 40, from: 30, to: 50 });
+    expect(d.draftCapital).toBeCloseTo(projectedCapital(40, "QB"), 12);
+    // Dynasty carries the pre-draft discount; Dynasty+ takes it off, as with a real pick.
+    expect(d.dynasty).toBeCloseTo(1.5 * QB_PREDRAFT_SCALE, 12);
+    expect(d.plus).toBeCloseTo(1.5 + 2 * projectedCapital(40, "QB"), 12);
+  });
+
+  it("capital only: landing inputs wait for the real pick", () => {
+    const landing = { competitors: [], standing: { value: 0.2 } as never, team: null };
+    const d = scoreDynasty({ ...qb, pos: "WR", consensusRank: 40, landing }, DEFAULT_DYNASTY_WEIGHTS);
+    expect(d.landing).toBeNull();
+    expect(d.plus).toBeCloseTo(1.5 + 2 * projectedCapital(40, "WR"), 12);
+  });
+
+  it("a real round wins over the consensus rank, and no rank means no Dynasty+", () => {
+    const real = scoreDynasty({ ...qb, pos: "WR", consensusRank: 40, draftRound: 1, draftPick: 3 }, DEFAULT_DYNASTY_WEIGHTS);
+    expect(real.projected).toBeNull();
+    expect(real.draftCapital).toBeCloseTo(draftCapitalForPick(3, "WR"), 12);
+    const none = scoreDynasty({ ...qb, consensusRank: null }, DEFAULT_DYNASTY_WEIGHTS);
+    expect([none.projected, none.draftCapital, none.plus]).toEqual([null, null, null]);
+    expect(scoreDynasty({ ...qb, consensusRank: 0 }, DEFAULT_DYNASTY_WEIGHTS).plus).toBeNull();
   });
 });

@@ -1205,6 +1205,14 @@ export interface Prospect {
   draft_round: number | null;
   draft_pick: number | null;
   draft_team: string | null;
+  /** Consensus big board (migration 109; lib/scouting/consensusBoard.ts): his
+   *  rank on the last upload for consensus_class (null = not on it), that
+   *  class, and when it was saved. Dynasty+ reads the rank as a projected
+   *  pick while no round is set, only while consensus_class is his class.
+   *  Optional: absent before the migration, and never sent on insert. */
+  consensus_rank?: number | null;
+  consensus_class?: number | null;
+  consensus_at?: string | null;
   /** Scout grade 1.0-100.0 off the tape, pre-NFL-draft. null = ungraded. See lib/scouting/prospectGrade.ts. */
   pre_draft_grade: number | null;
   /** Scout grade 1.0-100.0 once draft capital / landing spot are known. null = ungraded. */
@@ -1562,8 +1570,10 @@ export interface AEScoreLock {
 export interface BoardScores {
   /** Dynasty Score; null without an AE Score. */
   dynasty: number | null;
-  /** Dynasty Score Plus; null until a round is set (or without an AE Score). */
+  /** Dynasty Score Plus; null until a round is set or a consensus rank projects one (or without an AE Score). */
   plus: number | null;
+  /** Dynasty+ is projected from his consensus rank (no round set yet). Absent on rows saved before stage 6 = not projected. */
+  plus_projected?: boolean;
   /** The sample dot (lib/scouting/sampleSize.ts): plays charted (null under the
    *  floor), share of a full sample (0–1) and its tier. */
   sample: { n: number | null; share: number; tier: "full" | "half" | "quarter" | "low" };

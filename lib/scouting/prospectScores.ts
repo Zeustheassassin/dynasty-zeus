@@ -23,6 +23,7 @@ import {
 } from "./aboveExpected";
 import { buildAEComposite, MIN_POOL, type AEComposite, type CompositePos, type PositionComposite } from "./aeComposite";
 import { scoreDynasty, type DynastyBreakdown, type DynastyWeights, type LandingInputs } from "./dynastyScore";
+import { consensusRankOf } from "./consensusBoard";
 import { rookieSeasonAge, parseHeightInches } from "./prospectAge";
 import type { OpponentTier } from "./opponentTier";
 import { applyOpponentStrength, type OpponentAdjusted } from "./opponentAdjust";
@@ -358,6 +359,8 @@ export function dynastyScores(
       weighInLb: p.forty_weight ?? null,
       draftRound: p.draft_round,
       draftPick: p.draft_pick,
+      // His consensus big board rank (migration 109): a projected pick until his round is set.
+      consensusRank: consensusRankOf(p),
       landing: landing?.get(p.id) ?? null,
       rushing: rushing?.get(p.id) ?? null,
     }, weights));

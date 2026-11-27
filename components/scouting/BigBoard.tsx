@@ -51,6 +51,8 @@ import { buildSharedBoardRows, sharedBoardKey, type BoardShare, type SharedBoard
 import type { SamplePlays } from "../../lib/scouting/aggregateMerge";
 import { measuredShort, measuredTitle } from "../../lib/scouting/measuredSize";
 import BoardShareControl from "./BoardShareControl";
+import ConsensusPanel from "./consensus/ConsensusPanel";
+import { classConsensusAt, consensusStatus, notOnConsensusTitle, projectedCapitalLabel } from "../../lib/scouting/consensusBoard";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
 
@@ -221,6 +223,9 @@ interface Props {
    *  migration 105), or clear it; false if the write failed. Without it the
    *  toggle beside each name doesn't show. */
   onSetShareRedacted?: (id: string, redacted: boolean) => Promise<boolean>;
+  /** Save one class's consensus big board ranks ({ prospect id: rank }; migration 109);
+   *  resolves to an error message, or null. Without it the Consensus board button doesn't show. */
+  onSaveConsensus?: (year: number, ranks: ReadonlyMap<string, number>) => Promise<string | null>;
 }
 
 function getSortValue(
@@ -347,6 +352,7 @@ export default function BigBoard({
   boardSharesMissing = false,
   onSaveBoardShare,
   onSetShareRedacted,
+  onSaveConsensus,
 }: Props) {
   // Trigger lazy load of all three position plays the first time the
   // board renders. ScoutingHub no-ops if a position is already loaded
@@ -458,6 +464,11 @@ export default function BigBoard({
     () => dynastyScores(prospects, scoreViews, hsClass, weights, { landing, rushing, roleFits }),
     [prospects, scoreViews, hsClass, weights, landing, rushing, roleFits],
   );
+
+  // Each class's last consensus upload (consensusBoard.ts, migration 109): who
+  // has no projected Dynasty+ because the list doesn't name him.
+  const consensusAt = useMemo(() => classConsensusAt(prospects), [prospects]);
+  const [consensusOpen, setConsensusOpen] = useState(false);
 
   // Each prospect's charted sample against his position's full sample
   // (sampleSize.ts): the dot beside the rank. Always live, in either score view.
@@ -902,14 +913,25 @@ export default function BigBoard({
 
   // ── Dynasty / Dynasty Plus cells ──────────────────────────────
   // "—" without an AE Score (the skill base), or for Plus before a round is
-  // set. The tooltip walks through each piece at the current slider weights.
+  // set and with no consensus rank to project one (NC when his class's
+  // consensus upload doesn't name him). A projected Plus carries a P. The
+  // tooltip walks through each piece at the current slider weights.
   function dynastyCell(p: ProspectWithStats, plus: boolean) {
     const cls = `${tdBase} ${plus ? "border-r border-slate-800" : ""}`;
     if (!isCompositePos(p.position)) return <td className={cls} />;
     const d = dynasty.get(p.id);
     if (!d) return <td className={`${cls} text-slate-600`} title="Needs an AE Score first">—</td>;
     if (plus && d.plus == null) {
-      return <td className={`${cls} text-slate-600`} title="Set the NFL draft round to see Dynasty Score Plus">—</td>;
+      const cs = consensusStatus(p, consensusAt);
+      if (cs && cs.kind !== "ranked") {
+        return (
+          <td className={`${cls} text-slate-600`} title={notOnConsensusTitle(cs, p.draft_class_year)}>
+            <span className="rounded border border-slate-700 px-1 text-[9px] font-semibold text-slate-500">NC</span>
+            <span className="sr-only"> not on the consensus board</span>
+          </td>
+        );
+      }
+      return <td className={`${cls} text-slate-600`} title="Set the NFL draft round, or upload the consensus big board (Consensus board above), to see Dynasty Score Plus">—</td>;
     }
     const pos = p.position;
     const lines = [`AE Score ${signed(d.aeScore, 2)}`];
@@ -934,7 +956,12 @@ export default function BigBoard({
     if (d.rushing) lines.push(`Rushing: ${d.rushing.label} → ${signed(weights.rushing * d.rushing.value, 2)}`);
     if (d.qbDiscount) lines.push(`QB pre-draft: ${d.qbDiscount.label} → ${signed(d.qbDiscount.value, 2)}`);
     lines.push(`= Dynasty ${signed(d.dynasty, 2)}`);
-    if (plus && d.draftCapital != null) {
+    if (plus && d.draftCapital != null && d.projected) {
+      if (d.qbDiscount) lines.push(`QB pre-draft discount comes off (the projected pick prices it in) → ${signed(-d.qbDiscount.value, 2)}`);
+      lines.push(`Projected: ${projectedCapitalLabel(d.projected.rank, p.position, p.consensus_at)} → ${signed(weights.draft * d.draftCapital, 2)}`);
+      lines.push("Capital only: the landing spot waits for his real pick, which replaces this");
+      lines.push(`= Dynasty+ ${signed(d.plus!, 2)} (projected)`);
+    } else if (plus && d.draftCapital != null) {
       if (d.qbDiscount) lines.push(`QB pre-draft discount comes off (the pick prices it in) → ${signed(-d.qbDiscount.value, 2)}`);
       lines.push(`Drafted: ${draftCapitalLabel(p.draft_round!, p.draft_pick, p.position)} → ${signed(weights.draft * d.draftCapital, 2)}`);
       lines.push(...landingLines(d.landing, p.draft_class_year, weights));
@@ -949,6 +976,7 @@ export default function BigBoard({
         {flagged && <span className="text-red-500 mr-1" aria-hidden="true">⚑</span>}
         {flagged && <span className="sr-only">Red flag: light inside runner. </span>}
         {signed(v, 2)}
+        {plus && d.projected && <sup className="ml-0.5 text-[9px] font-semibold text-sky-400" aria-label="projected">P</sup>}
       </td>
     );
   }
@@ -1606,7 +1634,7 @@ export default function BigBoard({
                   disabled={realigning || none}
                   onClick={() => { void realign(by); }}
                   title={none
-                    ? (by === "plus" ? `No Dynasty+ in ${realignWhat} yet: it needs the NFL draft round` : `No Dynasty Score in ${realignWhat} yet`)
+                    ? (by === "plus" ? `No Dynasty+ in ${realignWhat} yet: it needs the NFL draft round or a consensus upload` : `No Dynasty Score in ${realignWhat} yet`)
                     : `Rank ${realignWhat} by ${label}, best first (${boardTab === "all" ? "OVR and position ranks" : "position rank only"}). Asks first; Undo after.`}
                   className="px-3 py-1 rounded text-xs font-medium transition bg-slate-800 text-teal-300 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
                 >By {label}</button>
@@ -1614,7 +1642,26 @@ export default function BigBoard({
             })}
           </div>
         )}
+        {onSaveConsensus && (
+          <button
+            onClick={() => setConsensusOpen((o) => !o)}
+            aria-expanded={consensusOpen}
+            title="Upload a consensus big board CSV for a class: until his real pick is set, each matched player's rank is his projected pick in Dynasty+ (draft capital only, the picks within 25% of it averaged)."
+            className={`px-3 py-1 rounded text-xs font-medium transition ${consensusOpen ? "bg-sky-700 text-white" : "bg-slate-800 text-sky-300 hover:bg-slate-700"}`}
+          >Consensus board</button>
+        )}
       </div>
+      {onSaveConsensus && consensusOpen && (
+        <ConsensusPanel
+          prospects={prospects}
+          years={years}
+          defaultYear={draftYearFilter}
+          dynasty={dynasty}
+          weights={weights}
+          onSave={onSaveConsensus}
+          onClose={() => setConsensusOpen(false)}
+        />
+      )}
       {realignNote && (
         <p role="status" className={`text-xs mb-2 text-center ${realignNote.failed ? "text-red-400" : "text-teal-300"}`}>
           {realignNote.text}
@@ -1645,7 +1692,7 @@ export default function BigBoard({
           </li>
         ))}
       </ul>
-      <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank or a grade to edit (1.0–100.0; Pre mirrors Dynasty) · Click any column header to sort{onSetShareRedacted ? " · The eye beside a name redacts him on shared links" : ""}</p>
+      <p className="text-xs text-slate-600 mb-2 text-center">Drag rows to reorder · Click rank or a grade to edit (1.0–100.0; Pre mirrors Dynasty) · Click any column header to sort{onSetShareRedacted ? " · The eye beside a name redacts him on shared links" : ""}{consensusAt.size > 0 ? " · Dynasty+ P = projected from the consensus board · NC = not on it" : ""}</p>
       <p className="text-xs text-slate-600 mb-2 text-center">AE Score true spread: {compositeStatus}</p>
       <p className="text-xs text-slate-600 mb-2 text-center">
         Opponent strength (scores only): {opponentStatus}

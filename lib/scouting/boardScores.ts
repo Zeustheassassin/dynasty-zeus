@@ -20,7 +20,8 @@ const roundOrNull = (v: number | null | undefined, dp: number) => (v == null ? n
 
 /**
  * Every prospect with a sample dot (QB / RB / WR / TE). Dynasty and Dynasty+
- * are null for one without an AE Score, and Dynasty+ until a round is set.
+ * are null for one without an AE Score, and Dynasty+ until a round is set or
+ * his consensus rank projects one (then `plus_projected` says so).
  */
 export function buildBoardScores(
   prospects: readonly ProspectWithStats[],
@@ -36,6 +37,7 @@ export function buildBoardScores(
     out.set(p.id, {
       dynasty: roundOrNull(d?.dynasty, 3),
       plus: roundOrNull(d?.plus, 3),
+      ...(d?.plus != null && d.projected ? { plus_projected: true } : {}),
       sample: { n: s.n, share: round(s.share, 3), tier: s.tier },
       weights: { age: weights.age, size: weights.size, draft: weights.draft },
     });
@@ -47,7 +49,7 @@ export function buildBoardScores(
 export function boardScoresKey(b: Partial<BoardScoresValue> | null | undefined): string | null {
   if (!b) return null;
   return [
-    b.dynasty ?? null, b.plus ?? null,
+    b.dynasty ?? null, b.plus ?? null, b.plus_projected ? 1 : 0,
     b.sample?.n ?? null, b.sample?.share ?? null, b.sample?.tier ?? null,
     b.weights?.age ?? null, b.weights?.size ?? null, b.weights?.draft ?? null,
   ].join("|");
