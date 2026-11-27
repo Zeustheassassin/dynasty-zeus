@@ -10,6 +10,7 @@ import { formatGrade } from "../../../lib/scouting/prospectGrade";
 import { roleFitTooltip, roleInfo, roleLabel } from "../../../lib/scouting/roleFit";
 import { poolRankText } from "../../../lib/scouting/roleStanding";
 import { PFF_GRADE } from "../../../lib/scouting/readyToChart";
+import { measuredFact } from "../../../lib/scouting/measuredSize";
 import { aeScoreMissingReason, dynastyScores, scorePieces, type AEKey } from "../../../lib/scouting/prospectScores";
 import type { OverviewPage } from "../../../lib/scouting/overviewStats";
 import { COLLEGE_ZONE_ACCURACY, COLLEGE_ZONE_SHARE, type QBFullSeasons } from "../../../lib/scouting/qbStyle";
@@ -86,6 +87,7 @@ function bioFacts(p: ProspectWithStats, report: UseProspectReportReturn, more: s
   return [
     String(p.draft_class_year), p.position, p.school,
     p.height || null, p.weight ? `${p.weight} lb` : null,
+    measuredFact(p),
     p.forty_time != null
       ? `${Number(p.forty_time).toFixed(2)} 40${p.forty_source === "pro_day" ? " (pro day)" : ""}`
       : p.forty_projected != null ? `~${Number(p.forty_projected).toFixed(2)} 40 (projected)` : null,

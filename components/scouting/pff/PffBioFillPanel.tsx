@@ -59,6 +59,12 @@ function Notes({ s }: { s: BioFillSummary }) {
   return (
     <div className="space-y-1 text-slate-400">
       {s.linked > 0 && <p>Linked {s.linked} new prospect{s.linked === 1 ? "" : "s"} to PFF.</p>}
+      {s.measuredKept.length > 0 && (
+        <p>
+          <span className="text-slate-300">Measured size kept ({s.measuredKept.length}), PFF lists another:</span>{" "}
+          {s.measuredKept.map((p) => p.name).join(", ")}
+        </p>
+      )}
       {s.noBirthday.length > 0 && (
         <p>
           <span className="text-slate-300">No birthday on file or in PFF ({s.noBirthday.length}), to fill by hand:</span>{" "}

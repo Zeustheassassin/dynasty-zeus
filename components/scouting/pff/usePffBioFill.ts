@@ -10,9 +10,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { withConcurrency } from "../../../lib/concurrency";
 import { logger } from "../../../lib/logger";
-import { bioChanges, bioPatches, type BioChange, type BioRow } from "../../../lib/scouting/pffBio";
+import { bioChanges, bioPatches, measuredKept, type BioChange, type BioRow } from "../../../lib/scouting/pffBio";
 import { supabase } from "../../../lib/supabaseclient";
-import type { PffPlayerMatchStatus } from "../../../lib/types";
+import type { PffPlayerMatchStatus, SizeSource } from "../../../lib/types";
 import { runPffBio, runPffImport, runPffMatch, type PffBatchProgress } from "./pffClient";
 
 const log = logger("scouting/pff/usePffBioFill");
@@ -23,6 +23,8 @@ export interface BioFillProspect {
   id: string;
   name: string;
   pff_match_status?: PffPlayerMatchStatus | null;
+  /** Measured size (migration 108): set = PFF's height and weight are left out. */
+  size_source?: SizeSource | null;
 }
 
 export interface BioFillSummary {
@@ -34,6 +36,8 @@ export interface BioFillSummary {
   skipped: { id: string; name: string; why: string }[];
   /** No birthday on file and none in PFF: for the user to fill by hand. */
   noBirthday: { id: string; name: string }[];
+  /** Measured sizes PFF lists differently: kept, not offered (measuredSize.ts). */
+  measuredKept: { id: string; name: string }[];
   /** Fields Apply saved. */
   saved: number;
 }
@@ -102,8 +106,9 @@ export function usePffBioFill(onDataChanged?: () => void): UsePffBioFillReturn {
       // Batches come back in database order; keep the sheet's.
       const order = new Map(prospects.map((p, i) => [p.id, i]));
       const results = [...bio.results].sort((a, b) => (order.get(a.prospectId) ?? 0) - (order.get(b.prospectId) ?? 0));
+      const measured = new Set(prospects.filter((p) => p.size_source != null).map((p) => p.id));
       const read: BioRow[] = results.flatMap((r) =>
-        r.pff ? [{ prospectId: r.prospectId, name: r.name, current: r.current, pff: r.pff }] : []);
+        r.pff ? [{ prospectId: r.prospectId, name: r.name, current: r.current, pff: r.pff, measured: measured.has(r.prospectId) }] : []);
       const list = bioChanges(read);
       setChanges(list);
       setSelected(new Set(list.filter((c) => c.on).map((c) => c.key)));
@@ -112,6 +117,7 @@ export function usePffBioFill(onDataChanged?: () => void): UsePffBioFillReturn {
         read: read.length,
         skipped: results.filter((r) => !r.pff).map((r) => ({ id: r.prospectId, name: r.name, why: r.error ?? r.note ?? "Not read" })),
         noBirthday: results.filter((r) => r.current.birthday == null && !r.pff?.dob).map((r) => ({ id: r.prospectId, name: r.name })),
+        measuredKept: measuredKept(read).map((r) => ({ id: r.prospectId, name: r.name })),
         saved: 0,
       });
       setPhase("review");

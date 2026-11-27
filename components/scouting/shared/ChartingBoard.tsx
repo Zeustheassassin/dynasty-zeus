@@ -15,6 +15,7 @@ import type { RolePos } from "../../../lib/scouting/roleFit";
 import { ShouldPlayField, WillPlayPostSelect } from "./RoleFields";
 import { GameSampleToggle, SampleSwitchPanel, SetAsideNote } from "./SampleSwitch";
 import { countInSampleReady, countsInSample, type SampleSwitch } from "../../../lib/scouting/sampleGames";
+import { measuredTitle } from "../../../lib/scouting/measuredSize";
 
 export interface ChartingBoardConfig {
   positionLabel: string;
@@ -270,6 +271,12 @@ export default function ChartingBoard({
       {/* Bio edit panel */}
       {editBio && (
         <div className="p-4 bg-slate-900 border border-slate-700 rounded-lg">
+          {/* Measured size (migration 108): where his height / weight came from. */}
+          {measuredTitle(prospect) && (
+            <p className="mb-3 text-xs text-violet-300">
+              {measuredTitle(prospect)} A height or weight typed here is saved as a correction to it. To go back to the listed size, use the chip after his weight on Prospect Data.
+            </p>
+          )}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
             {([
               { label: "Name",          key: "name" as const,          type: "text",   placeholder: "First Last" },

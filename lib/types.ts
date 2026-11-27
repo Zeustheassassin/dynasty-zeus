@@ -1126,6 +1126,8 @@ export type RouteType =
   | "flat" | "comeback" | "out" | "corner" | "other";
 /** Where a 40 was run (migration 099): the combine's laser timing, or a hand-timed pro day. */
 export type FortySource = "combine" | "pro_day";
+/** Where a height / weight were measured (migration 108; lib/scouting/measuredSize.ts). */
+export type SizeSource = "combine" | "senior_bowl" | "shrine_bowl" | "pro_day" | "all_star";
 
 export type Alignment = "left" | "right" | "slot" | "backfield";
 export type CoverageType = "man" | "zone" | "double" | "press" | "";
@@ -1155,6 +1157,16 @@ export interface Prospect {
   share_redacted?: boolean | null;
   height: string;
   weight: number | null;
+  /** Measured size (migration 108; lib/scouting/measuredSize.ts): where the
+   *  height / weight above were measured (null = listed: PFF's or typed), the
+   *  day (null for the combine, which outranks the rest), and what he was
+   *  listed at before the first measurement replaced it. Fill from PFF leaves
+   *  a measured size alone. Optional: absent before the migration, and never
+   *  sent on insert. */
+  size_source?: SizeSource | null;
+  size_measured_on?: string | null;
+  listed_height?: string | null;
+  listed_weight?: number | null;
   /** 40-yard dash in seconds, where he ran it, and what he weighed in at
    *  there (migration 099; lib/scouting/speedFloor.ts: an RB's Speed Score
    *  floor in the Dynasty Score; no weigh-in = his bio weight). Optional:

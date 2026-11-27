@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bioChanges, bioPatches, heightText, jerseyNumber, pffHeightInches, readPffBio, type BioRow } from "@/lib/scouting/pffBio";
+import { bioChanges, bioPatches, heightText, jerseyNumber, measuredKept, pffHeightInches, readPffBio, type BioRow } from "@/lib/scouting/pffBio";
 
 const row = (current: Partial<BioRow["current"]>, pff: Partial<BioRow["pff"]>, id = "p1"): BioRow => ({
   prospectId: id,
@@ -140,5 +140,18 @@ describe("bioPatches", () => {
       ["a", { height: `6'4"`, weight: 220 }],
       ["b", { birthday: "2005-01-02", eligible_thru_year: 2029, jersey_number: "4" }],
     ]);
+  });
+});
+
+// Measured size (2026-11-27, migration 108): PFF's listing never replaces a measured height or weight.
+describe("a measured size", () => {
+  it("leaves PFF's height and weight out, still offers the rest, and says what it kept", () => {
+    const measured: BioRow = { ...row({ height: `6'0 3/8"`, weight: 205 }, { heightIn: 74, weight: 212, eligibleThru: 2028 }, "m"), measured: true };
+    const listed = row({ height: `6'0"`, weight: 205 }, { heightIn: 74, weight: 212 }, "l");
+    expect(bioChanges([measured, listed]).map((c) => c.key)).toEqual(["m:eligible_thru_year", "l:height", "l:weight"]);
+    expect(measuredKept([measured, listed])).toEqual([{ prospectId: "m", name: "Name m" }]);
+  });
+  it("isn't counted as kept when PFF agrees with it", () => {
+    expect(measuredKept([{ ...row({ height: `6'0 3/8"`, weight: 205 }, { heightIn: 72, weight: 205 }), measured: true }])).toEqual([]);
   });
 });

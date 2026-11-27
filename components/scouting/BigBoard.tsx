@@ -49,6 +49,7 @@ import { countsInSample } from "../../lib/scouting/sampleGames";
 import { boardScoresKey, buildBoardScores, changedBoardScores, type BoardScoresValue } from "../../lib/scouting/boardScores";
 import { buildSharedBoardRows, sharedBoardKey, type BoardShare, type SharedBoardInputs, type SharedBoardRow } from "../../lib/scouting/sharedBoard";
 import type { SamplePlays } from "../../lib/scouting/aggregateMerge";
+import { measuredShort, measuredTitle } from "../../lib/scouting/measuredSize";
 import BoardShareControl from "./BoardShareControl";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
@@ -1492,8 +1493,12 @@ export default function BigBoard({
                 <td className={`${tdBase} text-slate-400`} title={age?.estimated ? "Estimated from the HS class year" : undefined}>
                   {age ? `${age.estimated ? "~" : ""}${Math.floor(age.years)}` : "—"}
                 </td>
-                <td className={`${tdBase} text-slate-400`}>{p.height || "—"}</td>
-                <td className={`${tdBase} text-slate-400`}>{p.weight ?? "—"}</td>
+                <td className={`${tdBase} text-slate-400`} title={measuredTitle(p) ?? undefined}>{p.height || "—"}</td>
+                <td className={`${tdBase} text-slate-400`} title={measuredTitle(p) ?? undefined}>
+                  {p.weight ?? "—"}
+                  {/* Measured size (migration 108): the source as a chip, the listed size in the tooltip. */}
+                  {measuredShort(p) && <sup className="ml-0.5 text-[9px] font-semibold text-violet-400">{measuredShort(p)}</sup>}
+                </td>
                 {fortyCell(p)}
                 {scoreCell(p)}
                 {dynastyCell(p, false)}

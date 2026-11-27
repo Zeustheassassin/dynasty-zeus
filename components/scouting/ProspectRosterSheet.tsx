@@ -12,6 +12,9 @@ import PffBioFillPanel from "./pff/PffBioFillPanel";
 import { usePffBioFill } from "./pff/usePffBioFill";
 import FortyFillPanel from "./forty/FortyFillPanel";
 import { useFortyFill } from "./forty/useFortyFill";
+import SizeFillPanel from "./size/SizeFillPanel";
+import { useSizeFill } from "./size/useSizeFill";
+import { backToListedPatch, measuredShort, measuredTitle, type SizeProspect } from "../../lib/scouting/measuredSize";
 import { fortyDisplay } from "../../lib/scouting/speedFloor";
 import type { RoleFit, RolePos } from "../../lib/scouting/roleFit";
 import type { OverviewData } from "./overview/useProspectReport";
@@ -83,9 +86,11 @@ interface RosterRowProps {
   rank: number | null;
   /** Commit a new rank for this prospect; the parent re-sequences the position. */
   onRankCommit: (raw: string) => void;
+  /** The hub reloads its prospects (after Back to listed). */
+  onDataChanged?: () => void;
 }
 
-function RosterRow({ p, fit, fitsReady, sizes, rank, onRankCommit }: RosterRowProps) {
+function RosterRow({ p, fit, fitsReady, sizes, rank, onRankCommit, onDataChanged }: RosterRowProps) {
   const [local, setLocal] = useState<RowState>(() => rowState(p));
   // A hub reload (after Fill from PFF or Auto-fill Conferences) brings new
   // props: take the fields it changed, keep the rest as typed. Render-phase
@@ -111,6 +116,27 @@ function RosterRow({ p, fit, fitsReady, sizes, rank, onRankCommit }: RosterRowPr
       .eq("id", p.id);
     if (error) log.error("prospect field save failed", { prospectId: p.id, fields: Object.keys(changes), err: error.message, code: error.code });
     setSaving(false);
+  }
+
+  // A measured size (migration 108): the chip after the weight puts his listed size back.
+  const measured = measuredShort(p);
+  const measuredNote = measuredTitle(p);
+  async function backToListed() {
+    const patch = backToListedPatch(p);
+    const listed = `${patch.height || "no height"} ${patch.weight ?? "no weight"}`;
+    if (!window.confirm(`${measuredNote}\n\nPut ${p.name}'s listed size back (${listed})? The measurement is dropped; import it again to bring it back.`)) return;
+    setSaving(true);
+    const { error } = await supabase.from("prospects")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", p.id);
+    setSaving(false);
+    if (error) {
+      log.error("back to listed size failed", { prospectId: p.id, err: error.message, code: error.code });
+      window.alert(`Couldn't put the listed size back: ${error.message}`);
+      return;
+    }
+    setLocal((l) => ({ ...l, height: patch.height, weight: patch.weight }));
+    onDataChanged?.();
   }
 
   // No w-full — width comes from `size` attribute (text/number) or browser default (date/select).
@@ -150,15 +176,23 @@ function RosterRow({ p, fit, fitsReady, sizes, rank, onRankCommit }: RosterRowPr
       </td>
 
       <td className={tdShrink}>
-        <input className={inp} size={sizes.height} value={local.height}
+        <input className={inp} size={sizes.height} value={local.height} title={measuredNote ?? undefined}
           onChange={(e) => setLocal((l) => ({ ...l, height: e.target.value }))}
           onBlur={() => saveFields({ height: local.height })} />
       </td>
 
       <td className={tdShrink}>
-        <input type="number" className={inpNum} size={4} value={local.weight ?? ""}
+        <input type="number" className={inpNum} size={4} value={local.weight ?? ""} title={measuredNote ?? undefined}
           onChange={(e) => setLocal((l) => ({ ...l, weight: e.target.value ? Number(e.target.value) : null }))}
           onBlur={() => saveFields({ weight: local.weight })} />
+        {measured && (
+          <button type="button" onClick={backToListed}
+            title={`${measuredNote} Click to put the listed size back.`}
+            aria-label={`${measuredNote} Put the listed size back`}
+            className="ml-0.5 rounded border border-violet-800 bg-violet-950/60 px-1 text-[10px] font-semibold text-violet-300 hover:border-violet-500">
+            {measured}
+          </button>
+        )}
       </td>
 
       {/* 40: read only (Edit Bio or Fill 40s); a projection greyed with ~ */}
@@ -286,6 +320,8 @@ export default function ProspectRosterSheet({ prospects, rolePos, overviewData, 
   const fillBusy = fill.phase === "linking" || fill.phase === "importing" || fill.phase === "reading" || fill.phase === "saving";
   const forty = useFortyFill(onDataChanged);
   const fortyBusy = forty.phase === "reading" || forty.phase === "saving";
+  const size = useSizeFill(onDataChanged);
+  const sizeBusy = size.phase === "reading" || size.phase === "saving";
 
   // When a real data reload arrives (onDataChanged → the hub re-fetches and the
   // `prospects` prop identity changes), the optimistic overrides are obsolete:
@@ -384,6 +420,16 @@ export default function ProspectRosterSheet({ prospects, rolePos, overviewData, 
     return Array.from(s).sort((a, b) => a - b);
   }, [prospects]);
 
+  // Measured sizes match across every position in the classes shown, so one
+  // Senior Bowl list (or one combine read) covers the whole board.
+  const sizePool = useMemo<SizeProspect[]>(() => (overviewData.prospects ?? []).filter((p) =>
+    ["QB", "RB", "WR", "TE"].includes(p.position) && (yearFilter == null || p.draft_class_year === yearFilter)), [overviewData.prospects, yearFilter]);
+  const sizeClasses = useMemo(() => {
+    if (yearFilter != null) return String(yearFilter);
+    const ys = [...new Set(sizePool.flatMap((p) => (p.draft_class_year != null ? [p.draft_class_year] : [])))].sort((a, b) => a - b);
+    return ys.length <= 1 ? String(ys[0] ?? "") : `${ys[0]}–${ys[ys.length - 1]}`;
+  }, [sizePool, yearFilter]);
+
   // Per-column max-length so every input in a column is sized to the longest value in that column.
   const sizes = useMemo<ColumnSizes>(() => {
     const maxLen = (vals: (string | null | undefined)[], floor: number) =>
@@ -466,7 +512,7 @@ export default function ProspectRosterSheet({ prospects, rolePos, overviewData, 
           onClick={() => fill.start(filteredSorted)}
           disabled={fillBusy || filteredSorted.length === 0}
           className="ml-auto px-3 py-1 rounded text-xs font-medium bg-sky-700 hover:bg-sky-600 disabled:opacity-50 text-white transition"
-          title={`Height, weight, birthday and Eligible Thru from PFF for the ${filteredSorted.length} prospect(s) shown. New prospects are linked to PFF first. You review every change before it's saved.`}
+          title={`Height, weight (unless measured), birthday and Eligible Thru from PFF for the ${filteredSorted.length} prospect(s) shown. New prospects are linked to PFF first. You review every change before it's saved.`}
         >
           {fillBusy ? "Filling…" : "Fill from PFF"}
         </button>
@@ -477,6 +523,14 @@ export default function ProspectRosterSheet({ prospects, rolePos, overviewData, 
           title={`40 times for the ${filteredSorted.length} ${rolePos}(s) shown: the combine's official times and weigh-ins once that class's combine is out (early March of its draft year; they count in the RB speed floor), and WalterFootball's projections for the players it ranks (shown only, never counted). You review every change before it's saved.`}
         >
           {fortyBusy ? "Reading 40s…" : "Fill 40s"}
+        </button>
+        <button
+          onClick={size.open}
+          disabled={sizeBusy || sizePool.length === 0}
+          className="px-3 py-1 rounded text-xs font-medium bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-white transition"
+          title={`Measured heights and weights for every QB, RB, WR and TE in the ${sizeClasses} class(es): the combine from nflverse, or a pasted Senior Bowl / Shrine Bowl / pro day / all-star list. They replace the listed size (the combine, then the latest measurement, outrank the rest), and Fill from PFF leaves them alone. You review every change before it's saved.`}
+        >
+          {sizeBusy ? "Reading sizes…" : "Measured sizes"}
         </button>
         <button
           onClick={autofillConferences}
@@ -490,6 +544,7 @@ export default function ProspectRosterSheet({ prospects, rolePos, overviewData, 
 
       <PffBioFillPanel fill={fill} />
       <FortyFillPanel fill={forty} />
+      <SizeFillPanel fill={size} pool={sizePool} classes={sizeClasses} />
 
       {rankError && (
         <p className="text-red-400 text-xs mb-3" role="alert">{rankError}</p>
@@ -581,6 +636,7 @@ export default function ProspectRosterSheet({ prospects, rolePos, overviewData, 
                 sizes={sizes}
                 rank={effectiveRank(p)}
                 onRankCommit={(raw) => commitRank(p.id, raw)}
+                onDataChanged={onDataChanged}
               />
             ))}
           </tbody>

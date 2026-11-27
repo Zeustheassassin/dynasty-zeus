@@ -97,8 +97,8 @@ export function parseWalterFootballPage(html: string, position: FortyPos): Forty
   return rows;
 }
 
-/** One CSV line's fields ("a","b, c",d → a | b, c | d). */
-function csvFields(line: string): string[] {
+/** One CSV line's fields ("a","b, c",d → a | b, c | d). Also read by measuredSize.ts's combine sizes. */
+export function csvFields(line: string): string[] {
   const out: string[] = [];
   let cur = "";
   let quoted = false;
@@ -181,7 +181,10 @@ export interface FortyProspect {
   draft_class_year: number | null;
 }
 
-export interface FortyMatch { row: FortyRow; schoolDiffers: boolean }
+export interface FortyMatch<R extends NamedRow = FortyRow> { row: R; schoolDiffers: boolean }
+
+/** What matching needs from a source's row (a 40, or a combine size: measuredSize.ts). */
+export interface NamedRow { name: string; school: string | null; position: FortyPos }
 
 /**
  * Each prospect's row by name (suffixes and punctuation dropped,
@@ -189,16 +192,16 @@ export interface FortyMatch { row: FortyRow; schoolDiffers: boolean }
  * rows with his name: the one from his school, else none. A row goes to one
  * prospect at most; two prospects claiming it get neither.
  */
-export function matchFortyRows(
-  prospects: readonly FortyProspect[], rows: readonly FortyRow[], year: number,
-): Map<string, FortyMatch> {
-  const byName = new Map<string, FortyRow[]>();
+export function matchFortyRows<R extends NamedRow = FortyRow>(
+  prospects: readonly FortyProspect[], rows: readonly R[], year: number,
+): Map<string, FortyMatch<R>> {
+  const byName = new Map<string, R[]>();
   for (const r of rows) {
     const k = `${r.position}|${normalizeRookieName(r.name)}`;
     byName.set(k, [...(byName.get(k) ?? []), r]);
   }
-  const found = new Map<string, FortyMatch>();
-  const claims = new Map<FortyRow, string[]>();
+  const found = new Map<string, FortyMatch<R>>();
+  const claims = new Map<R, string[]>();
   for (const p of prospects) {
     if (p.draft_class_year !== year || !isFortyPos(p.position)) continue;
     let cands = byName.get(`${p.position}|${normalizeRookieName(p.name)}`) ?? [];

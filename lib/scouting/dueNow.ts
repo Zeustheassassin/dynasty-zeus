@@ -190,13 +190,13 @@ function datedSpecs(year: number): DatedSpec[] {
     {
       key: "senior_bowl", cycle: `${year}`,
       title: "Senior Bowl measurements",
-      detail: "Import the Senior Bowl weigh-ins (the measured-size import, plan stage 5). They replace the listed height and weight until the combine.",
+      detail: "Prospect Data → Measured sizes → Paste a list (source Senior Bowl, the weigh-in day). They replace the listed height and weight until the combine; the Shrine Bowl and other all-star games the same way.",
       start: new Date(year, 1, 2),
     },
     {
       key: "fill_40s", cycle: `${year}`,
       title: "Fill 40s",
-      detail: "Prospect Data → Fill 40s, once the combine's 40s are out (nflverse). The 40 only counts pre-draft; the weigh-ins come with it.",
+      detail: "Prospect Data → Fill 40s, then Measured sizes → Read the combine, once the combine's out (nflverse). The 40 only counts pre-draft; the weigh-ins come with it, and the combine's height and weight outrank every other measurement.",
       start: new Date(year, 2, 2),
     },
     {

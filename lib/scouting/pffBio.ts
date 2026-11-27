@@ -13,6 +13,9 @@
 // can enter (his eligibility runs out), not the first; PFF's wins.
 // Jersey (2026-11-23, migration 104): PFF's jersey_number, the number he
 // wears now (shown after his name on the charting boards); PFF's wins.
+// Measured size (2026-11-27, migration 108, measuredSize.ts): once his height
+// and weight were measured (combine, Senior Bowl, pro day …), PFF's listed
+// ones are left out; the review says how many it kept.
 // Client-safe: pure functions, no PFF client.
 // ============================================================
 
@@ -83,6 +86,16 @@ export interface BioRow {
   name: string;
   current: BioOnFile;
   pff: PffBio;
+  /** His height and weight were measured (size_source set): PFF's are left out. */
+  measured?: boolean;
+}
+
+/** Measured prospects whose height or weight PFF lists differently: kept, not offered. */
+export function measuredKept(rows: readonly BioRow[]): { prospectId: string; name: string }[] {
+  return rows.filter((r) => r.measured && (
+    (r.pff.heightIn != null && parseHeightInches(r.current.height) !== r.pff.heightIn)
+    || (r.pff.weight != null && r.current.weight !== r.pff.weight)
+  )).map((r) => ({ prospectId: r.prospectId, name: r.name }));
 }
 
 /** Every field PFF would change, in prospect order then height, weight, birthday, eligible thru, jersey. */
@@ -93,10 +106,11 @@ export function bioChanges(rows: readonly BioRow[]): BioChange[] {
       out.push({ key: `${r.prospectId}:${field}`, prospectId: r.prospectId, name: r.name, field, from, to, kind, on: kind !== "differs" });
 
     const { heightIn, weight, dob, eligibleThru, jersey } = r.pff;
-    if (heightIn != null && parseHeightInches(r.current.height) !== heightIn) {
+    // A measured size outranks PFF's listing.
+    if (!r.measured && heightIn != null && parseHeightInches(r.current.height) !== heightIn) {
       add("height", r.current.height, heightText(heightIn), r.current.height.trim() === "" ? "fill" : "update");
     }
-    if (weight != null && r.current.weight !== weight) {
+    if (!r.measured && weight != null && r.current.weight !== weight) {
       add("weight", r.current.weight, weight, r.current.weight == null ? "fill" : "update");
     }
     if (dob != null && r.current.birthday !== dob) {

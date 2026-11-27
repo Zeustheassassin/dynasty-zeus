@@ -50,12 +50,21 @@ export function rookieSeasonAge(
   return prospectAgeAt(new Date(Date.UTC(draftClassYear, 8, 1)), birthday, hsClassYear);
 }
 
-/** Height text as entered ("6'2\"", "6’2”", "6-2", "74") → inches. Null if unreadable. */
+/**
+ * Height text as entered ("6'2\"", "6’2”", "6-2", "74") → inches. Null if
+ * unreadable. A measured height keeps its eighths ("6'0 3/8\"", migration 108,
+ * measuredSize.ts); it reads to the nearest inch, so every score still gets
+ * whole inches.
+ */
 export function parseHeightInches(height: string | null | undefined): number | null {
   if (!height) return null;
   const s = height.trim();
-  const ftIn = s.match(/^(\d)\s*['’-]\s*(\d{1,2})/);
-  if (ftIn) return Number(ftIn[1]) * 12 + Number(ftIn[2]);
+  const ftIn = s.match(/^(\d)\s*['’-]\s*(\d{1,2})(?:\s+(\d{1,2})\s*\/\s*(\d{1,2}))?/);
+  if (ftIn) {
+    const whole = Number(ftIn[1]) * 12 + Number(ftIn[2]);
+    const frac = ftIn[3] && Number(ftIn[4]) > 0 ? Number(ftIn[3]) / Number(ftIn[4]) : 0;
+    return frac > 0 && frac < 1 ? Math.round(whole + frac) : whole;
+  }
   if (/^\d{2}(\.\d+)?$/.test(s)) return Number(s);
   return null;
 }
