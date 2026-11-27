@@ -31,18 +31,24 @@ export const PFF_GRADE: Record<CompositePos, { key: string; label: string }> = {
  * Ready prospects → their PFF grade (null = none yet). Not ready = absent.
  * Null when charted games are unknown (their play counts didn't load): then
  * no one is called ready, rather than every logged prospect.
+ *
+ * `rankedBy` picks the rank that makes him "ranked": his position rank (the
+ * Prospects lists, the default) or his OVR rank (Scouting → Chart Next, whose
+ * goal lists run on OVR).
  */
 export function readyToChart(
-  prospects: readonly Pick<Prospect, "id" | "position" | "personal_rank">[],
+  prospects: readonly (Pick<Prospect, "id" | "position" | "personal_rank"> & Partial<Pick<Prospect, "overall_rank">>)[],
   games: readonly Pick<ScoutingGame, "prospect_id">[],
   chartedGames: ReadonlyMap<string, number> | null,
   pffTotals: ReadonlyMap<string, PffTotals>,
+  rankedBy: "position" | "overall" = "position",
 ): Map<string, number | null> | null {
   if (!chartedGames) return null;
   const logged = new Set(games.map((g) => g.prospect_id));
   const out = new Map<string, number | null>();
   for (const p of prospects) {
-    if (p.personal_rank != null || !logged.has(p.id) || (chartedGames.get(p.id) ?? 0) > 0) continue;
+    const rank = rankedBy === "overall" ? p.overall_rank : p.personal_rank;
+    if (rank != null || !logged.has(p.id) || (chartedGames.get(p.id) ?? 0) > 0) continue;
     const grade = PFF_GRADE[p.position as CompositePos];
     out.set(p.id, grade ? (pffValues(pffTotals.get(p.id))[grade.key] ?? null) : null);
   }

@@ -259,8 +259,9 @@ const RecruitsTab = dynamic(() => import("./scouting/RecruitsTab"), { ssr: false
 const RecruitStatsTab = dynamic(() => import("./scouting/RecruitStatsTab"), { ssr: false });
 const PffLinksTab = dynamic(() => import("./scouting/pff/PffLinksTab"), { ssr: false });
 const UnwatchedTab = dynamic(() => import("./scouting/UnwatchedTab"), { ssr: false });
+const ChartNextTab = dynamic(() => import("./scouting/ChartNextTab"), { ssr: false });
 
-type HubTab = "prospects" | "big_board" | "games_log" | "analysis" | "compare" | "recruits" | "recruit_stats" | "pff_links" | "unwatched";
+type HubTab = "prospects" | "big_board" | "chart_next" | "games_log" | "analysis" | "compare" | "recruits" | "recruit_stats" | "pff_links" | "unwatched";
 type PositionTab = "WR" | "RB" | "QB" | "TE";
 
 const POSITIONS: PositionTab[] = ["QB", "RB", "WR", "TE"];
@@ -874,6 +875,7 @@ export default function ScoutingHub() {
   const hubTabs: { key: HubTab; label: string }[] = [
     { key: "prospects", label: "Prospects" },
     { key: "big_board", label: "Big Board" },
+    { key: "chart_next", label: "Chart Next" },
     // "games_log" (Games Charted) intentionally hidden from the tab bar — data/rendering
     // kept intact below (tab === "games_log"), just not user-reachable via nav.
     { key: "analysis",  label: "Analysis" },
@@ -908,10 +910,17 @@ export default function ScoutingHub() {
     [prospects],
   );
 
-  // Unwatched tab → his board, on Chart Game with that game picked.
+  // Unwatched / Chart Next tab → his board, on Chart Game with that game picked.
   const openGame = useCallback((p: Prospect, gameId: string) => {
     setPendingProspect(p);
     setPendingGameId(gameId);
+    setPositionTab(p.position as PositionTab);
+    setTab("prospects");
+  }, []);
+  // Chart Next tab → his board.
+  const openProspect = useCallback((p: Prospect) => {
+    setPendingProspect(p);
+    setPendingGameId(null);
     setPositionTab(p.position as PositionTab);
     setTab("prospects");
   }, []);
@@ -1152,6 +1161,23 @@ export default function ScoutingHub() {
             boardSharesMissing={boardSharesMissing}
             onSaveBoardShare={handleSaveBoardShare}
             onSetShareRedacted={handleSetShareRedacted}
+          />
+        )}
+
+        {tab === "chart_next" && (
+          <ChartNextTab
+            prospects={prospectsWithStats}
+            games={games}
+            snapCounts={unwatchedLoadFailed ? null : gameSnapStatsRows}
+            samplePlays={samplePlaysByProspect}
+            pffTotals={pffTotals}
+            routeCounts={routeCounts}
+            years={classYears}
+            loading={loading}
+            draftYearFilter={draftYearFilter}
+            setDraftYearFilter={setDraftYearFilter}
+            onOpenProspect={openProspect}
+            onOpenGame={openGame}
           />
         )}
 

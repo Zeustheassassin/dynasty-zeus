@@ -57,6 +57,16 @@ describe("readyToChart", () => {
     expect(readyToChart([prospect("a")], [game("a")], null, new Map())).toBeNull();
   });
 
+  it("can go by OVR rank instead (Chart Next's first looks): a position rank alone doesn't count", () => {
+    const prospects = [
+      { ...prospect("posOnly", { personal_rank: 14 }), overall_rank: null },
+      { ...prospect("ovr"), overall_rank: 40 },
+    ];
+    const games = [game("posOnly"), game("ovr")];
+    expect([...readyToChart(prospects, games, new Map(), new Map(), "overall")!.keys()]).toEqual(["posOnly"]);
+    expect([...readyToChart(prospects, games, new Map(), new Map())!.keys()]).toEqual(["ovr"]);
+  });
+
   it("uses the same headline grade as the prospect report", () => {
     expect(PFF_GRADE).toEqual({
       WR: { key: "pff_gr_route", label: "PFF route grade" },
