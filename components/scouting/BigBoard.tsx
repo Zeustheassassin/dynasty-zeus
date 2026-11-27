@@ -52,6 +52,8 @@ import type { SamplePlays } from "../../lib/scouting/aggregateMerge";
 import { measuredShort, measuredTitle } from "../../lib/scouting/measuredSize";
 import BoardShareControl from "./BoardShareControl";
 import ConsensusPanel from "./consensus/ConsensusPanel";
+import ScoreRulesDialog from "./ScoreRulesDialog";
+import type { CompositePos } from "../../lib/scouting/aeComposite";
 import { classConsensusAt, consensusStatus, notOnConsensusTitle, projectedCapitalLabel } from "../../lib/scouting/consensusBoard";
 
 type LoadPositionPlaysFn = (pos: "RB" | "QB" | "TE") => void;
@@ -469,6 +471,8 @@ export default function BigBoard({
   // has no projected Dynasty+ because the list doesn't name him.
   const consensusAt = useMemo(() => classConsensusAt(prospects), [prospects]);
   const [consensusOpen, setConsensusOpen] = useState(false);
+  // The Rules popout's position (scoreRules.ts), or null when closed.
+  const [rulesPos, setRulesPos] = useState<CompositePos | null>(null);
 
   // Each prospect's charted sample against his position's full sample
   // (sampleSize.ts): the dot beside the rank. Always live, in either score view.
@@ -1650,7 +1654,20 @@ export default function BigBoard({
             className={`px-3 py-1 rounded text-xs font-medium transition ${consensusOpen ? "bg-sky-700 text-white" : "bg-slate-800 text-sky-300 hover:bg-slate-700"}`}
           >Consensus board</button>
         )}
+        <div role="group" aria-label="Score rules" className="flex items-center gap-1">
+          <span className="text-sm text-slate-400">Rules:</span>
+          {COMPOSITE_POS.map((pos) => (
+            <button
+              key={pos}
+              onClick={() => setRulesPos(pos)}
+              aria-label={`Rules for ${pos}`}
+              title={`Every piece of the ${pos} AE Score, Dynasty Score and Dynasty+, with its size and whether it's on`}
+              className={`px-2 py-1 rounded text-xs font-semibold transition bg-slate-800 hover:bg-slate-700 ${POS_COLOR[pos] ?? "text-slate-300"}`}
+            >{pos}</button>
+          ))}
+        </div>
       </div>
+      {rulesPos && <ScoreRulesDialog pos={rulesPos} weights={weights} onClose={() => setRulesPos(null)} />}
       {onSaveConsensus && consensusOpen && (
         <ConsensusPanel
           prospects={prospects}

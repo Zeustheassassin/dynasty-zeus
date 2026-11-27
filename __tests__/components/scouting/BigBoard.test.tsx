@@ -1179,6 +1179,37 @@ describe("BigBoard Pre grade mirrors the Dynasty Score", () => {
   });
 });
 
+// Stage 7 of the 2026-11-26 scouting plan: a rules popout per position.
+describe("BigBoard score rules", () => {
+  const open = (pos: string) =>
+    fireEvent.click(within(screen.getByRole("group", { name: "Score rules" })).getByRole("button", { name: `Rules for ${pos}` }));
+
+  it("opens one position's rules from its button and closes on Escape", () => {
+    renderBoard();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    open("RB");
+    const dialog = screen.getByRole("dialog", { name: "RB score rules" });
+    for (const title of ["AE Score: the skill pieces", "AE Score: added on top", "AE Score: how his plays are read", "Dynasty Score", "Dynasty+"]) {
+      expect(within(dialog).getByRole("region", { name: title })).toBeTruthy();
+    }
+    expect(within(dialog).getByText("Speed floor")).toBeTruthy();
+    expect(within(dialog).getByText("Position baseline")).toBeTruthy();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("follows the sliders: a piece at 0 reads Off", () => {
+    renderBoard();
+    fireEvent.change(screen.getByRole("slider", { name: "Speed weight" }), { target: { value: "0" } });
+    open("RB");
+    const row = within(screen.getByRole("dialog")).getByText("Speed floor").closest("tr")!;
+    expect(within(row).getByText("Off")).toBeTruthy();
+    expect(within(row).getByText(/Speed slider 0\.00×: off/)).toBeTruthy();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
 describe("BigBoard Realign ranks", () => {
   const POOL = Array.from({ length: 10 }, (_, i) => prospect(`pq${i}`, `Pool QB ${i}`, "QB", 10 + i));
   const BOARD = [...PROSPECTS, ...POOL];

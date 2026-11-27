@@ -362,8 +362,8 @@ export function buildPositionComposite(pos: CompositePos, metrics: CompositeMetr
 // actually trying to win. cSAE is the primary metric: a WR needs 15 core routes
 // to be scored. Its routes are a subset of SAE's, so in effect core routes
 // count in full and nines and screens at about 30%.
-const WR_CORE_WEIGHT = 0.7;
-const WR_ALL_WEIGHT = 0.3;
+export const WR_CORE_WEIGHT = 0.7;
+export const WR_ALL_WEIGHT = 0.3;
 // WR samples count in full from these route counts (the user's call,
 // 2026-10-01; see trustAt).
 export const WR_CORE_FULL_TRUST = 168;
@@ -407,8 +407,8 @@ export function matchedCeiling(wr: PositionComposite): ((halfPoint: number) => n
 }
 // TE: routes carry the charted weight in full and blocking adds through field
 // time (weight 0, PairedMetrics). Replaced SAER 0.8 + SAEB 0.2 on 2026-10-21.
-const TE_ROUTE_WEIGHT = 1;
-const TE_BLOCK_WEIGHT = 0;
+export const TE_ROUTE_WEIGHT = 1;
+export const TE_BLOCK_WEIGHT = 0;
 export const TE_FIELD_TIME_PAIR: PairedMetrics = {
   counts: "averaged",
   primary: "te_saer",
