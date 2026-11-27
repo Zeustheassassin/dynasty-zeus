@@ -13,6 +13,7 @@ import LiveDraftBoard from "./draftHub/LiveDraftBoard";
 import RookieBigBoard from "./draftHub/RookieBigBoard";
 import HistoricalBigBoards from "./draftHub/HistoricalBigBoards";
 import HistoricalLeagueDrafts from "./draftHub/HistoricalLeagueDrafts";
+import LeagueFormatsTab from "./draftHub/LeagueFormatsTab";
 
 type HistoricalView = "BIG_BOARDS" | "LEAGUE_DRAFTS";
 
@@ -43,7 +44,7 @@ function HistoricalSection() {
 // HISTORICAL_BOARDS + HISTORICAL_LEAGUE_DRAFTS were merged into one "HISTORICAL"
 // section with an in-page type toggle (Phase B4/R4) — HISTORY (this league's own
 // past drafts, DraftHistory.tsx) is a separate, unrelated tab and is untouched.
-type DraftSection = "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL";
+type DraftSection = "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL" | "FORMATS";
 
 interface DraftHubProps {
   draftHubSection: DraftSection;
@@ -111,6 +112,7 @@ function DraftHub({
     { key: "PICK_VALUES", label: "Pick Values" },
     { key: "HISTORY",     label: "Draft History" },
     { key: "HISTORICAL",  label: "Historical Boards & Drafts" },
+    { key: "FORMATS",     label: "League Formats" },
   ];
 
   return (
@@ -202,6 +204,13 @@ function DraftHub({
          ══════════════════════════════════════════════════════ */}
       {draftHubSection === "HISTORICAL" && (
         <HistoricalSection />
+      )}
+
+      {/* ══════════════════════════════════════════════════════
+          LEAGUE FORMATS (the format survey, stage 9 of the 2026-11-26 scouting plan)
+         ══════════════════════════════════════════════════════ */}
+      {draftHubSection === "FORMATS" && (
+        <LeagueFormatsTab leagues={leagues} />
       )}
     </div>
   );

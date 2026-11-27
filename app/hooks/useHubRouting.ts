@@ -15,7 +15,8 @@ type TradeHubSection = typeof TRADE_HUB_SECTIONS[number];
 const DATA_HUB_TABS = ["RANKINGS", "VALUE_TRENDS", "PROJECTIONS", "STAT_PROJECTIONS", "LEAGUEMATES", "DEPTH_CHARTS", "CONTRACTS", "MY_SHARES", "ROSTER_CHECK", "COMPARE"] as const;
 type DataHubTab = typeof DATA_HUB_TABS[number];
 // HISTORICAL_BOARDS + HISTORICAL_LEAGUE_DRAFTS merged into HISTORICAL in Phase B4/R4.
-const DRAFT_HUB_SECTIONS = ["BOARD", "BIG_BOARD", "HISTORY", "PICK_VALUES", "HISTORICAL"] as const;
+// FORMATS: the league format survey (stage 9 of the 2026-11-26 scouting plan).
+const DRAFT_HUB_SECTIONS = ["BOARD", "BIG_BOARD", "HISTORY", "PICK_VALUES", "HISTORICAL", "FORMATS"] as const;
 type DraftHubSection = typeof DRAFT_HUB_SECTIONS[number];
 const ALERTS_FEED_TABS = ["transactions", "waivers", "injury", "alerts"] as const;
 export type AlertsFeedTab = typeof ALERTS_FEED_TABS[number];

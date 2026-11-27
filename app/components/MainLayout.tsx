@@ -27,7 +27,7 @@ interface MainLayoutProps {
   setTradeHubSection: (s: "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS") => void;
   setLeagueHubTab: (t: LeagueHubTab) => void;
   setDataHubTab: (t: "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "CONTRACTS" | "MY_SHARES" | "COMPARE") => void;
-  setDraftHubSection: (s: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL") => void;
+  setDraftHubSection: (s: "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL" | "FORMATS") => void;
   setPlayerProfileId: (id: string | null) => void;
   setTodoView: (view: TodoView) => void;
   // Stepping through the leagues needing attention (To-Do Stage 3): [ / ] and the palette

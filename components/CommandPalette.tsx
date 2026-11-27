@@ -12,7 +12,7 @@ import type { LeagueStepTarget } from "../app/hooks/useLeagueStepper";
 // TodoView is the exception: useHubRouting exports it and the To-Do hub imports it too.
 type TradeHubSection = "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS";
 type DataHubTab = "RANKINGS" | "VALUE_TRENDS" | "PROJECTIONS" | "STAT_PROJECTIONS" | "LEAGUEMATES" | "DEPTH_CHARTS" | "CONTRACTS" | "MY_SHARES" | "COMPARE";
-type DraftHubSection = "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL";
+type DraftHubSection = "BOARD" | "BIG_BOARD" | "HISTORY" | "PICK_VALUES" | "HISTORICAL" | "FORMATS";
 
 export interface CommandPaletteProps {
   players: Record<string, SleeperPlayer>;
@@ -60,6 +60,7 @@ const DRAFT_HUB_LABELS: Record<DraftHubSection, string> = {
   PICK_VALUES: "Pick Values",
   HISTORY: "Draft History",
   HISTORICAL: "Historical Boards & Drafts",
+  FORMATS: "League Formats",
 };
 
 interface NavItem {
