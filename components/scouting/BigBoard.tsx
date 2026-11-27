@@ -1596,6 +1596,8 @@ export default function BigBoard({
           onApplyDraftResults={onApplyDraftResults}
           onUpdateWillPlayPost={onUpdateWillPlayPost}
           onSaveLandingInputs={onSaveLandingInputs}
+          samples={samples}
+          samplesReady={scoresReady}
         />
       ) : (<>
       {/* Controls */}

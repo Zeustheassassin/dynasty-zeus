@@ -229,7 +229,7 @@ function datedSpecs(year: number): DatedSpec[] {
     {
       key: "draft_week", cycle: `${year}`,
       title: "Draft week",
-      detail: "Apply the picks each night (Post-Draft tab), load and save the NFL rooms soon after, the surprise picks on Saturday, then the UDFAs over the next days. Then the board is done.",
+      detail: "Apply the picks each night (Post-Draft tab), load and save the NFL rooms soon after, the surprise picks on Saturday (Post-Draft → Surprise picks), then Load UDFA signings there over the next days. Then the board is done.",
       start: draft, end: new Date(draft.getTime() + 2 * DAY),
     },
     {

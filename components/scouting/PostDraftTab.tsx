@@ -33,6 +33,8 @@ import {
 } from "../../lib/scouting/teamLanding";
 import type { Prospect } from "../../lib/types";
 import { WillPlayPostSelect } from "./shared/RoleFields";
+import { surprisePicks, surpriseWhyText, UDFA_COLUMNS, type UdfaRow } from "../../lib/scouting/surprisePicks";
+import { sampleText, type SampleSize } from "../../lib/scouting/sampleSize";
 import { ContractOutlookSection } from "./ContractOutlookSection";
 
 const log = logger("PostDraftTab");
@@ -52,6 +54,10 @@ interface Props {
   onUpdateWillPlayPost?: (id: string, value: string) => Promise<boolean>;
   /** Save prospects' team inputs (whole new values); resolves with how many failed. */
   onSaveLandingInputs?: (updates: readonly { id: string; next: LandingSaved | null }[]) => Promise<number>;
+  /** Each prospect's sample (the Big Board's sampleSizes), for the surprise picks' thin check. */
+  samples?: ReadonlyMap<string, SampleSize>;
+  /** Every play has loaded, so the samples are whole (BigBoard scoresReady). */
+  samplesReady?: boolean;
 }
 
 const slot = (round: number | null, pick: number | null, team: string | null) =>
@@ -107,7 +113,7 @@ function QbGradeInput({ value, suggested, onSave, label, disabled }: {
 
 export default function PostDraftTab({
   prospects, draftPicks, dynasty, weights, roleFits, standings, onReloadDraftPicks, onApplyDraftResults, onUpdateWillPlayPost,
-  onSaveLandingInputs,
+  onSaveLandingInputs, samples, samplesReady = false,
 }: Props) {
   const thisYear = new Date().getFullYear();
   const years = useMemo(
@@ -122,6 +128,8 @@ export default function PostDraftTab({
   const [error, setError] = useState<string | null>(null);
   // Every team's room as last loaded from PFF (not saved until "Save rooms").
   const [rooms, setRooms] = useState<NflRoomsResponse | null>(null);
+  // The class's undrafted free agents as last read from nfl_contracts (surprisePicks.ts).
+  const [udfas, setUdfas] = useState<{ year: number; rows: UdfaRow[] } | null>(null);
 
   const yearPicks = useMemo(() => draftPicks.filter((pk) => pk.year === shown), [draftPicks, shown]);
   const complete = isCompleteDraft(yearPicks);
@@ -142,6 +150,11 @@ export default function PostDraftTab({
     [classSkill],
   );
   const boardPicks = yearPicks.filter((pk) => draftSkillPosition(pk.position) != null).length;
+  const udfaRows = udfas && udfas.year === shown ? udfas.rows : null;
+  const surprises = useMemo(
+    () => (shown == null ? null : surprisePicks(shown, yearPicks, udfaRows ?? [], prospects, samples ?? new Map(), samplesReady)),
+    [shown, yearPicks, udfaRows, prospects, samples, samplesReady],
+  );
 
   // His role halves the QB and offense values for a Blocking TE, as in Dynasty+ (landingInputsFrom).
   const team = useMemo(
@@ -188,6 +201,29 @@ export default function PostDraftTab({
       const msg = e instanceof Error ? e.message : String(e);
       log.error("load draft results", { msg });
       setError(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // The class's undrafted free agents: skill players of that draft year with no
+  // round in the contracts table (OverTheCap via nflverse, refreshed daily
+  // March–May). Read on click: the signings come in over the days after the draft.
+  async function loadUdfas() {
+    if (shown == null) return;
+    setBusy(true); setError(null); setStatus(null);
+    try {
+      const { supabase } = await import("../../lib/supabaseclient");
+      const { data, error: err } = await supabase.from("nfl_contracts").select(UDFA_COLUMNS)
+        .eq("draft_year", shown).is("draft_round", null).in("position", ["QB", "RB", "FB", "WR", "TE"]);
+      if (err) throw new Error(err.message);
+      const rows = (data ?? []) as unknown as UdfaRow[];
+      setUdfas({ year: shown, rows });
+      setStatus(rows.length ? `${rows.length} undrafted QB / RB / WR / TE signings read.` : `No ${shown} undrafted signings in the contracts data yet.`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      log.error("load UDFA signings", { msg });
+      setError(`Couldn't read the UDFA signings: ${msg}`);
     } finally {
       setBusy(false);
     }
@@ -331,6 +367,57 @@ export default function PostDraftTab({
           </div>
           <p className="text-xs text-slate-500 mb-1">{"A name that's spelled differently in the draft shows here too: set his round in the board's Round column instead."}</p>
           <p className="text-xs text-slate-300">{notDrafted.map((p) => `${p.name} (${p.position})`).join(", ")}</p>
+        </section>
+      )}
+
+      {shown <= thisYear && surprises && (
+        <section aria-labelledby="pd-surprises" className="border border-slate-800 rounded p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+            <h3 id="pd-surprises" className="font-semibold text-slate-200">Surprise picks ({surprises.rows.length})</h3>
+            <button onClick={() => { void loadUdfas(); }} disabled={busy}
+              title="Undrafted free agents of this draft year at QB / RB / WR / TE from the NFL contracts data (OverTheCap, refreshed daily March–May)"
+              className="px-3 py-1 rounded text-xs font-medium bg-slate-700 text-white hover:bg-slate-600 disabled:opacity-40">
+              {udfaRows ? "Reload UDFA signings" : "Load UDFA signings"}
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 mb-2">
+            Drafted{udfaRows ? " and undrafted" : ""} QB / RB / WR / TE your board can&apos;t speak for yet: not on it for {shown}, or under a quarter sample.
+            {" "}{surprises.drafted} drafted{udfaRows ? `, ${surprises.udfa} undrafted signings` : " (load the UDFA signings once they're announced)"}.
+            {!surprises.samplesChecked && " Thin samples show once every play has loaded."}
+          </p>
+          {surprises.rows.length === 0 ? (
+            <p className="text-xs text-slate-400">{surprises.drafted + surprises.udfa === 0 ? `Load the ${shown} draft results first.` : "None: every one is on your board with at least a quarter sample."}</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-slate-500 text-left">
+                    <th className="px-2 py-1 font-medium">Slot</th>
+                    <th className="px-2 py-1 font-medium">Name</th>
+                    <th className="px-2 py-1 font-medium">Pos</th>
+                    <th className="px-2 py-1 font-medium">College</th>
+                    <th className="px-2 py-1 font-medium">Why</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {surprises.rows.map((r) => (
+                    <tr key={r.key} className="border-t border-slate-800">
+                      <td className="px-2 py-1 text-slate-400 whitespace-nowrap">
+                        {r.pick ? slot(r.pick.round, r.pick.overall, r.team) : `${r.team ? `${r.team} · ` : ""}UDFA`}
+                        {r.released && <span className="ml-1 text-slate-500">(released)</span>}
+                      </td>
+                      <td className="px-2 py-1 text-slate-200">{r.name}</td>
+                      <td className="px-2 py-1 text-slate-400">{r.position}</td>
+                      <td className="px-2 py-1 text-slate-400">{r.college ?? "—"}</td>
+                      <td className={`px-2 py-1 ${r.why === "thin" ? "text-amber-300" : r.why === "off_board" ? "text-red-300" : "text-slate-300"}`}>
+                        {surpriseWhyText(r, sampleText)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       )}
 
