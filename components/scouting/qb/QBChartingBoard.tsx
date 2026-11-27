@@ -58,6 +58,7 @@ import {
   INT_TYPES,
   intTypeShort,
   onTargetColor,
+  QB_PLAY_DEFAULTS,
 } from "./qbConstants";
 
 const QB_CONFIG: ChartingBoardConfig = {
@@ -96,9 +97,11 @@ export default function QBChartingBoard({ prospect, initialGameId, onBack, onDat
   // baselines for the per-dimension AAE breakdown panel. Fetched once when
   // the board mounts; small (~MB-scale at full league) and not in a hot path.
   const [leaguePlays, setLeaguePlays]       = useState<QBPlay[]>([]);
-  const [snapPos, setSnapPos]               = useState<QBSnapPosition>("shotgun");
-  const [playType, setPlayType]             = useState<QBPlayType>("pass");
-  const [timing, setTiming]                 = useState<QBTiming | null>(null);
+  // A fresh play opens on QB_PLAY_DEFAULTS (Shotgun / Pass / 1st Option / Clean
+  // Pocket / On Platform / Touch Correct); the charter changes whatever's off.
+  const [snapPos, setSnapPos]               = useState<QBSnapPosition>(QB_PLAY_DEFAULTS.snapPosition);
+  const [playType, setPlayType]             = useState<QBPlayType>(QB_PLAY_DEFAULTS.playType);
+  const [timing, setTiming]                 = useState<QBTiming | null>(QB_PLAY_DEFAULTS.timing);
   const [accuracy, setAccuracy]             = useState<QBAccuracy | null>(null);
   const [completion, setCompletion]         = useState<QBCompletion | null>(null);
   const [intType, setIntType]               = useState<QBIntType | null>(null);
@@ -111,13 +114,13 @@ export default function QBChartingBoard({ prospect, initialGameId, onBack, onDat
   // The receiver's sub-route under the route (data collection only, lib/scouting/routeVariants.ts).
   const variant = useRouteVariant(null);
   const [coverage, setCoverage]             = useState<"man" | "zone" | null>(null);
-  const [platform, setPlatform]             = useState<QBPlatform | null>(null);
+  const [platform, setPlatform]             = useState<QBPlatform | null>(QB_PLAY_DEFAULTS.platform);
   const [platformSide, setPlatformSide]     = useState<QBPlatformSide | null>(null);
-  const [pressure, setPressure]             = useState<QBPressure | null>(null);
+  const [pressure, setPressure]             = useState<QBPressure | null>(QB_PLAY_DEFAULTS.pressure);
   const [pressureHandling, setPressureHandling] = useState<QBPressureHandling | null>(null);
   // Default "correct" so the charter only clicks when something's off — saves
   // a click on every throw. Resets back to "correct" after each log.
-  const [touch, setTouch]                   = useState<QBTouch>("correct");
+  const [touch, setTouch]                   = useState<QBTouch>(QB_PLAY_DEFAULTS.touch);
   const [playNotes, setPlayNotes]           = useState("");
   const [savingPlay, setSavingPlay]         = useState(false);
   const [playError, setPlayError]           = useState<string | null>(null);
@@ -266,13 +269,13 @@ export default function QBChartingBoard({ prospect, initialGameId, onBack, onDat
     tags.missing(tagFacts).length === 0;
 
   // After a log, an edit or a Cancel the next play starts blank: the board's
-  // opening state (sticky tags keep their value).
+  // opening state, QB_PLAY_DEFAULTS (sticky tags keep their value).
   function resetForm() {
     setEditingPlayId(null);
     tags.reset();
-    setSnapPos("shotgun");
-    setPlayType("pass");
-    setTiming(null);
+    setSnapPos(QB_PLAY_DEFAULTS.snapPosition);
+    setPlayType(QB_PLAY_DEFAULTS.playType);
+    setTiming(QB_PLAY_DEFAULTS.timing);
     setAccuracy(null);
     setCompletion(null);
     setIntType(null);
@@ -282,11 +285,11 @@ export default function QBChartingBoard({ prospect, initialGameId, onBack, onDat
     setRouteType(null);
     variant.reset(null);
     setCoverage(null);
-    setPlatform(null);
+    setPlatform(QB_PLAY_DEFAULTS.platform);
     setPlatformSide(null);
-    setPressure(null);
+    setPressure(QB_PLAY_DEFAULTS.pressure);
     setPressureHandling(null);
-    setTouch("correct");
+    setTouch(QB_PLAY_DEFAULTS.touch);
     setPlayNotes("");
   }
 
@@ -318,11 +321,14 @@ export default function QBChartingBoard({ prospect, initialGameId, onBack, onDat
 
   function handlePlayTypeChange(pt: QBPlayType) {
     // Pass and RPO share the same downstream fields, so toggling between them
-    // preserves the bottom section. Only crossing the run boundary resets it.
+    // preserves the bottom section. Only crossing the run boundary resets it:
+    // into a run everything clears, back into a dropback it starts on the
+    // fresh play's 1st Option / Clean Pocket / On Platform again.
     const crossesRun = pt === "run" || playType === "run";
+    const dropback = pt !== "run";
     setPlayType(pt);
     if (crossesRun) {
-      setTiming(null);
+      setTiming(dropback ? QB_PLAY_DEFAULTS.timing : null);
       setAccuracy(null);
       setCompletion(null);
       setIntType(null);
@@ -331,15 +337,23 @@ export default function QBChartingBoard({ prospect, initialGameId, onBack, onDat
       setRouteType(null);
       variant.reset(null);
       setCoverage(null);
-      setPlatform(null);
+      setPlatform(dropback ? QB_PLAY_DEFAULTS.platform : null);
       setPlatformSide(null);
-      setPressure(null);
+      setPressure(dropback ? QB_PLAY_DEFAULTS.pressure : null);
       setPressureHandling(null);
     }
   }
 
   function handleTimingChange(t: QBTiming) {
+    // Coming out of a sack / scramble / throw-away (which cleared the platform)
+    // into a throw: the platform starts On Platform again. Between two throw
+    // timings the platform pick stays as it is.
+    const fromNoThrow = timing === null || noThrowTimings.includes(timing);
     setTiming(t);
+    if (!noThrowTimings.includes(t) && fromNoThrow && platform === null) {
+      setPlatform(QB_PLAY_DEFAULTS.platform);
+      setPlatformSide(null);
+    }
     if (noThrowTimings.includes(t)) {
       setAccuracy(null);
       setCompletion(null);

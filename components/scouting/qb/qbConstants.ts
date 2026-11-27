@@ -13,7 +13,31 @@ import type {
   QBPressureHandling,
   QBDepthZone,
   QBIntType,
+  QBTouch,
 } from "../../../lib/types";
+
+// The QB board's fresh play (the user, 2026-11-26, stage 4 of the scouting
+// plan): it opens on, and every reset returns to, Shotgun / Pass / 1st Option /
+// Clean Pocket / On Platform / Touch Correct, the most common dropback. The
+// charter changes whatever's off. A Run → Pass / RPO switch fills the timing,
+// pressure and platform back in, and a throw after a sack / scramble / throw-
+// away gets On Platform back (QBChartingBoard handlePlayTypeChange /
+// handleTimingChange). An edit opens on the saved play, not these.
+export const QB_PLAY_DEFAULTS: {
+  snapPosition: QBSnapPosition;
+  playType: QBPlayType;
+  timing: QBTiming;
+  pressure: QBPressure;
+  platform: QBPlatform;
+  touch: QBTouch;
+} = {
+  snapPosition: "shotgun",
+  playType: "pass",
+  timing: "first_option",
+  pressure: "clean",
+  platform: "on_platform",
+  touch: "correct",
+};
 
 // Interception types: the board's INT Type buttons, the play list's short code
 // ("INT (BT)") and the Overview panel's counts, in this order. Records only (no
