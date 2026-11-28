@@ -29,7 +29,7 @@ function renderBoard(dormant: boolean) {
       draftSettings={null} draftPicks={[]} draftOrder={{}} allPicks={[]}
       boardRookies={[]} myPickList={[]} draftedPlayerIds={new Set()}
       predictedDraftPicks={{}} draftPoolRanks={{} as never} topAvailableRookies={[]}
-      orderView={{ format: null, value: null, curve: null, seasons: [], error: null, retry: vi.fn(), places: new Map() }}
+      orderView={{ format: null, value: null, curve: null, scoreName: "Dynasty", rate: null, seasons: [], error: null, retry: vi.fn(), places: new Map() }}
       refreshDraftBoard={refreshDraftBoard} loadDraftScout={loadDraftScout} loadingDraftRefresh={false}
       dormant={dormant}
     />,

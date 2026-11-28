@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { draftBoardClass, firstKickoff } from "../../../lib/helpers/draftClass";
+import { draftBoardClass, firstKickoff, nflDraftDay, nflDraftOver } from "../../../lib/helpers/draftClass";
 import type { TeamGameState } from "../../../lib/types";
 
 // The 2026 opener, NE @ SEA: 8:20 pm ET on Wednesday 9/9/2026 (ESPN's Week 1).
@@ -55,5 +55,19 @@ describe("firstKickoff", () => {
     expect(firstKickoff({}, 2027)).toBeNull();
     expect(firstKickoff(null, 2027)).toBeNull();
     expect(firstKickoff({ NE: game("2026-09-10T00:20:00Z") }, 2027)).toBeNull();
+  });
+});
+
+describe("nflDraftOver", () => {
+  // A league's board order reads Dynasty until the NFL draft is over, Dynasty+ after (the user, 2026-11-27).
+  it("turns on the Sunday after the draft's first night, when the rookie drafts start", () => {
+    expect(nflDraftDay(2027)).toEqual(new Date(2027, 3, 22));
+    expect(nflDraftOver(2027, new Date(2026, 10, 27))).toBe(false);
+    expect(nflDraftOver(2027, new Date(2027, 3, 24, 23, 59))).toBe(false);
+    expect(nflDraftOver(2027, new Date(2027, 3, 25, 0, 0))).toBe(true);
+    expect(nflDraftOver(2026, new Date(2027, 0, 1))).toBe(true);
+    // 2028's draft opens Apr 27, so its Sunday is Apr 30.
+    expect(nflDraftOver(2028, new Date(2028, 3, 29, 12))).toBe(false);
+    expect(nflDraftOver(2028, new Date(2028, 3, 30))).toBe(true);
   });
 });

@@ -8,8 +8,9 @@ import type { LinePos, SeasonLine } from "@/lib/helpers/nflSeasonLines";
 import type { DraftBoardProspect } from "@/lib/helpers/draftBoard";
 
 // Stage 2 of the 2026-11-27 positional value plan: the Rookie Big Board's
-// league picker re-sorts the board by OVR place → the user's Pick Values ×
-// the league's multiplier for each position (League Formats' numbers).
+// league picker re-sorts the board by the score OVR follows (Dynasty before
+// the NFL draft) plus each position's multiplier (League Formats' numbers) as
+// a shift priced by the user's Pick Values.
 
 const h = vi.hoisted(() => ({
   state: null as unknown as NflSeasonLinesState,
@@ -82,7 +83,9 @@ const prospect = (id: string, position: string, rank: number | null, dynasty: nu
 const PROSPECTS = [
   prospect("Wr One", "WR", 1, 2.6), prospect("Rb One", "RB", 2, 2.3), prospect("Wr Two", "WR", 3, 2.1),
   prospect("Qb One", "QB", 4, 1.9), prospect("Wr Three", "WR", 5, 1.6), prospect("Te One", "TE", 6, 1.4),
-  prospect("Te Two", "TE", 7, 1.2), prospect("Rb Late", "RB", null, 0.4),
+  prospect("Te Two", "TE", 7, 1.2), prospect("Rb Two", "RB", 8, 1.0), prospect("Wr Four", "WR", 9, 0.9),
+  prospect("Qb Two", "QB", 10, 0.7), prospect("Rb Three", "RB", 11, 0.5), prospect("Wr Five", "WR", 12, 0.3),
+  prospect("Rb Late", "RB", null, 0.4),
 ];
 
 function Harness() {
@@ -128,7 +131,7 @@ describe("RookieBigBoard league picker", () => {
     const mult = byLeague.get("3")!.mult;
     expect(mult.TE!).toBeGreaterThan(1.05);
     const ranked = PROSPECTS.filter((p) => p.overall_rank != null);
-    const { order } = leagueOrder(ranked, (p) => p.position, mult, pickValueCurve(h.pickFcValues, 2027)!);
+    const { order } = leagueOrder(ranked, (p) => p.position, (p) => p.board_scores?.dynasty, mult, pickValueCurve(h.pickFcValues, 2027)!)!;
     const expected = [...order.map((p) => p.id), "Rb Late"];
     await waitFor(() => expect(shownNames(container)).toEqual(expected));
     expect(expected.indexOf("Te One")).toBeLessThan(5);
@@ -145,7 +148,7 @@ describe("RookieBigBoard league picker", () => {
     const [upPhone, up] = within(teRow).getAllByLabelText(/^Up \d+ from OVR 6$/);
     expect(upPhone.textContent).toBe(up.textContent);
     expect(upPhone.getAttribute("title")).toBe(up.getAttribute("title"));
-    expect(up.getAttribute("title")).toMatch(/^OVR 6 → your 2027 1\.06 \(4,300\) × TE ×\d\.\d\d = [\d,]+ → \d in Gamma TEP \(up \d+\)\.$/);
+    expect(up.getAttribute("title")).toMatch(/^OVR 6: Dynasty \+1\.40, TE ×\d\.\d\d = \+\d\.\d\d → \+\d\.\d\d → \d in Gamma TEP \(up \d+\)\.$/);
     // Same-position order holds.
     expect(expected.indexOf("Te One")).toBeLessThan(expected.indexOf("Te Two"));
     expect(expected.indexOf("Wr One")).toBeLessThan(expected.indexOf("Wr Two"));
@@ -153,7 +156,9 @@ describe("RookieBigBoard league picker", () => {
     // What it rests on, and where TAKEN comes from.
     expect(screen.getByText(/^QB ×\d\.\d\d · RB ×\d\.\d\d · WR ×\d\.\d\d · TE ×\d\.\d\d$/)).toBeTruthy();
     expect(screen.getByText(/TAKEN marks are from Alpha Dynasty's draft/)).toBeTruthy();
-    expect(screen.getByText(/Gamma TEP's order: OVR × positional value/)).toBeTruthy();
+    expect(screen.getByText(/Gamma TEP's order: Dynasty \+ positional value/)).toBeTruthy();
+    expect(screen.getByText(/^QB [+−]\d\.\d\d · RB [+−]\d\.\d\d · WR [+−]\d\.\d\d · TE \+\d\.\d\d$/)).toBeTruthy();
+    expect(screen.getByText(/\+1\.00 Dynasty is worth ×\d\.\d\d on your 2027 Pick Values/)).toBeTruthy();
     expect(h.enabled).toContain(true);
 
     // Back to OVR.

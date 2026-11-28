@@ -34,6 +34,7 @@ import { X_RELEASE_REPS } from "./roleFitWR";
 import { scoutingClassYear } from "./chartNext";
 import { sampleGameToProspect } from "./sampleGames";
 import { latestConsensusAt } from "./consensusBoard";
+import { nflDraftDay } from "../helpers/draftClass";
 
 export type DueState = "due" | "soon" | "waiting" | "later" | "watch" | "done";
 
@@ -80,12 +81,8 @@ export const DUE_LIST_START = new Date(2026, 10, 26).getTime();
 
 // ── Dates ───────────────────────────────────────────────────
 
-/** The NFL draft's first night: the fourth Thursday of April (Apr 23 in 2026, Apr 22 in 2027). */
-export function nflDraftDay(year: number): Date {
-  const firstWeekday = new Date(year, 3, 1).getDay();
-  const firstThursday = 1 + ((4 - firstWeekday + 7) % 7);
-  return new Date(year, 3, firstThursday + 21);
-}
+// The NFL draft's first night (the fourth Thursday of April) lives with the draft class helpers.
+export { nflDraftDay };
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 /** "Jan 5, 2027". */

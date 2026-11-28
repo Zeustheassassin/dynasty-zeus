@@ -80,3 +80,22 @@ export function firstKickoff(games: Record<string, TeamGameState> | null | undef
   }
   return first;
 }
+
+// ── The NFL draft ───────────────────────────────────────────
+
+/** The NFL draft's first night: the fourth Thursday of April (Apr 23 in 2026, Apr 22 in 2027). */
+export function nflDraftDay(year: number): Date {
+  const firstWeekday = new Date(year, 3, 1).getDay();
+  const firstThursday = 1 + ((4 - firstWeekday + 7) % 7);
+  return new Date(year, 3, firstThursday + 21);
+}
+
+/**
+ * The class's NFL draft is over: from the Sunday after its first night (local
+ * midnight), the day the rookie drafts start. The user realigns OVR by
+ * Dynasty+ on the Saturday before.
+ */
+export function nflDraftOver(year: number, now: Date): boolean {
+  const d = nflDraftDay(year);
+  return now.getTime() >= new Date(year, d.getMonth(), d.getDate() + 3).getTime();
+}

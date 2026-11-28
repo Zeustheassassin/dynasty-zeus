@@ -9,13 +9,15 @@ import { getFcValuesRaw } from "../../lib/fcValuesStore";
 import { useDraftBoardClass } from "../../hooks/useDraftBoardClass";
 import { SAMPLE_TIERS } from "../../lib/scouting/sampleTiers";
 import { classDraftedBy } from "../../lib/scouting/scoreLock";
+import { nflDraftOver } from "../../lib/helpers/draftClass";
 import {
   DRAFT_BOARD_COLUMNS, DRAFT_BOARD_POSITIONS, sortDraftBoard, nflDraftLabel, latestScoresSavedAt,
-  fcClassValues, fcValueFor, draftBoardSnapshotRows, readNotes, draftBoardTiers, tierRangeLabel, TIER_STEP,
+  fcClassValues, fcValueFor, draftBoardSnapshotRows, readNotes, draftBoardTiers, tierRangeLabel, tierScore, TIER_STEP,
   type DraftBoardProspect,
 } from "../../lib/helpers/draftBoard";
 import {
-  pickValueCurve, leagueBoardRows, leaguePlaceTitle, curveLastLabel, type LeaguePlace, type PickCurve,
+  pickValueCurve, leagueBoardRows, leaguePlaceTitle, rateText, shiftsText,
+  type LeaguePlace, type PickCurve, type ScoreRate,
 } from "../../lib/helpers/leagueBoard";
 import { LINE_POSITIONS, uncountedScoringKeys } from "../../lib/helpers/nflSeasonLines";
 import type { LeagueFormat } from "../../lib/helpers/leagueFormat";
@@ -34,10 +36,11 @@ const log = logger("components/draftHub/RookieBigBoard");
 // the class year.
 //
 // The league picker (stage 2 of the 2026-11-27 plan) re-sorts the board for
-// one league: each OVR place read as that pick on the user's Pick Values,
-// times the league's multiplier for his position (League Formats), highest
-// first (lib/helpers/leagueBoard.ts). Same-position order and tiers never
-// change; the unranked stay below; Save Board still saves the OVR order.
+// one league: each position's multiplier (League Formats) becomes a shift in
+// the score OVR follows (Dynasty until the NFL draft is over, Dynasty+ after),
+// priced by the user's Pick Values, and the board sorts by score + shift
+// (lib/helpers/leagueBoard.ts). Same-position order and tiers never change;
+// the unranked stay below; Save Board still saves the OVR order.
 
 // How long typing must pause before a note saves to the account.
 const NOTE_SYNC_DELAY_MS = 800;
@@ -91,15 +94,18 @@ interface RookieBigBoardProps {
 }
 
 const multText = (pos: string, m: number | null) => `${pos} ×${m == null ? "1.00" : m.toFixed(2)}`;
-const whole = (v: number) => Math.round(v).toLocaleString("en-US");
 
 /** What the picked league's order rests on, or why the board is still in OVR order. */
 function LeagueViewNote({
-  format, value, curve, seasons, error, onRetry, takenFrom,
+  format, value, curve, rate, scoreName, seasons, error, onRetry, takenFrom,
 }: {
   format: LeagueFormat;
   value: LeagueValue | null;
   curve: PickCurve | null;
+  /** What a point of the score is worth on the user's Pick Values; null when too few places are scored to read it. */
+  rate: ScoreRate | null;
+  /** The score the order reads: Dynasty, or Dynasty+ once the NFL draft is over. */
+  scoreName: string;
   seasons: number[];
   error: string | null;
   onRetry: () => void;
@@ -119,19 +125,25 @@ function LeagueViewNote({
     body = <>Reading the {span} NFL seasons for {format.name}&apos;s numbers… the board stays in OVR order until then.</>;
   } else if (!curve) {
     body = <>No pick values for this class yet (Draft Hub → Pick Values), so the board stays in OVR order.</>;
+  } else if (!rate) {
+    body = (
+      <>
+        Too few of your top {curve.values.length} have a {scoreName} score to read what a point of it is worth on your {curve.year}{" "}
+        Pick Values, so the board stays in OVR order.
+      </>
+    );
   } else {
     const uncounted = uncountedScoringKeys(format.scoring).length;
-    const last = curveLastLabel(curve);
     body = (
       <>
         <span className="font-semibold text-slate-300">
           {LINE_POSITIONS.map((pos) => multText(pos, value.mult[pos])).join(" · ")}
         </span>{" "}
         against your usual format (League Formats shows why{uncounted > 0 ? `; ${uncounted} of this league's rules aren't counted` : ""}).
-        Each OVR place reads as that pick on your {curve.year} Pick Values (1.01 {whole(curve.values[0])} … {last}{" "}
-        {whole(curve.values[curve.values.length - 1])}; past {last}, ×{curve.perPick.toFixed(3)} a pick), times his position&apos;s
-        number, highest first. A position keeps its own order, tiers stay your usual ones (no dividers here), and the unranked stay
-        below. Hover ± for the math.
+        {" "}{rateText(rate, scoreName, curve.year)}, so in {scoreName} those are{" "}
+        <span className="font-semibold text-slate-300">{shiftsText(LINE_POSITIONS, value.mult, rate)}</span>, and the board sorts by{" "}
+        {scoreName} plus that: a small gap gets crossed, a tier break holds. A position keeps its own order, tiers stay your usual
+        ones (no dividers here), and the unranked stay below. Hover ± for the math.
         {takenFrom && <> TAKEN marks are from {takenFrom}&apos;s draft (the league picked at the top of the app).</>}
       </>
     );
@@ -348,9 +360,14 @@ export default function RookieBigBoard({
   const viewValue = viewFormat ? pv.values?.byLeague.get(viewFormat.leagueId) ?? null : null;
   const boardClass = board?.year;
   const curve = useMemo(() => (boardClass != null ? pickValueCurve(pickFcValues, boardClass) : null), [pickFcValues, boardClass]);
+  // The score OVR follows: Dynasty until the class's NFL draft is over, Dynasty+ from the Sunday the rookie drafts start.
+  const orderPlus = useMemo(() => boardClass != null && nflDraftOver(boardClass, new Date()), [boardClass]);
+  const orderScoreName = orderPlus ? "Dynasty+" : "Dynasty";
   const leagueView = useMemo(
-    () => (rows && viewValue && curve ? leagueBoardRows(rows, viewValue.mult, curve) : null),
-    [rows, viewValue, curve],
+    () => (rows && viewValue && curve
+      ? leagueBoardRows(rows, (p) => tierScore(p, orderPlus), viewValue.mult, curve)
+      : null),
+    [rows, viewValue, curve, orderPlus],
   );
   const ordered = leagueView?.rows ?? rows;
 
@@ -524,7 +541,7 @@ export default function RookieBigBoard({
           <h2 className="text-white font-semibold text-sm">{board.year} Rookie Class</h2>
           <p className="text-[11px] text-slate-500">
             {ranked} ranked · {board.rows.length - ranked} unranked · {leagueView && viewFormat
-              ? `${viewFormat.name}'s order: OVR × positional value`
+              ? `${viewFormat.name}'s order: ${orderScoreName} + positional value`
               : "order from Scouting → Big Board (OVR)"}
           </p>
         </div>
@@ -556,6 +573,8 @@ export default function RookieBigBoard({
           format={viewFormat}
           value={viewValue}
           curve={curve}
+          rate={leagueView?.rate ?? null}
+          scoreName={orderScoreName}
           seasons={pv.seasons}
           error={pv.error}
           onRetry={pv.retry}
@@ -699,7 +718,7 @@ export default function RookieBigBoard({
 
             <div className={`${grid} bg-slate-800/70 px-2 sm:px-3 py-1.5 mb-0.5 rounded-lg text-sm${taken ? " opacity-40" : ""}`}>
               {leagueView && viewFormat ? (
-                <LeaguePlaceCells lp={lp} title={lp && curve ? leaguePlaceTitle(lp, p.position, curve, viewFormat.name) : undefined} />
+                <LeaguePlaceCells lp={lp} title={lp ? leaguePlaceTitle(lp, p.position, orderScoreName, viewFormat.name) : undefined} />
               ) : (
                 <span className="text-center text-xs font-mono text-slate-400">{p.overall_rank ?? "—"}</span>
               )}

@@ -59,16 +59,25 @@ const LINES: SeasonLine[] = [2024, 2025].flatMap((season) => [
 
 const PRICES = [7900, 6400, 5300, 5000, 4600, 4300, 3800, 3300, 3000, 2800, 2600, 2400];
 const PICK_VALUES = Object.fromEntries(PRICES.map((v, i) => [`2027-1.${String(i + 1).padStart(2, "0")}`, v]));
-const prospect = (id: string, position: string, rank: number | null): DraftBoardProspect => ({
+// Dynasty+ runs in another order (projected capital), so the test can tell which score the order read.
+const prospect = (id: string, position: string, rank: number | null, dynasty: number, plus: number): DraftBoardProspect => ({
   id, name: id, position, school: "State", draft_class_year: 2027, overall_rank: rank,
-  draft_round: null, draft_pick: null, draft_team: null, board_scores: null,
+  draft_round: null, draft_pick: null, draft_team: null,
+  board_scores: {
+    dynasty, plus, plus_projected: true, sample: { n: 300, share: 1, tier: "full" },
+    weights: { age: 1, size: 1, draft: 2 }, saved_at: "2026-11-27T12:00:00Z",
+  },
 });
-// In OVR order, as useDraftBoardProspects gives it.
+// In OVR order (= Dynasty order), as useDraftBoardProspects gives it.
 const PROSPECTS = [
-  prospect("Wr One", "WR", 1), prospect("Rb One", "RB", 2), prospect("Wr Two", "WR", 3),
-  prospect("Qb One", "QB", 4), prospect("Wr Three", "WR", 5), prospect("Te One", "TE", 6),
-  prospect("Te Two", "TE", 7), prospect("Rb Late", "RB", null),
+  prospect("Wr One", "WR", 1, 2.6, 2.0), prospect("Rb One", "RB", 2, 2.3, 3.1), prospect("Wr Two", "WR", 3, 2.1, 1.0),
+  prospect("Qb One", "QB", 4, 1.9, 2.6), prospect("Wr Three", "WR", 5, 1.6, 0.8), prospect("Te One", "TE", 6, 1.4, 0.6),
+  prospect("Te Two", "TE", 7, 1.2, 1.9), prospect("Rb Two", "RB", 8, 1.0, 0.5), prospect("Wr Four", "WR", 9, 0.9, 1.4),
+  prospect("Qb Two", "QB", 10, 0.7, 0.3), prospect("Rb Three", "RB", 11, 0.5, 1.2), prospect("Wr Five", "WR", 12, 0.3, 0.1),
+  prospect("Rb Late", "RB", null, 0.4, 0.2),
 ];
+const dynastyOf = (p: DraftBoardProspect) => p.board_scores?.dynasty;
+const plusOf = (p: DraftBoardProspect) => p.board_scores?.plus;
 // The market pool: one board prospect Sleeper lists, plus a rookie the board doesn't have.
 const POOL: RookieBoardPlayer[] = [
   { player_id: "s-te1", name: "Te One", position: "TE", team: "", adp: 9, fcValue: 2100 },
@@ -76,16 +85,17 @@ const POOL: RookieBoardPlayer[] = [
 ];
 
 // What the helpers give for Gamma TEP against the usual format.
-function expectedGamma() {
+function expectedGamma(scoreOf = dynastyOf) {
   const formats = LEAGUES.map(leagueFormat);
   const mult = leagueValues(LINES, formats, homeFormat(formats)!).byLeague.get("3")!.mult;
-  return { mult, ...leagueBoardRows(PROSPECTS, mult, pickValueCurve(PICK_VALUES, 2027)!) };
+  return { mult, ...leagueBoardRows(PROSPECTS, scoreOf, mult, pickValueCurve(PICK_VALUES, 2027)!)! };
 }
 
 beforeEach(() => {
   h.state = { lines: LINES, seasons: [2024, 2025], error: null, retry: vi.fn() };
   h.enabled.length = 0;
 });
+afterEach(() => { vi.useRealTimers(); });
 
 const run = (leagueId: string | null, enabled: boolean, pickValues = PICK_VALUES) =>
   renderHook(() => useLiveDraftLeagueOrder(PROSPECTS, LEAGUES, leagueId, pickValues, enabled)).result.current;
@@ -101,10 +111,22 @@ describe("useLiveDraftLeagueOrder", () => {
     expect(view.format?.name).toBe("Gamma TEP");
     expect(view.value?.mult).toEqual(want.mult);
     expect(view.curve?.year).toBe(2027);
+    expect(view.scoreName).toBe("Dynasty");
+    expect(view.rate).toEqual(want.rate);
     // Places by place on the live board; the unranked have none.
-    expect(view.places.size).toBe(7);
-    rows.slice(0, 7).forEach((p, i) => expect(view.places.get(i + 1)).toEqual(want.places.get(p)));
+    expect(view.places.size).toBe(12);
+    rows.slice(0, 12).forEach((p, i) => expect(view.places.get(i + 1)).toEqual(want.places.get(p)));
     expect(h.enabled).toContain(true);
+  });
+
+  it("reads Dynasty until the NFL draft is over, then Dynasty+ (from the Sunday the rookie drafts start)", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2027, 3, 24, 22, 0));
+    expect(run("3", true).view.scoreName).toBe("Dynasty");
+    vi.setSystemTime(new Date(2027, 3, 25, 0, 1));
+    const after = run("3", true);
+    expect(after.view.scoreName).toBe("Dynasty+");
+    expect(after.rows.map((p) => p.id)).toEqual(expectedGamma(plusOf).rows.map((p) => p.id));
   });
 
   it("stays in OVR order and loads no seasons when off (in season, another Draft Hub tab) or with no league", () => {
@@ -132,6 +154,13 @@ describe("useLiveDraftLeagueOrder", () => {
     expect(noCurve.rows).toBe(PROSPECTS);
     expect(noCurve.view.value).not.toBeNull();
     expect(noCurve.view.curve).toBeNull();
+
+    // Too few scored places among the priced picks to read what a point is worth.
+    const sparse = PROSPECTS.map((p, i) => (i < 8 ? p : { ...p, board_scores: null }));
+    const thin = renderHook(() => useLiveDraftLeagueOrder(sparse, LEAGUES, "3", PICK_VALUES, true)).result.current;
+    expect(thin.rows).toBe(sparse);
+    expect(thin.view.curve).not.toBeNull();
+    expect(thin.view.rate).toBeNull();
   });
 
   it("feeds the live draft's lists: board ranks are league places, the user's slots go down it, then the pool", () => {
@@ -165,11 +194,13 @@ function renderBoard(view: LiveDraftOrderView, top: RookieBoardPlayer[], withDra
 describe("LiveDraftBoard in the drafting league's order", () => {
   it("says which order Top Available is in, and each card's OVR place, move and math", () => {
     const { rows, view } = run("3", true);
-    const top = draftBoardRookies(rows, POOL).slice(0, 7);
+    const top = draftBoardRookies(rows, POOL).slice(0, 10);
     renderBoard(view, top, true);
 
     expect(screen.getByText(/^QB ×\d\.\d\d · RB ×\d\.\d\d · WR ×\d\.\d\d · TE ×\d\.\d\d$/)).toBeTruthy();
+    expect(screen.getByText(/^QB [+−]\d\.\d\d · RB [+−]\d\.\d\d · WR [+−]\d\.\d\d · TE \+\d\.\d\d$/)).toBeTruthy();
     expect(screen.getByText(/Gamma TEP's order:/)).toBeTruthy();
+    expect(screen.getByText(/\+1\.00 Dynasty is worth ×\d\.\d\d on your 2027 Pick Values/)).toBeTruthy();
     expect(screen.getByText(/everyone else's predictions still\s+read the market/)).toBeTruthy();
     expect(screen.getByText("Your slots: your board in Gamma TEP's order (Top Available below says how)")).toBeTruthy();
 
@@ -177,11 +208,11 @@ describe("LiveDraftBoard in the drafting league's order", () => {
     const lp = view.places.get(place)!;
     const move = screen.getByLabelText(`Up ${6 - place} from OVR 6`);
     expect(move.textContent).toBe(`OVR 6 ▲${6 - place}`);
-    expect(move.getAttribute("title")).toBe(leaguePlaceTitle(lp, "TE", view.curve!, "Gamma TEP"));
+    expect(move.getAttribute("title")).toBe(leaguePlaceTitle(lp, "TE", "Dynasty", "Gamma TEP"));
     expect(move.parentElement?.textContent).toBe(`#${place}OVR 6 ▲${6 - place}`);
   });
 
-  it("is the OVR board, saying why, with no league, while loading, or on an error (Retry)", () => {
+  it("is the OVR board, saying why, with no league, while loading, on an error (Retry), or with too few scores", () => {
     const top = draftBoardRookies(PROSPECTS, POOL).slice(0, 3);
     const ovr = run(null, true).view;
     renderBoard(ovr, top, true);
@@ -201,5 +232,12 @@ describe("LiveDraftBoard in the drafting league's order", () => {
     expect(screen.getByText(/Your board stays in OVR order here/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(retry).toHaveBeenCalledTimes(1);
+    cleanup();
+
+    h.state = { lines: LINES, seasons: [2024, 2025], error: null, retry: vi.fn() };
+    const sparse = PROSPECTS.map((p, i) => (i < 8 ? p : { ...p, board_scores: null }));
+    renderBoard(renderHook(() => useLiveDraftLeagueOrder(sparse, LEAGUES, "3", PICK_VALUES, true)).result.current.view, top);
+    expect(screen.getByText(/Too few of your top 12 have a Dynasty score/)).toBeTruthy();
+    expect(screen.queryByText(/OVR \d/)).toBeNull();
   });
 });

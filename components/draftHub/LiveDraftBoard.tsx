@@ -14,7 +14,7 @@ import type {
 } from "../../lib/types";
 import { posColor, normalizeRookieName } from "./shared";
 import { isDraftedRookie } from "../../lib/helpers/draftBoard";
-import { leaguePlaceTitle, type LeaguePlace } from "../../lib/helpers/leagueBoard";
+import { leaguePlaceTitle, rateText, shiftsText, type LeaguePlace } from "../../lib/helpers/leagueBoard";
 import { LINE_POSITIONS, uncountedScoringKeys } from "../../lib/helpers/nflSeasonLines";
 import type { LiveDraftOrderView } from "../../hooks/useLiveDraftLeagueOrder";
 import type { GridPick } from "./shared";
@@ -59,11 +59,11 @@ interface LiveDraftBoardProps {
 const multText = (pos: string, m: number | null) => `${pos} ×${m == null ? "1.00" : m.toFixed(2)}`;
 
 /** The board is in the drafting league's order (else it's in OVR order). */
-const inLeagueOrder = (v: LiveDraftOrderView) => !!(v.format && v.value && v.curve);
+const inLeagueOrder = (v: LiveDraftOrderView) => !!(v.format && v.value && v.curve && v.rate);
 
 /** What order Top Available and the user's own slots are in: the drafting league's, or OVR and why. */
 function OrderNote({ view }: { view: LiveDraftOrderView }) {
-  const { format, value, curve, seasons, error, retry } = view;
+  const { format, value, curve, rate, scoreName, seasons, error, retry } = view;
   const drop = " Players drop off once drafted in this Sleeper draft.";
   let body: ReactNode;
   if (!format) {
@@ -80,6 +80,13 @@ function OrderNote({ view }: { view: LiveDraftOrderView }) {
     body = <>Reading the{span} NFL seasons for {format.name}&apos;s numbers… your board stays in OVR order until then.</>;
   } else if (!curve) {
     body = <>No pick values for this class yet (Draft Hub → Pick Values), so your board stays in OVR order.{drop}</>;
+  } else if (!rate) {
+    body = (
+      <>
+        Too few of your top {curve.values.length} have a {scoreName} score to read what a point of it is worth on your {curve.year}{" "}
+        Pick Values, so your board stays in OVR order.{drop}
+      </>
+    );
   } else {
     const uncounted = uncountedScoringKeys(format.scoring).length;
     body = (
@@ -89,9 +96,10 @@ function OrderNote({ view }: { view: LiveDraftOrderView }) {
           {LINE_POSITIONS.map((pos) => multText(pos, value.mult[pos])).join(" · ")}
         </span>{" "}
         against your usual format (League Formats shows why{uncounted > 0 ? `; ${uncounted} of this league's rules aren't counted` : ""}).
-        Your OVR re-sorted by your {curve.year} Pick Values × his position&apos;s number, the same order as Rookie Big Board →
-        Order for {format.name}. Your own predicted slots and the slot picker go down it too; everyone else&apos;s predictions still
-        read the market.{drop}
+        {" "}{rateText(rate, scoreName, curve.year)}, so in {scoreName} those are{" "}
+        <span className="font-semibold text-slate-300">{shiftsText(LINE_POSITIONS, value.mult, rate)}</span>, and your board sorts
+        by {scoreName} plus that, the same order as Rookie Big Board → Order for {format.name}. Your own predicted slots and the
+        slot picker go down it too; everyone else&apos;s predictions still read the market.{drop}
       </>
     );
   }
@@ -104,7 +112,7 @@ function OvrMove({ lp, pos, view }: { lp: LeaguePlace; pos: string; view: LiveDr
   const tone = d > 0 ? "text-teal-300" : d < 0 ? "text-rose-300" : "text-slate-500";
   const mark = d > 0 ? ` ▲${d}` : d < 0 ? ` ▼${-d}` : "";
   const label = d > 0 ? `Up ${d} from OVR ${lp.ovr}` : d < 0 ? `Down ${-d} from OVR ${lp.ovr}` : `Same as OVR ${lp.ovr}`;
-  const title = view.curve && view.format ? leaguePlaceTitle(lp, pos, view.curve, view.format.name) : label;
+  const title = view.format ? leaguePlaceTitle(lp, pos, view.scoreName, view.format.name) : label;
   return (
     <span title={title} aria-label={label} className={`ml-2 text-[10px] font-semibold tabular-nums ${tone}`}>
       OVR {lp.ovr}{mark}
@@ -561,8 +569,8 @@ export default function LiveDraftBoard({
                               return (
                                 <button
                                   key={r.player_id || r.name}
-                                  title={lp && orderView.curve && orderView.format
-                                    ? leaguePlaceTitle(lp, r.position, orderView.curve, orderView.format.name)
+                                  title={lp && orderView.format
+                                    ? leaguePlaceTitle(lp, r.position, orderView.scoreName, orderView.format.name)
                                     : undefined}
                                   className="w-full text-left px-2 py-1 rounded hover:bg-slate-800 flex items-center justify-between gap-1"
                                   onClick={() => {
