@@ -103,6 +103,8 @@ function DraftHub({
   const { rosters } = useLeague();
   const { pickFcValues, marketPickFcValues, pickValueOverrides, savePickValueOverrides } = useValues();
   const [rookieSearch, setRookieSearch] = useState("");
+  // The Rookie Big Board's league picker (null = OVR), kept while the Draft Hub is open.
+  const [boardLeagueId, setBoardLeagueId] = useState<string | null>(null);
 
   const myRosterId = rosters.find((r) => r.owner_id === user?.user_id)?.roster_id;
 
@@ -175,6 +177,9 @@ function DraftHub({
           rookieSearch={rookieSearch}
           setRookieSearch={setRookieSearch}
           onOpenScouting={onOpenScouting}
+          leagues={leagues}
+          leagueViewId={boardLeagueId}
+          setLeagueViewId={setBoardLeagueId}
         />
       )}
 

@@ -19,14 +19,17 @@ export interface NflSeasonLinesState {
 /**
  * The last three finished NFL seasons as QB / RB / WR / TE season lines
  * (/api/nfl-season-lines), for positional value per league. Loads once per
- * mount; a failure says so and can be retried.
+ * mount, from when `enabled` is first true (the Rookie Big Board waits for a
+ * league to be picked); a failure says so and can be retried.
  */
-export function useNflSeasonLines(): NflSeasonLinesState {
+export function useNflSeasonLines(enabled = true): NflSeasonLinesState {
   const expected = useMemo(() => finishedSeasons(new Date()), []);
   const [state, setState] = useState<{ payload: SeasonLinesPayload | null; error: string | null }>({ payload: null, error: null });
   const [attempt, setAttempt] = useState(0);
+  const loaded = state.payload != null;
 
   useEffect(() => {
+    if (!enabled || loaded) return;
     let cancelled = false;
     cachedFetch<SeasonLinesPayload>("/api/nfl-season-lines", {
       ttlMs: TTL_MS,
@@ -40,7 +43,7 @@ export function useNflSeasonLines(): NflSeasonLinesState {
       },
     );
     return () => { cancelled = true; };
-  }, [expected, attempt]);
+  }, [expected, attempt, enabled, loaded]);
 
   const lines = useMemo(() => (state.payload ? fromPayload(state.payload) : null), [state.payload]);
   const retry = useCallback(() => {

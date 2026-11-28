@@ -1,8 +1,10 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import { logger } from "../../lib/logger";
 import { useAuth } from "../../lib/AuthContext";
+import { useLeague } from "../../lib/LeagueContext";
+import { useValues } from "../../lib/ValuesContext";
 import { getFcValuesRaw } from "../../lib/fcValuesStore";
 import { useDraftBoardClass } from "../../hooks/useDraftBoardClass";
 import { SAMPLE_TIERS } from "../../lib/scouting/sampleTiers";
@@ -12,7 +14,14 @@ import {
   fcClassValues, fcValueFor, draftBoardSnapshotRows, readNotes, draftBoardTiers, tierRangeLabel, TIER_STEP,
   type DraftBoardProspect,
 } from "../../lib/helpers/draftBoard";
-import type { BoardScores, SleeperNFLState } from "../../lib/types";
+import {
+  pickValueCurve, leagueOrder, leaguePlaceTitle, curveLastLabel, type LeaguePlace, type PickCurve,
+} from "../../lib/helpers/leagueBoard";
+import { LINE_POSITIONS, uncountedScoringKeys } from "../../lib/helpers/nflSeasonLines";
+import type { LeagueFormat } from "../../lib/helpers/leagueFormat";
+import type { LeagueValue } from "../../lib/helpers/positionalValue";
+import { useLeaguePositionalValues } from "../../hooks/useLeaguePositionalValues";
+import type { BoardScores, SleeperLeague, SleeperNFLState } from "../../lib/types";
 import { posBadge, normalizeRookieName } from "./shared";
 
 const log = logger("components/draftHub/RookieBigBoard");
@@ -23,16 +32,27 @@ const log = logger("components/draftHub/RookieBigBoard");
 // those scores in 0.25 brackets (draftBoardTiers). Notes are the one thing
 // edited here, keyed by prospect id on the user's rookie_board_tiers row for
 // the class year.
+//
+// The league picker (stage 2 of the 2026-11-27 plan) re-sorts the board for
+// one league: each OVR place read as that pick on the user's Pick Values,
+// times the league's multiplier for his position (League Formats), highest
+// first (lib/helpers/leagueBoard.ts). Same-position order and tiers never
+// change; the unranked stay below; Save Board still saves the OVR order.
 
 // How long typing must pause before a note saves to the account.
 const NOTE_SYNC_DELAY_MS = 800;
 const SAMPLE_UNIT: Record<string, string> = { QB: "throws", RB: "runs", WR: "routes", TE: "routes" };
 
 // One grid for the header and every row, so the columns line up:
-// OVR · sample dot · player · Dyn · Dyn+ · FC · tier · note.
+// OVR · sample dot · player · Dyn · Dyn+ · FC · tier · note. A league's order
+// adds his move from OVR after the place (# · ± · sample dot · …); on a phone
+// the move sits under the place instead, so the name keeps its width.
 const GRID =
   "grid grid-cols-[1.5rem_0.625rem_minmax(0,1fr)_2.25rem_2.25rem_2.5rem_2.25rem_1rem] " +
   "sm:grid-cols-[2rem_0.75rem_minmax(0,1fr)_3rem_3rem_3.5rem_3rem_1.5rem] gap-1 sm:gap-2 items-center";
+const LEAGUE_GRID =
+  "grid grid-cols-[1.5rem_0.625rem_minmax(0,1fr)_2.25rem_2.25rem_2.5rem_2.25rem_1rem] " +
+  "sm:grid-cols-[2rem_2rem_0.75rem_minmax(0,1fr)_3rem_3rem_3.5rem_3rem_1.5rem] gap-1 sm:gap-2 items-center";
 
 const signed = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
 
@@ -63,6 +83,87 @@ interface RookieBigBoardProps {
   rookieSearch: string;
   setRookieSearch: (s: string) => void;
   onOpenScouting: () => void;
+  /** The user's leagues, for the league picker. */
+  leagues: readonly SleeperLeague[];
+  /** The league whose order the board shows; null = OVR (the usual format). Kept by the Draft Hub across its tabs. */
+  leagueViewId: string | null;
+  setLeagueViewId: (id: string | null) => void;
+}
+
+const multText = (pos: string, m: number | null) => `${pos} ×${m == null ? "1.00" : m.toFixed(2)}`;
+const whole = (v: number) => Math.round(v).toLocaleString("en-US");
+
+/** What the picked league's order rests on, or why the board is still in OVR order. */
+function LeagueViewNote({
+  format, value, curve, seasons, error, onRetry, takenFrom,
+}: {
+  format: LeagueFormat;
+  value: LeagueValue | null;
+  curve: PickCurve | null;
+  seasons: number[];
+  error: string | null;
+  onRetry: () => void;
+  /** The league the TAKEN marks come from, when it isn't the one picked here. */
+  takenFrom: string | null;
+}) {
+  const span = seasons.length ? `${seasons[0]}–${seasons[seasons.length - 1]}` : "";
+  let body: ReactNode;
+  if (error) {
+    body = (
+      <span className="text-rose-300">
+        {error} The board stays in OVR order.{" "}
+        <button onClick={onRetry} className="ml-1 rounded bg-slate-800 px-2 py-0.5 text-slate-200 hover:bg-slate-700">Retry</button>
+      </span>
+    );
+  } else if (!value) {
+    body = <>Reading the {span} NFL seasons for {format.name}&apos;s numbers… the board stays in OVR order until then.</>;
+  } else if (!curve) {
+    body = <>No pick values for this class yet (Draft Hub → Pick Values), so the board stays in OVR order.</>;
+  } else {
+    const uncounted = uncountedScoringKeys(format.scoring).length;
+    const last = curveLastLabel(curve);
+    body = (
+      <>
+        <span className="font-semibold text-slate-300">
+          {LINE_POSITIONS.map((pos) => multText(pos, value.mult[pos])).join(" · ")}
+        </span>{" "}
+        against your usual format (League Formats shows why{uncounted > 0 ? `; ${uncounted} of this league's rules aren't counted` : ""}).
+        Each OVR place reads as that pick on your {curve.year} Pick Values (1.01 {whole(curve.values[0])} … {last}{" "}
+        {whole(curve.values[curve.values.length - 1])}; past {last}, ×{curve.perPick.toFixed(3)} a pick), times his position&apos;s
+        number, highest first. A position keeps its own order, tiers stay your usual ones (no dividers here), and the unranked stay
+        below. Hover ± for the math.
+        {takenFrom && <> TAKEN marks are from {takenFrom}&apos;s draft (the league picked at the top of the app).</>}
+      </>
+    );
+  }
+  return <p className="text-[10px] text-slate-500 mb-2 px-0.5">{body}</p>;
+}
+
+/** A row's place in the league's order and its move from OVR: two cells from sm up, one on a phone (the move under the place). */
+function LeaguePlaceCells({ lp, title }: { lp: LeaguePlace | undefined; title: string | undefined }) {
+  if (!lp) {
+    return (
+      <>
+        <span className="text-center text-xs font-mono text-slate-400">—</span>
+        <span aria-hidden="true" className="hidden sm:block" />
+      </>
+    );
+  }
+  const d = lp.ovr - lp.place;
+  const label = d > 0 ? `Up ${d} from OVR ${lp.ovr}` : d < 0 ? `Down ${-d} from OVR ${lp.ovr}` : `Same as OVR ${lp.ovr}`;
+  const tone = d > 0 ? "text-teal-300" : d < 0 ? "text-rose-300" : "text-slate-600";
+  const mark = d > 0 ? `▲${d}` : d < 0 ? `▼${-d}` : "·";
+  return (
+    <>
+      <span className="text-center text-xs font-mono text-slate-400 leading-tight">
+        {lp.place}
+        <span title={title} aria-label={label} className={`sm:hidden block text-[9px] font-semibold font-sans ${tone}`}>{mark}</span>
+      </span>
+      <span title={title} aria-label={label} className={`hidden sm:block text-center text-[10px] font-semibold tabular-nums ${tone}`}>
+        {mark}
+      </span>
+    </>
+  );
 }
 
 function sampleDot(pos: string, s: BoardScores["sample"] | undefined) {
@@ -93,8 +194,11 @@ function scoreCell(v: number | null | undefined, title: string, projected = fals
 
 export default function RookieBigBoard({
   nflState, draftedPlayerIds, rookieSearch, setRookieSearch, onOpenScouting,
+  leagues, leagueViewId, setLeagueViewId,
 }: RookieBigBoardProps) {
   const { supabaseUser } = useAuth();
+  const { selectedLeague } = useLeague();
+  const { pickFcValues } = useValues();
   const userId = supabaseUser?.id ?? null;
   const { classYear, ready } = useDraftBoardClass(nflState);
 
@@ -237,13 +341,28 @@ export default function RookieBigBoard({
     }
   }
 
+  // ── A league's order (the league picker) ───────────────────
+  // The seasons load only once a league is picked.
+  const pv = useLeaguePositionalValues(leagues, leagueViewId != null);
+  const viewFormat = leagueViewId != null ? pv.formats.find((f) => f.leagueId === leagueViewId) ?? null : null;
+  const viewValue = viewFormat ? pv.values?.byLeague.get(viewFormat.leagueId) ?? null : null;
+  const boardClass = board?.year;
+  const curve = useMemo(() => (boardClass != null ? pickValueCurve(pickFcValues, boardClass) : null), [pickFcValues, boardClass]);
+  const leagueView = useMemo(() => {
+    if (!rows || !viewValue || !curve) return null;
+    const ranked = rows.filter((p) => p.overall_rank != null);
+    const { order, places } = leagueOrder(ranked, (p) => p.position, viewValue.mult, curve);
+    return { rows: [...order, ...rows.filter((p) => p.overall_rank == null)], places };
+  }, [rows, viewValue, curve]);
+  const ordered = leagueView?.rows ?? rows;
+
   // ── What shows ──────────────────────────────────────────────
   const visible = useMemo(() => {
     const q = rookieSearch.trim().toLowerCase();
-    return (rows ?? []).filter((p) =>
+    return (ordered ?? []).filter((p) =>
       (!posFilter || p.position === posFilter) &&
       (!q || p.name.toLowerCase().includes(q) || (p.school ?? "").toLowerCase().includes(q)));
-  }, [rows, rookieSearch, posFilter]);
+  }, [ordered, rookieSearch, posFilter]);
 
   const ranked = useMemo(() => (rows ?? []).filter((p) => p.overall_rank != null).length, [rows]);
   const savedAt = useMemo(() => latestScoresSavedAt(rows ?? []), [rows]);
@@ -300,6 +419,7 @@ export default function RookieBigBoard({
   }
 
   const searching = !!rookieSearch.trim();
+  const grid = leagueView ? LEAGUE_GRID : GRID;
   const noteProspect = expandedNoteId ? board.rows.find((p) => p.id === expandedNoteId) : undefined;
 
   return (
@@ -323,6 +443,7 @@ export default function RookieBigBoard({
             <h2 id="save-board-title" className="text-white font-semibold text-sm mb-1">Save Big Board Snapshot</h2>
             <p className="text-slate-500 text-xs mb-4">
               Give this snapshot a name. Saving with the same name overwrites the previous version.
+              {leagueView && viewFormat && ` It saves your OVR order, not ${viewFormat.name}'s.`}
             </p>
             <input
               autoFocus
@@ -404,7 +525,9 @@ export default function RookieBigBoard({
         <div className="min-w-0">
           <h2 className="text-white font-semibold text-sm">{board.year} Rookie Class</h2>
           <p className="text-[11px] text-slate-500">
-            {ranked} ranked · {board.rows.length - ranked} unranked · order from Scouting → Big Board (OVR)
+            {ranked} ranked · {board.rows.length - ranked} unranked · {leagueView && viewFormat
+              ? `${viewFormat.name}'s order: OVR × positional value`
+              : "order from Scouting → Big Board (OVR)"}
           </p>
         </div>
         <button
@@ -414,6 +537,33 @@ export default function RookieBigBoard({
           Save Board
         </button>
       </div>
+
+      {/* The league picker: OVR (the usual format), or one league's order. */}
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <label htmlFor="rookie-board-league" className="text-[11px] text-slate-400 shrink-0">Order for</label>
+        <select
+          id="rookie-board-league"
+          value={viewFormat ? viewFormat.leagueId : ""}
+          onChange={(e) => setLeagueViewId(e.target.value || null)}
+          className="flex-1 sm:flex-none min-w-0 max-w-full p-1.5 rounded bg-slate-800 text-xs text-slate-200"
+        >
+          <option value="">Your usual format (OVR)</option>
+          {pv.dynasty.map((f) => (
+            <option key={f.leagueId} value={f.leagueId}>{f.name}</option>
+          ))}
+        </select>
+      </div>
+      {viewFormat && (
+        <LeagueViewNote
+          format={viewFormat}
+          value={viewValue}
+          curve={curve}
+          seasons={pv.seasons}
+          error={pv.error}
+          onRetry={pv.retry}
+          takenFrom={selectedLeague && selectedLeague.league_id !== viewFormat.leagueId ? selectedLeague.name : null}
+        />
+      )}
 
       {/* min-w-0 lets the search box shrink on a phone; flex-wrap catches the hint. */}
       <div className="flex flex-wrap items-center gap-3 mb-2">
@@ -483,8 +633,15 @@ export default function RookieBigBoard({
       )}
 
       {/* Column headers */}
-      <div className={`${GRID} px-2 sm:px-3 mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500`}>
-        <span className="text-center" title={OVR_TOOLTIP}>OVR</span>
+      <div className={`${grid} px-2 sm:px-3 mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500`}>
+        {leagueView && viewFormat ? (
+          <>
+            <span className="text-center" title={`Place in ${viewFormat.name}'s order: OVR re-sorted by your pick values × positional value.`}>#</span>
+            <span className="hidden sm:block text-center" title="Spots up (▲) or down (▼) from OVR. Hover a row's for the math.">±</span>
+          </>
+        ) : (
+          <span className="text-center" title={OVR_TOOLTIP}>OVR</span>
+        )}
         <span aria-hidden="true" />
         <span>Player</span>
         <span className="text-right" title={DYN_TOOLTIP}>Dyn</span>
@@ -502,8 +659,10 @@ export default function RookieBigBoard({
         const prev = i > 0 ? visible[i - 1] : null;
         const myTier = tiers.get(p.id);
         const unrankedStart = p.overall_rank == null && (!prev || prev.overall_rank != null);
-        // A divider wherever the tier changes, and above the first row when it has one.
-        const showTierDivider = !searching && (prev ? myTier?.tier !== tiers.get(prev.id)?.tier : !!myTier);
+        // A divider wherever the tier changes, and above the first row when it has one (OVR order only:
+        // a league's order runs across tiers).
+        const showTierDivider = !searching && !leagueView && (prev ? myTier?.tier !== tiers.get(prev.id)?.tier : !!myTier);
+        const lp = leagueView?.places.get(p);
         const hasNote = !!(board.notes[p.id] || "").trim();
         const fc = fcById.get(p.id) ?? 0;
         const nfl = nflDraftLabel(p);
@@ -540,8 +699,12 @@ export default function RookieBigBoard({
               </div>
             )}
 
-            <div className={`${GRID} bg-slate-800/70 px-2 sm:px-3 py-1.5 mb-0.5 rounded-lg text-sm${taken ? " opacity-40" : ""}`}>
-              <span className="text-center text-xs font-mono text-slate-400">{p.overall_rank ?? "—"}</span>
+            <div className={`${grid} bg-slate-800/70 px-2 sm:px-3 py-1.5 mb-0.5 rounded-lg text-sm${taken ? " opacity-40" : ""}`}>
+              {leagueView && viewFormat ? (
+                <LeaguePlaceCells lp={lp} title={lp && curve ? leaguePlaceTitle(lp, p.position, curve, viewFormat.name) : undefined} />
+              ) : (
+                <span className="text-center text-xs font-mono text-slate-400">{p.overall_rank ?? "—"}</span>
+              )}
               {sampleDot(p.position, s?.sample)}
               {/* On a phone the name gets the whole first line and the
                   position badge drops to the second, beside the school. */}

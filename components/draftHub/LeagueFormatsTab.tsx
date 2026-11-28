@@ -8,20 +8,20 @@
 // Positional value (stage 1 of the 2026-11-27 plan): each league's QB / RB /
 // WR / TE multiplier against the user's usual format, from lineup math on the
 // last three NFL seasons (lib/helpers/positionalValue.ts; the seasons from
-// /api/nfl-season-lines, nflverse). Shown for the user to check: nothing reads
-// them yet.
+// /api/nfl-season-lines, nflverse; hooks/useLeaguePositionalValues.ts). The
+// Rookie Big Board's league picker sorts by the same numbers (stage 2).
 
 import { useMemo, useState } from "react";
 import type { SleeperLeague } from "../../lib/types";
 import {
-  FORMAT_FIELDS, formatSummary, formatValue, leagueFormat, lineupText, usualFormat, type FormatField, type LeagueFormat,
+  FORMAT_FIELDS, formatSummary, formatValue, lineupText, usualFormat, type FormatField, type LeagueFormat,
 } from "../../lib/helpers/leagueFormat";
 import { LINE_POSITIONS, uncountedScoringKeys, type LinePos } from "../../lib/helpers/nflSeasonLines";
 import {
-  MIN_GAMES, VALUE_DEPTH, homeFormat, leagueValues, type FormatValue, type LeagueValue, type ValueFormat,
+  MIN_GAMES, VALUE_DEPTH, type FormatValue, type LeagueValue, type ValueFormat,
 } from "../../lib/helpers/positionalValue";
 import { formatRule } from "../../lib/helpers/scoring";
-import { useNflSeasonLines } from "../../hooks/useNflSeasonLines";
+import { useLeaguePositionalValues } from "../../hooks/useLeaguePositionalValues";
 
 interface Props {
   leagues: readonly SleeperLeague[];
@@ -105,8 +105,8 @@ function PositionalValueSection({ home, homeValue, leagueCount, seasons, error, 
             Each league&apos;s number is a position&apos;s share of starting value there against its share in your usual format: ×1.10 = worth 10% more there,
             compared with the other positions. From the real {span} NFL seasons (nflverse: every QB, RB, WR and TE with {MIN_GAMES}+ games), scored with
             that league&apos;s own rules; every lineup filled with the best player left; starting value = the top {VALUE_DEPTH} at a position, points per
-            game above the first one who doesn&apos;t start. Hover a number for its starters and replacement. Nothing uses these yet: the Big Board&apos;s
-            league picker will, once you&apos;ve checked them.
+            game above the first one who doesn&apos;t start. Hover a number for its starters and replacement. The Rookie Big Board&apos;s league picker
+            sorts by them.
           </p>
         </>
       )}
@@ -115,21 +115,13 @@ function PositionalValueSection({ home, homeValue, leagueCount, seasons, error, 
 }
 
 export default function LeagueFormatsTab({ leagues }: Props) {
-  const all = useMemo(() => leagues.map(leagueFormat), [leagues]);
+  const { formats: all, dynasty, home, values, seasons, error, retry } = useLeaguePositionalValues(leagues);
   const hasOthers = all.some((f) => f.kind !== "Dynasty");
   const [dynastyOnly, setDynastyOnly] = useState(true);
   const formats = useMemo(() => (hasOthers && dynastyOnly ? all.filter((f) => f.kind === "Dynasty") : all), [all, hasOthers, dynastyOnly]);
   const summary = useMemo(() => formatSummary(formats), [formats]);
   const usual = useMemo(() => usualFormat(summary), [summary]);
-
   // The usual format comes from the dynasty leagues whatever the checkbox says (all of them if there are none).
-  const dynasty = useMemo(() => {
-    const d = all.filter((f) => f.kind === "Dynasty");
-    return d.length ? d : all;
-  }, [all]);
-  const home = useMemo(() => homeFormat(dynasty), [dynasty]);
-  const { lines, seasons, error, retry } = useNflSeasonLines();
-  const values = useMemo(() => (lines && home ? leagueValues(lines, all, home) : null), [lines, home, all]);
 
   if (all.length === 0) {
     return <p className="text-sm text-slate-500 text-center py-12">No leagues loaded yet.</p>;
