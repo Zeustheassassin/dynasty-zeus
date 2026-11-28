@@ -233,6 +233,14 @@ function datedSpecs(year: number): DatedSpec[] {
       start: draft, end: new Date(draft.getTime() + 2 * DAY),
     },
     {
+      // The user, 2026-11-27: so it isn't forgotten on the one night between the
+      // last round and the first rookie drafts.
+      key: "draft_realign", cycle: `${year}`,
+      title: "Draft Saturday: realign by Dynasty+",
+      detail: `Once the last round's picks are applied (Post-Draft tab → Load ${year} draft results → Apply all): Big Board → All tab → Realign ranks → By Dynasty+ for the ${year} class, then move anyone by hand. Rookie drafts start Sunday, and the Draft Hub board follows OVR.`,
+      start: new Date(draft.getTime() + 2 * DAY),
+    },
+    {
       key: "birthdays", cycle: `${year}-draft`,
       title: "Birthday refill (after the draft)",
       detail: "Prospect Data → Fill from PFF, then ask Claude for the Wikipedia birthday pass for the blanks.",

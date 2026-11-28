@@ -49,6 +49,9 @@ describe("calendarItems", () => {
     expect(find(items, "class_check", "2026")!.when).toBe("Jan 5, 2027");
     expect(find(items, "review_2", "2027")!.when).toBe("Apr 1–15, 2027");
     expect(find(items, "draft_week", "2027")!.when).toBe("Apr 22–24, 2027");
+    // Draft Saturday, the night before rookie drafts start.
+    expect(find(items, "draft_realign", "2027")!.when).toBe("Apr 24, 2027");
+    expect(find(items, "draft_realign", "2027")!.detail).toMatch(/Realign ranks → By Dynasty\+/);
     expect(find(items, "league_renewal")).toBeTruthy();
     // Nothing from before the list started shows as overdue.
     expect(items.filter((i) => i.state === "due")).toEqual([]);
@@ -87,6 +90,7 @@ describe("calendarItems", () => {
     const items = calendarItems(may10, none, null, []);
     expect(find(items, "catapult", "2028")!.state).toBe("later");
     expect(find(items, "draft_week", "2027")!.state).toBe("due");
+    expect(find(items, "draft_realign", "2027")!.state).toBe("due");
     expect(find(items, "birthdays", "2027-draft")!.state).toBe("due");
     expect(find(items, "post_curve", "2027")!.state).toBe("due");
     const marked = marks([["draft_week", "2027", { doneAt: "2027-04-26T12:00:00Z", value: null }]]);
