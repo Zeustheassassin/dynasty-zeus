@@ -14,6 +14,7 @@ import RookieBigBoard from "./draftHub/RookieBigBoard";
 import HistoricalBigBoards from "./draftHub/HistoricalBigBoards";
 import HistoricalLeagueDrafts from "./draftHub/HistoricalLeagueDrafts";
 import LeagueFormatsTab from "./draftHub/LeagueFormatsTab";
+import type { LiveDraftOrderView } from "../hooks/useLiveDraftLeagueOrder";
 
 type HistoricalView = "BIG_BOARDS" | "LEAGUE_DRAFTS";
 
@@ -73,6 +74,8 @@ interface DraftHubProps {
   predictedDraftPicks: Record<string, PredictedPick>;
   draftPoolRanks: DraftPoolRanks;
   topAvailableRookies: RookieBoardPlayer[];
+  /** The order the live draft's board is in: the drafting league's view, or OVR until it loads. */
+  liveDraftOrderView: LiveDraftOrderView;
 
   refreshDraftBoard: () => void;
   loadDraftScout: (userId: string) => void;
@@ -94,7 +97,7 @@ function DraftHub({
   user,
   draftSettings, draftPicks, draftOrder, allPicks,
   boardRookies, myPickList,
-  draftedPlayerIds, predictedDraftPicks, draftPoolRanks, topAvailableRookies,
+  draftedPlayerIds, predictedDraftPicks, draftPoolRanks, topAvailableRookies, liveDraftOrderView,
   refreshDraftBoard, loadDraftScout,
   loadingDraftRefresh,
   leagues,
@@ -160,6 +163,7 @@ function DraftHub({
           predictedDraftPicks={predictedDraftPicks}
           draftPoolRanks={draftPoolRanks}
           topAvailableRookies={topAvailableRookies}
+          orderView={liveDraftOrderView}
           refreshDraftBoard={refreshDraftBoard}
           loadDraftScout={loadDraftScout}
           loadingDraftRefresh={loadingDraftRefresh}

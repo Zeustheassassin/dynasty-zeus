@@ -39,6 +39,7 @@ import type { DashboardAlert, LeagueTransaction, InjuryReportPlayer } from "../.
 import type { ExposureData } from "../../hooks/useUserExposure";
 import type { DraftScoutLeague } from "../../hooks/useDraftScout";
 import type { LoadLeagueOverviewOpts } from "../../hooks/useLeagueOverview";
+import type { LiveDraftOrderView } from "../../hooks/useLiveDraftLeagueOrder";
 import type { MgmtHubTab } from "../../hooks/useManagementState";
 import type { StandingRow, AnnotatedTransaction } from "../../components/LeagueHub/leagueHubTypes";
 import type { ShareEntry } from "../../components/DataHub/dataHubTypes";
@@ -259,6 +260,8 @@ interface HubRouterProps {
   topAvailableRookies: RookieBoardPlayer[];
   boardRookies: RookieBoardPlayer[];
   myPickList: RookieBoardPlayer[];
+  /** The order the live draft's board is in: the drafting league's view, or OVR until it loads. */
+  liveDraftOrderView: LiveDraftOrderView;
 
   // Trade Hub
   tradeHubSection: "CALCULATOR" | "FINDER" | "TRADE_LOG" | "ATTEMPTS";
@@ -378,7 +381,7 @@ export function HubRouter({
   draftHubSection, setDraftHubSection, myDraftSlotPicks, setMyDraftSlotPicks,
   draftSlotEditing, setDraftSlotEditing, draftSlotSearchQuery, setDraftSlotSearchQuery,
   draftSettings, draftPicks, draftOrder, predictedDraftPicks, draftPoolRanks,
-  topAvailableRookies, boardRookies, myPickList,
+  topAvailableRookies, boardRookies, myPickList, liveDraftOrderView,
   tradeHubSection, calcOpponentRosterId,
   selectedLeagueDraftHasOccurred,
   leaguePlayerTags, handleSetAssetDisposition,
@@ -691,6 +694,7 @@ export function HubRouter({
     predictedDraftPicks={predictedDraftPicks}
     draftPoolRanks={draftPoolRanks}
     topAvailableRookies={topAvailableRookies}
+    liveDraftOrderView={liveDraftOrderView}
     refreshDraftBoard={refreshDraftBoard}
     loadDraftScout={loadDraftScout}
     loadingDraftRefresh={loadingDraftRefresh}

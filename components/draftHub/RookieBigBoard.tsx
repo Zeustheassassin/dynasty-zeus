@@ -15,7 +15,7 @@ import {
   type DraftBoardProspect,
 } from "../../lib/helpers/draftBoard";
 import {
-  pickValueCurve, leagueOrder, leaguePlaceTitle, curveLastLabel, type LeaguePlace, type PickCurve,
+  pickValueCurve, leagueBoardRows, leaguePlaceTitle, curveLastLabel, type LeaguePlace, type PickCurve,
 } from "../../lib/helpers/leagueBoard";
 import { LINE_POSITIONS, uncountedScoringKeys } from "../../lib/helpers/nflSeasonLines";
 import type { LeagueFormat } from "../../lib/helpers/leagueFormat";
@@ -348,12 +348,10 @@ export default function RookieBigBoard({
   const viewValue = viewFormat ? pv.values?.byLeague.get(viewFormat.leagueId) ?? null : null;
   const boardClass = board?.year;
   const curve = useMemo(() => (boardClass != null ? pickValueCurve(pickFcValues, boardClass) : null), [pickFcValues, boardClass]);
-  const leagueView = useMemo(() => {
-    if (!rows || !viewValue || !curve) return null;
-    const ranked = rows.filter((p) => p.overall_rank != null);
-    const { order, places } = leagueOrder(ranked, (p) => p.position, viewValue.mult, curve);
-    return { rows: [...order, ...rows.filter((p) => p.overall_rank == null)], places };
-  }, [rows, viewValue, curve]);
+  const leagueView = useMemo(
+    () => (rows && viewValue && curve ? leagueBoardRows(rows, viewValue.mult, curve) : null),
+    [rows, viewValue, curve],
+  );
   const ordered = leagueView?.rows ?? rows;
 
   // ── What shows ──────────────────────────────────────────────

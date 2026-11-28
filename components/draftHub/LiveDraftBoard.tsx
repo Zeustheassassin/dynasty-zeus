@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { supabase } from "../../lib/supabaseclient";
 import { usePlayers } from "../../lib/PlayersContext";
 import { useAuth } from "../../lib/AuthContext";
@@ -14,6 +14,9 @@ import type {
 } from "../../lib/types";
 import { posColor, normalizeRookieName } from "./shared";
 import { isDraftedRookie } from "../../lib/helpers/draftBoard";
+import { leaguePlaceTitle, type LeaguePlace } from "../../lib/helpers/leagueBoard";
+import { LINE_POSITIONS, uncountedScoringKeys } from "../../lib/helpers/nflSeasonLines";
+import type { LiveDraftOrderView } from "../../hooks/useLiveDraftLeagueOrder";
 import type { GridPick } from "./shared";
 
 // Rookie-draft class year tracks the CALENDAR (upcoming class), not the NFL season.
@@ -44,11 +47,69 @@ interface LiveDraftBoardProps {
   predictedDraftPicks: Record<string, PredictedPick>;
   draftPoolRanks: DraftPoolRanks;
   topAvailableRookies: RookieBoardPlayer[];
+  /** The order the board is in: the drafting league's view (positional value stage 3), or OVR until it loads. */
+  orderView: LiveDraftOrderView;
   refreshDraftBoard: () => void;
   loadDraftScout: (userId: string) => void;
   loadingDraftRefresh: boolean;
   /** Weeks 1–17 (isDraftBoardDormant): the board is blank and nothing on it calls Sleeper. */
   dormant: boolean;
+}
+
+const multText = (pos: string, m: number | null) => `${pos} ×${m == null ? "1.00" : m.toFixed(2)}`;
+
+/** The board is in the drafting league's order (else it's in OVR order). */
+const inLeagueOrder = (v: LiveDraftOrderView) => !!(v.format && v.value && v.curve);
+
+/** What order Top Available and the user's own slots are in: the drafting league's, or OVR and why. */
+function OrderNote({ view }: { view: LiveDraftOrderView }) {
+  const { format, value, curve, seasons, error, retry } = view;
+  const drop = " Players drop off once drafted in this Sleeper draft.";
+  let body: ReactNode;
+  if (!format) {
+    body = <>Your Rookie Big Board (Scouting OVR order).{drop}</>;
+  } else if (error) {
+    body = (
+      <span className="text-rose-300">
+        {error} Your board stays in OVR order here.{" "}
+        <button onClick={retry} className="ml-1 rounded bg-slate-800 px-2 py-0.5 text-slate-200 hover:bg-slate-700">Retry</button>
+      </span>
+    );
+  } else if (!value) {
+    const span = seasons.length ? ` ${seasons[0]}–${seasons[seasons.length - 1]}` : "";
+    body = <>Reading the{span} NFL seasons for {format.name}&apos;s numbers… your board stays in OVR order until then.</>;
+  } else if (!curve) {
+    body = <>No pick values for this class yet (Draft Hub → Pick Values), so your board stays in OVR order.{drop}</>;
+  } else {
+    const uncounted = uncountedScoringKeys(format.scoring).length;
+    body = (
+      <>
+        {format.name}&apos;s order:{" "}
+        <span className="font-semibold text-slate-300">
+          {LINE_POSITIONS.map((pos) => multText(pos, value.mult[pos])).join(" · ")}
+        </span>{" "}
+        against your usual format (League Formats shows why{uncounted > 0 ? `; ${uncounted} of this league's rules aren't counted` : ""}).
+        Your OVR re-sorted by your {curve.year} Pick Values × his position&apos;s number, the same order as Rookie Big Board →
+        Order for {format.name}. Your own predicted slots and the slot picker go down it too; everyone else&apos;s predictions still
+        read the market.{drop}
+      </>
+    );
+  }
+  return <p className="text-sm text-slate-400">{body}</p>;
+}
+
+/** "OVR 7 ▲4" beside a Top Available place in a league's order; the math in the tooltip. */
+function OvrMove({ lp, pos, view }: { lp: LeaguePlace; pos: string; view: LiveDraftOrderView }) {
+  const d = lp.ovr - lp.place;
+  const tone = d > 0 ? "text-teal-300" : d < 0 ? "text-rose-300" : "text-slate-500";
+  const mark = d > 0 ? ` ▲${d}` : d < 0 ? ` ▼${-d}` : "";
+  const label = d > 0 ? `Up ${d} from OVR ${lp.ovr}` : d < 0 ? `Down ${-d} from OVR ${lp.ovr}` : `Same as OVR ${lp.ovr}`;
+  const title = view.curve && view.format ? leaguePlaceTitle(lp, pos, view.curve, view.format.name) : label;
+  return (
+    <span title={title} aria-label={label} className={`ml-2 text-[10px] font-semibold tabular-nums ${tone}`}>
+      OVR {lp.ovr}{mark}
+    </span>
+  );
 }
 
 export default function LiveDraftBoard({
@@ -58,6 +119,7 @@ export default function LiveDraftBoard({
   user,
   draftSettings, draftPicks, draftOrder, allPicks,
   boardRookies, myPickList, draftedPlayerIds, predictedDraftPicks, draftPoolRanks, topAvailableRookies,
+  orderView,
   refreshDraftBoard, loadDraftScout, loadingDraftRefresh,
   dormant,
 }: LiveDraftBoardProps) {
@@ -307,6 +369,9 @@ export default function LiveDraftBoard({
               My Slots (click to set)
             </span>
             <span className="flex items-center gap-1 italic text-slate-600">Italic gray = AI prediction</span>
+            {inLeagueOrder(orderView) && orderView.format && (
+              <span className="text-slate-400">Your slots: your board in {orderView.format.name}&apos;s order (Top Available below says how)</span>
+            )}
             <span className="text-orange-400 font-bold">REACH</span><span>&gt;7 ahead of ADP</span>
             <span className="text-emerald-400 font-bold">VALUE</span><span>&gt;4 after ADP</span>
           </div>
@@ -492,9 +557,13 @@ export default function LiveDraftBoard({
                             .map((r) => {
                               // No ADP is MAX_SAFE_INTEGER: no REACH/VALUE then.
                               const reachAmt = r.adp < Number.MAX_SAFE_INTEGER ? Math.round(overallPick - r.adp) : null;
+                              const lp = r.boardRank ? orderView.places.get(r.boardRank) : undefined;
                               return (
                                 <button
                                   key={r.player_id || r.name}
+                                  title={lp && orderView.curve && orderView.format
+                                    ? leaguePlaceTitle(lp, r.position, orderView.curve, orderView.format.name)
+                                    : undefined}
                                   className="w-full text-left px-2 py-1 rounded hover:bg-slate-800 flex items-center justify-between gap-1"
                                   onClick={() => {
                                     setMyDraftSlotPicks((prev) => ({ ...prev, [slotStr]: r.player_id || r.name }));
@@ -535,9 +604,7 @@ export default function LiveDraftBoard({
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold">Top Available Rookies From Your Big Board</h2>
-            <p className="text-sm text-slate-400">
-              Your Rookie Big Board (Scouting OVR order). Players drop off once drafted in this Sleeper draft.
-            </p>
+            <OrderNote view={orderView} />
           </div>
         </div>
         {!boardRookies.length ? (
@@ -546,23 +613,29 @@ export default function LiveDraftBoard({
           <div className="text-slate-400 text-sm">Everyone on your board has been drafted.</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {topAvailableRookies.map((player) => (
-              <div
-                key={player.player_id || `${normalizeRookieName(player.name)}-${player.boardRank}`}
-                className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm text-blue-400 font-semibold">#{player.boardRank}</div>
-                    <div className="font-medium text-white">{player.name}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs text-slate-400">{player.team || "FA"}</div>
-                    <div className="text-xs text-slate-300">{player.position}</div>
+            {topAvailableRookies.map((player) => {
+              const lp = player.boardRank ? orderView.places.get(player.boardRank) : undefined;
+              return (
+                <div
+                  key={player.player_id || `${normalizeRookieName(player.name)}-${player.boardRank}`}
+                  className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm text-blue-400 font-semibold">
+                        #{player.boardRank}
+                        {lp && <OvrMove lp={lp} pos={player.position} view={orderView} />}
+                      </div>
+                      <div className="font-medium text-white">{player.name}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-slate-400">{player.team || "FA"}</div>
+                      <div className="text-xs text-slate-300">{player.position}</div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

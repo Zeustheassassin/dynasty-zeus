@@ -52,6 +52,7 @@ import { usePlayerStats } from "../../hooks/usePlayerStats";
 import { useManagementState } from "../../hooks/useManagementState";
 import { useRookieBoardState, ROOKIE_BOARD_VERSION, ROOKIE_BOARD_RESET_KEY } from "../../hooks/useRookieBoardState";
 import { useDraftBoardProspects } from "../../hooks/useDraftBoardProspects";
+import { useLiveDraftLeagueOrder } from "../../hooks/useLiveDraftLeagueOrder";
 import { draftBoardRookies, unionRookies, sameRookie, isDraftedRookie } from "../../lib/helpers/draftBoard";
 import { useAlerts } from "../../hooks/useAlerts";
 import { useUserExposure } from "../../hooks/useUserExposure";
@@ -2559,7 +2560,15 @@ const saveSnapshotNow = async () => {
   // slots, Top Available and the position counts; the pool (`rookies`) drives
   // everyone else's predictions and REACH/VALUE.
   const draftBoardProspects = useDraftBoardProspects(supabaseUser?.id ?? null, nflState, mainTab === "DRAFT");
-  const boardRookies = useMemo(() => draftBoardRookies(draftBoardProspects, rookies), [draftBoardProspects, rookies]);
+  // In the drafting league's order (positional value stage 3): OVR place × the
+  // league's multiplier on the user's Pick Values, as the Rookie Big Board's
+  // "Order for" shows it; OVR until the NFL seasons load (only on the Live Draft Board).
+  const liveDraftOrder = useLiveDraftLeagueOrder(
+    draftBoardProspects, leagues, selectedLeague?.league_id ?? null, pickFcValues,
+    mainTab === "DRAFT" && draftHubSection === "BOARD" && draftBoardLoads,
+  );
+  const liveDraftOrderView = liveDraftOrder.view;
+  const boardRookies = useMemo(() => draftBoardRookies(liveDraftOrder.rows, rookies), [liveDraftOrder.rows, rookies]);
   // The user's slots go down the board, then past it into the pool.
   const myPickList = useMemo(() => unionRookies(boardRookies, rookies), [boardRookies, rookies]);
   // Everyone else picks from the pool plus any board prospect Sleeper doesn't list yet.
@@ -3818,6 +3827,7 @@ const myPlayerSet = new Set<string>(roster?.players || []);
     topAvailableRookies,
     boardRookies,
     myPickList,
+    liveDraftOrderView,
     tradeHubSection,
     calcOpponentRosterId,
     selectedLeagueDraftHasOccurred,

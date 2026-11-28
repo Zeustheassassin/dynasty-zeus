@@ -1,5 +1,6 @@
 // ============================================================
-// A league's view of the rookie board (stage 2 of the 2026-11-27 plan)
+// A league's view of the rookie board (stage 2 of the 2026-11-27 plan; the
+// live draft reads the drafting league's view the same way, stage 3)
 // ============================================================
 // The board's OVR order is built for the user's usual format. For one league,
 // each ranked prospect's place on the board is read as a pick of the class on
@@ -121,6 +122,21 @@ export function leagueOrder<T>(
   const places = new Map<T, LeaguePlace>();
   scored.forEach((s, i) => places.set(s.row, { ovr: s.ovr, place: i + 1, base: s.base, mult: s.mult, value: s.value }));
   return { order: scored.map((s) => s.row), places };
+}
+
+/**
+ * The whole board (ranked in OVR order, then the unranked) in one league's
+ * order: the ranked re-sorted by leagueOrder, the unranked below them as they
+ * were. The Rookie Big Board's "Order for" and the live draft (stage 3) both
+ * read the board this way. `places` holds the ranked rows only.
+ */
+export function leagueBoardRows<T extends { overall_rank: number | null; position: string }>(
+  rows: readonly T[],
+  mult: Readonly<Partial<Record<string, number | null>>>,
+  curve: PickCurve,
+): { rows: T[]; places: Map<T, LeaguePlace> } {
+  const { order, places } = leagueOrder(rows.filter((p) => p.overall_rank != null), (p) => p.position, mult, curve);
+  return { rows: [...order, ...rows.filter((p) => p.overall_rank == null)], places };
 }
 
 const whole = (v: number) => Math.round(v).toLocaleString("en-US");

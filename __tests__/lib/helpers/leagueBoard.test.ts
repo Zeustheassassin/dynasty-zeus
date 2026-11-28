@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  pickValueCurve, curveValue, curveSlotLabel, curveLastLabel, leagueOrder, leaguePlaceTitle, shownMult,
+  pickValueCurve, curveValue, curveSlotLabel, curveLastLabel, leagueOrder, leagueBoardRows, leaguePlaceTitle, shownMult,
 } from "@/lib/helpers/leagueBoard";
 import { applyPickValueOverrides } from "@/lib/helpers/picks";
 
@@ -155,5 +155,30 @@ describe("leaguePlaceTitle", () => {
     const past = places.get(BOARD[59])!;
     expect(leaguePlaceTitle(past, BOARD[59].pos, c, "Gamma TEP"))
       .toMatch(/^OVR 60 → past your 4\.12: [\d,]+ × \w+ ×\d\.\d\d = [\d,]+ → \d+ in Gamma TEP \((up \d+|down \d+|no move)\)\.$/);
+  });
+});
+
+describe("leagueBoardRows", () => {
+  // Stage 3: the Rookie Big Board's "Order for" and the live draft read the whole board the same way.
+  const c = pickValueCurve(MAP, 2027)!;
+  const rows = [
+    { id: "wr1", position: "WR", overall_rank: 1 }, { id: "te1", position: "TE", overall_rank: 2 },
+    { id: "qb1", position: "QB", overall_rank: 3 }, { id: "wr2", position: "WR", overall_rank: 4 },
+    { id: "late-rb", position: "RB", overall_rank: null }, { id: "late-qb", position: "QB", overall_rank: null },
+  ];
+
+  it("re-sorts the ranked and keeps the unranked below, in their own order", () => {
+    const { rows: out, places } = leagueBoardRows(rows, { QB: 1.6, RB: 1, WR: 1, TE: 1 }, c);
+    expect(out.map((r) => r.id)).toEqual(["qb1", "wr1", "te1", "wr2", "late-rb", "late-qb"]);
+    expect(places.get(rows[2])).toMatchObject({ ovr: 3, place: 1 });
+    expect(places.has(rows[4])).toBe(false);
+    expect(places.size).toBe(4);
+  });
+
+  it("is the same order leagueOrder gives the ranked rows", () => {
+    const mult = { QB: 0.8, RB: 1.2, WR: 1, TE: 1.4 };
+    const ranked = rows.filter((r) => r.overall_rank != null);
+    const { order } = leagueOrder(ranked, (r) => r.position, mult, c);
+    expect(leagueBoardRows(rows, mult, c).rows.slice(0, 4)).toEqual(order);
   });
 });
