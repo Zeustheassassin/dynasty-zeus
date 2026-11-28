@@ -44,6 +44,8 @@ export interface LeagueFormat {
   bench: number;
   taxi: number;
   rookieRounds: number | null;
+  /** Every scoring rule with a number (Sleeper's scoring_settings), for positionalValue.ts. */
+  scoring: Record<string, number>;
 }
 
 const NOT_STARTING = new Set(["BN", "IR", "TAXI"]);
@@ -85,6 +87,7 @@ export function leagueFormat(l: SleeperLeague): LeagueFormat {
     bench,
     taxi: n(l.settings?.taxi_slots),
     rookieRounds: l.settings?.draft_rounds ?? null,
+    scoring: Object.fromEntries(Object.entries(s).filter(([, v]) => typeof v === "number" && Number.isFinite(v))),
   };
 }
 
@@ -137,7 +140,7 @@ export function usualFormat(summary: Record<FormatField, FieldCount[]>): Record<
 }
 
 /** The starting lineup in a line: "QB 1 · RB 2 · WR 3 · TE 1 · FLEX 2 · SF 1". */
-export function lineupText(f: LeagueFormat): string {
+export function lineupText(f: Pick<LeagueFormat, "slots">): string {
   const order = ["QB", "RB", "WR", "TE", "FLEX", "WRRB_FLEX", "REC_FLEX", "SUPER_FLEX"];
   const label: Record<string, string> = { SUPER_FLEX: "SF", WRRB_FLEX: "W/R", REC_FLEX: "W/T" };
   const rest = Object.keys(f.slots).filter((k) => !order.includes(k)).sort();
